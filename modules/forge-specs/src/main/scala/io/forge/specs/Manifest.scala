@@ -17,8 +17,18 @@ final case class Manifest(
     pieces: Vector[Piece]
 ) derives ReadWriter:
 
-  /** Run the §5.1 invariants. Returns the manifest unchanged on success, or
-    * a non-empty list of error messages. */
+  /** Run the §5.1 + §5.5 invariants. Returns the manifest unchanged on
+    * success, or a non-empty list of error messages.
+    *
+    * Per-piece field rules (§5.1):
+    *   - pending:     baseSha, prNumber, mergeCommit, mergedAt all null
+    *   - in_progress: baseSha non-null; mergeCommit, mergedAt null
+    *                  (prNumber may be set after PR creation, §11.4 step 6)
+    *   - merged:      every field set (baseSha + prNumber + mergeCommit + mergedAt)
+    *
+    * Structural rules:
+    *   - piece ids are unique
+    *   - merged pieces form a contiguous prefix of the piece list (§5.5) */
   def validate: Either[Vector[String], Manifest] =
     val errs = Vector.newBuilder[String]
 
@@ -26,12 +36,29 @@ final case class Manifest(
     if ids.distinct.size != ids.size then errs += "duplicate piece ids in manifest"
 
     pieces.foreach: p =>
-      if p.status != PieceStatus.Pending && p.baseSha.isEmpty then
-        errs += s"piece ${p.id.value}: status=${p.status.asString} requires non-null baseSha"
-      if p.status == PieceStatus.Merged then
-        if p.prNumber.isEmpty then    errs += s"piece ${p.id.value}: merged status requires prNumber"
-        if p.mergeCommit.isEmpty then errs += s"piece ${p.id.value}: merged status requires mergeCommit"
-        if p.mergedAt.isEmpty then    errs += s"piece ${p.id.value}: merged status requires mergedAt"
+      val tag = s"piece ${p.id.value}"
+      p.status match
+        case PieceStatus.Pending =>
+          if p.baseSha.isDefined     then errs += s"$tag: pending status requires null baseSha"
+          if p.prNumber.isDefined    then errs += s"$tag: pending status requires null prNumber"
+          if p.mergeCommit.isDefined then errs += s"$tag: pending status requires null mergeCommit"
+          if p.mergedAt.isDefined    then errs += s"$tag: pending status requires null mergedAt"
+        case PieceStatus.InProgress =>
+          if p.baseSha.isEmpty       then errs += s"$tag: in_progress status requires non-null baseSha"
+          if p.mergeCommit.isDefined then errs += s"$tag: in_progress status requires null mergeCommit"
+          if p.mergedAt.isDefined    then errs += s"$tag: in_progress status requires null mergedAt"
+        case PieceStatus.Merged =>
+          if p.baseSha.isEmpty     then errs += s"$tag: merged status requires non-null baseSha"
+          if p.prNumber.isEmpty    then errs += s"$tag: merged status requires prNumber"
+          if p.mergeCommit.isEmpty then errs += s"$tag: merged status requires mergeCommit"
+          if p.mergedAt.isEmpty    then errs += s"$tag: merged status requires mergedAt"
+
+    // §5.5: merged pieces must form a contiguous prefix.
+    val totalMerged = pieces.count(_.status == PieceStatus.Merged)
+    val prefixLen   = pieces.takeWhile(_.status == PieceStatus.Merged).size
+    if prefixLen != totalMerged then
+      errs += s"§5.5 violated: merged pieces must form a contiguous prefix " +
+        s"(total merged=$totalMerged, contiguous at head=$prefixLen)"
 
     val list = errs.result()
     if list.isEmpty then Right(this) else Left(list)

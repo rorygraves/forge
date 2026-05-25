@@ -109,6 +109,56 @@ class ManifestSuite extends munit.FunSuite:
     val errs = emptyManifest.copy(pieces = Vector(a, b)).validate.swap.toOption.get
     assert(errs.exists(_.contains("duplicate piece ids")))
 
+  test("validator rejects a pending piece with baseSha set"):
+    val bad = basePending.copy(baseSha = Some(Sha("abcdef0")))
+    val errs = emptyManifest.copy(pieces = Vector(bad)).validate.swap.toOption.get
+    assert(errs.exists(_.contains("pending status requires null baseSha")))
+
+  test("validator rejects a pending piece with prNumber set"):
+    val bad = basePending.copy(prNumber = Some(PrNumber(42)))
+    val errs = emptyManifest.copy(pieces = Vector(bad)).validate.swap.toOption.get
+    assert(errs.exists(_.contains("pending status requires null prNumber")))
+
+  test("validator rejects a pending piece carrying merge metadata"):
+    val bad = basePending.copy(mergeCommit = Some(mergeSha), mergedAt = Some(Instant.parse("2026-05-25T00:00:00Z")))
+    val errs = emptyManifest.copy(pieces = Vector(bad)).validate.swap.toOption.get
+    assert(errs.exists(_.contains("pending status requires null mergeCommit")))
+    assert(errs.exists(_.contains("pending status requires null mergedAt")))
+
+  test("validator rejects an in_progress piece carrying merge metadata"):
+    val bad = basePending.copy(
+      status = PieceStatus.InProgress,
+      baseSha = Some(Sha("abcdef0")),
+      mergeCommit = Some(mergeSha),
+      mergedAt = Some(Instant.parse("2026-05-25T00:00:00Z"))
+    )
+    val errs = emptyManifest.copy(pieces = Vector(bad)).validate.swap.toOption.get
+    assert(errs.exists(_.contains("in_progress status requires null mergeCommit")))
+    assert(errs.exists(_.contains("in_progress status requires null mergedAt")))
+
+  test("validator accepts an in_progress piece that has a prNumber (PR opened pre-merge)"):
+    val ok = basePending.copy(
+      status = PieceStatus.InProgress,
+      baseSha = Some(Sha("abcdef0")),
+      prNumber = Some(PrNumber(42))
+    )
+    assert(emptyManifest.copy(pieces = Vector(ok)).validate.isRight)
+
+  test("validator rejects a manifest where merged pieces are not a contiguous prefix"):
+    val merged1 = basePending.copy(
+      id = PieceId("p1"),
+      status = PieceStatus.Merged,
+      baseSha = Some(Sha("abcdef0")),
+      prNumber = Some(PrNumber(1)),
+      mergeCommit = Some(mergeSha),
+      mergedAt = Some(Instant.parse("2026-05-25T00:00:00Z"))
+    )
+    val pending = basePending.copy(id = PieceId("p2"))
+    val merged2 = merged1.copy(id = PieceId("p3"), prNumber = Some(PrNumber(3)))
+    val errs = emptyManifest.copy(pieces = Vector(merged1, pending, merged2)).validate.swap.toOption.get
+    assert(errs.exists(_.contains("§5.5")))
+    assert(errs.exists(_.contains("contiguous prefix")))
+
   // Query helpers ---
 
   test("nextPending picks the first pending piece in manifest order"):
