@@ -1093,6 +1093,11 @@ If a future cell **doesn't qualify** (e.g., the deferred Codex halt-reliability 
 
 ## 17. Build order (de-risked)
 
+> Slices 0–5 below cover v1 (the contract of this document). Phase-level
+> context — including which seams to leave in v1 code so the v2 pivot
+> stays cheap — lives in [`roadmap.md`](roadmap.md). Two such seams are
+> called out inline below (Slice 1 role-trait, Slice 2 paths helper).
+
 ### Slice 0 — Validate CLI assumptions (complete)
 
 Ran 2026-05-25. Output: `docs/slice-0/slice-0-report.md`. Findings folded into this revision (v1.1).
@@ -1104,6 +1109,7 @@ Build `forge-agents` standalone with a CLI demo and integration tests.
 - `AgentSession`, `StreamingSession`, `Connector` traits per §7.1.
 - `ClaudeConnector` and `CodexConnector`. Each declares `questionMechanism` and `schemaMechanism = Native` (§7.4).
 - `HaltWithQuestion` parsing + re-spawn loop (§7.3) in the orchestrator scaffolding. Reliability sample (≥19/20 target per §16) measured during integration tests; failure narrows scope per §16.1.
+- **Role-trait seam (Phase 4/5 enabler — see [`roadmap.md`](roadmap.md) §2.6, §4.2).** Connectors and orchestrator callers route through a thin `Role` indirection (e.g. `Role.Driver(connector)`, `Role.Reviewer(connector)`) rather than pattern-matching directly on the `Mode` enum. v1 keeps the two-case `Mode` ADT and its `fromString` config wiring unchanged; the seam is purely about *call-site* discipline so the v2 role-pluggability refactor (§20) has nothing to disentangle later. Caller-side rule: a `match m: Mode` on `ClaudeDriver`/`CodexDriver` outside `Mode` itself and connector construction is a code smell — call the role instead.
 - **Codex price table** (§7.10(b)). Define the `~/.forge/prices.json` schema, ship `~/.forge/prices.example.json` with current OpenAI model entries, implement `CodexConnector.costFrom` to look up by model and compute USD. Handle missing-model / missing-file by returning `None` (orchestrator logs `harness.price_missing` once per `(feature, model)`).
 - **Codex system-prompt prepending** (§7.10(a)) implemented in `CodexConnector.runStreamingSpec` / `runHeadlessImplementation` / `runFixup`.
 - **Codex sticky-settings rule** (§7.10(c)): no `resumeStreamingSpec` call attempts to change `--sandbox`, `--output-schema`, `--add-dir`, etc.; any settings change spawns a fresh session.
@@ -1124,6 +1130,7 @@ Build `forge-agents` standalone with a CLI demo and integration tests.
 - `StateCache` with atomic writes.
 - `ActionLog`.
 - `forge rebuild-state <feature>` replays log → state cache.
+- **Paths helper (Phase 4 enabler — see [`roadmap.md`](roadmap.md) §2.6, §5.1).** All filesystem locations under `.forge/` (`specs/`, `state/`, `log/`, `state/.lock`) are resolved through a single `ForgePaths` object constructed from the repo root. No caller hardcodes a `.forge/...` literal. v1 keeps the layout in §4 unchanged; the seam is so v2's instance-rooted layout (per-repo specs/audit stay in-repo; state/log/lock move to `~/.forge/instances/<name>/`) is a constructor swap rather than a sweep through every callsite. Test rule: a `grep '"\.forge/'` outside `ForgePaths` itself is a code smell.
 - Property tests:
   - Replaying the action log reproduces the final state, including session-id projections.
   - `NeedsHumanIntervention` always carries a `ResumeHint` and `forge resume` produces a legal next state.
