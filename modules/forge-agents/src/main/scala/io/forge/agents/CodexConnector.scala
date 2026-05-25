@@ -63,17 +63,18 @@ final class CodexConnector(
     *
     * Underlying blocker: **`runStreamingSpec(systemPromptPath)` takes no initial user message, but both `codex exec`
     * (positional prompt required) and `claude -p --input-format stream-json` (init emitted only after first JSON frame
-    * on stdin — runtime-verified) need one before they produce a session id.** The §7.1 trait needs to grow an
-    * initial-message parameter for either connector to honour it cleanly; see `docs/design-rationale.md` C11 +
-    * `docs/slice-1/slice-1-findings.md` for the proposed shape.
+    * on stdin — runtime-verified) need one before they produce a session id.** forge-design-1.2 §7.1 grew the
+    * initial-message parameter; see `docs/design-rationale.md` C11 + `docs/forge-design-1.2.md` §7.1 for the shipped
+    * shape.
     *
-    * Lands when the trait extension lands in forge-design-1.2.
+    * Lands when the trait-shape code change lands (next slice-1 PR, now unblocked by v1.2).
     */
   def runStreamingSpec(systemPromptPath: os.Path): IO[StreamingSession] =
     IO.raiseError(
       NotImplementedError(
         "CodexConnector.runStreamingSpec — Codex `exec` requires an initial user message that the §7.1 trait " +
-          "doesn't carry. Same blocker as ClaudeConnector; resolves with the forge-design-1.2 trait extension."
+          "(pre-v1.2) doesn't carry. Same blocker as ClaudeConnector; the v1.2 trait extension is now shipped, the " +
+          "trait-shape code change is the next slice-1 PR."
       )
     )
 

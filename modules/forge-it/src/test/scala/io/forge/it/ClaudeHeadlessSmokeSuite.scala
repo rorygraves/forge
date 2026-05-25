@@ -88,12 +88,13 @@ class ClaudeHeadlessSmokeSuite extends munit.FunSuite:
         assert(durationMs > 0, clue = durationMs)
       case other => fail(s"expected Result as last event, got $other")
 
-  test("Claude streaming spec is currently stubbed (pending §7.1 trait extension)"):
+  test("Claude streaming spec is currently stubbed (pending v1.2 trait-shape code change)"):
     // Documents the design point surfaced by review of the original streaming wiring: with `-p --input-format
     // stream-json`, Claude only emits `init` AFTER the first user-message JSON frame arrives on stdin (verified
     // empirically against Claude CLI 2.1.150). The §7.1 trait's synchronous `sessionId: String` accessor cannot be
-    // honored at spawn time; the orchestrator needs an initial-message parameter that the v1 trait doesn't carry —
-    // a forge-design-1.2 change. Same blocker as CodexConnector.runStreamingSpec.
+    // honored at spawn time without the initial-message parameter that forge-design-1.2 §7.1 ships. The spec change
+    // has landed; the trait-shape code change in this module is the next slice-1 PR. Same blocker as
+    // CodexConnector.runStreamingSpec until that lands.
     val connector = ClaudeConnector(binary = claudeOnPath.map(_.toString).getOrElse("claude"))
     val r1 = connector.runStreamingSpec(os.Path("/tmp/x.md")).attempt.unsafeRunSync()
     assert(

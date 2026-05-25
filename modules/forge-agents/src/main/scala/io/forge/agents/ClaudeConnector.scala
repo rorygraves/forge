@@ -57,8 +57,8 @@ final class ClaudeConnector(
     * `StreamingDriver.fromSubprocess` model (block on Init, then return a session ready for `send`). Both connectors
     * really want an initial user message at spawn time, which the trait doesn't carry.
     *
-    * Lands when the trait grows an initial-message parameter (forge-design-1.2 territory — see roadmap). Until then
-    * this method raises so callers can't silently rely on a half-working session.
+    * forge-design-1.2 §7.1 grew the initial-message parameter; the code change to that trait shape is the next slice-1
+    * PR. Until then this method raises so callers can't silently rely on a half-working session.
     *
     * The pieces needed when this re-enables — the `-p` flag, the `encodeUserMessageJson` wire-shape, the JSON frame
     * schema — are already in this module and unit-tested.
@@ -67,8 +67,9 @@ final class ClaudeConnector(
     IO.raiseError(
       NotImplementedError(
         "ClaudeConnector.runStreamingSpec — Claude `--input-format stream-json` emits init only after the first " +
-          "user message; the §7.1 trait can't deliver a session with a populated sessionId without an initial " +
-          "message. Same blocker as CodexConnector; resolves with the slice-1 follow-up + trait extension."
+          "user message; the §7.1 trait (pre-v1.2) can't deliver a session with a populated sessionId without an " +
+          "initial message. Same blocker as CodexConnector; the v1.2 trait extension is now shipped, the trait-shape " +
+          "code change is the next slice-1 PR."
       )
     )
 

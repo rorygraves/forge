@@ -4,14 +4,15 @@
 > non-obvious runtime findings surfaced while implementing the
 > [`forge-design-1.1.md`](../forge-design-1.1.md) §7.1 connector contract,
 > and the resulting **spec corrections that v1.1 does not yet reflect**.
-> These corrections will land in `forge-design-1.2.md` (standalone, per
-> §23); until then, the implementation diverges from 1.1 in two named
-> places below and the two connector docstrings flag the divergence at
-> the source-code level.
+> These corrections have now landed in
+> [`forge-design-1.2.md`](../forge-design-1.2.md) (standalone, per §23).
 >
-> **Status:** draft 2026-05-25. Recorded mid-slice-1 in response to a
-> code review flagging the 1.1 contract drift. Update / finalise when
-> 1.2 lands.
+> **Status:** ✅ superseded by v1.2 (2026-05-25). Kept in-tree as an
+> evolution record alongside the slice-0 report. The trait-shape code
+> change in `forge-agents` is the next slice-1 PR — until that lands, the
+> two connector docstrings still flag the implementation drift at the
+> source-code level. Do not treat this doc as authoritative for the
+> trait shape; read v1.2 §7.1 instead.
 
 ## 1. What's done in slice 1
 

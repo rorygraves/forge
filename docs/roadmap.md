@@ -1,20 +1,21 @@
 # Forge — product roadmap
 
-> Companion to [`forge-design-1.1.md`](forge-design-1.1.md). The design doc is
+> Companion to [`forge-design-1.2.md`](forge-design-1.2.md). The design doc is
 > the implementation contract for v1; this document is the multi-horizon plan
 > the design lives inside. Early phases are concrete (and trace directly into
 > §17 of the design); later phases capture direction and have not yet been
 > turned into specs.
 >
-> **Status:** draft v0.2 — 2026-05-25. Refreshed mid-Slice 1 to reflect
-> landed work; full refresh due when Slice 1 closes out.
+> **Status:** draft v0.3 — 2026-05-25. Refreshed mid-Slice 1 again after
+> v1.2 landed (folds in the §7.1 trait-shape findings); full refresh due
+> when Slice 1 closes out.
 
 ## 0. How to read this
 
 | Phase | Outcome | Source of detail |
 |---|---|---|
 | 0 — Slice 0 | CLI capabilities validated | [`slice-0/slice-0-report.md`](slice-0/slice-0-report.md) |
-| 1 — Testability MVP | Forge ships its own next slice | `forge-design-1.1.md` §17 slices 1–4 |
+| 1 — Testability MVP | Forge ships its own next slice | `forge-design-1.2.md` §17 slices 1–4 |
 | 2 — MLP | Pleasant single-repo daily-driver | §17 slice 5 + polish |
 | 3 — v1.0 | Single-repo, OSS-ready, role-pluggable | §20 v2 candidates + role-trait refactor |
 | 4 — v2.0 | Forge-instance pivot (multi-repo, daemon, parallel, containerised) | Needs its own design doc (`forge-design-2.0.md`) before work starts |
@@ -70,15 +71,15 @@ risks are integration-shaped.
   / `StructuredOutputMissing` / `StructuredOutputMalformed` for
   §7.5 adapter / config errors so `reviewProcessRetries` never
   burns its budget on a content or setup mistake), and fake-CLI
-  end-to-end tests proving the full plumbing. **Blocked on a trait change:**
-  `runStreamingSpec` / `resumeStreamingSpec` are stubbed for both
-  connectors because the §7.1 trait can't deliver a populated
-  `sessionId` at spawn time — both CLIs need an initial user
-  message before emitting init (verified empirically against
-  Claude CLI 2.1.150 and via the Codex `exec` model). Resolves by
-  adding an initial-message parameter in a forge-design-1.2
-  revision; the `-p` flag, stream-json JSON-frame encoder, and
-  UserMessage mirror plumbing are already in place for that PR.
+  end-to-end tests proving the full plumbing. **Spec unblock landed:**
+  forge-design-1.2 carries the §7.1 trait extension (initial
+  user message on streaming spawn/resume; `answerQuestion` for
+  the §7.2 `tool_result` path; `toolUseId` on `AskUserQuestion`
+  events). `runStreamingSpec` / `resumeStreamingSpec` are still
+  stubbed in the code — the trait-shape code PR is next and
+  re-enables them against the new signatures; the `-p` flag,
+  stream-json JSON-frame encoder, and `UserMessage` mirror
+  plumbing are already in place for that PR.
 - [~] `HaltWithQuestion` parsing + re-spawn loop for Codex. Envelope
   decoder landed (`HaltWithQuestion.detect` / `tryParse`); the
   orchestrator-side re-spawn loop lands with slice 2 (FSM).
@@ -91,15 +92,16 @@ risks are integration-shaped.
 
 **What unblocks slice-1 closure** (in dependency order):
 
-1. **`forge-design-1.2.md`** — extend the §7.1 trait to model two
-   findings 1.1 doesn't carry: an initial user message on
-   `runStreamingSpec` / `resumeStreamingSpec` (both pinned CLIs need
-   one before emitting init / thread_id), and an explicit
-   `answerQuestion(toolUseId, answer)` for the §7.2 tool_result
-   path. Proposed delta + runtime evidence is captured in
-   [`docs/slice-1/slice-1-findings.md`](slice-1/slice-1-findings.md);
-   when 1.2 lands it incorporates that delta as a complete
-   standalone spec per §23.
+1. **`forge-design-1.2.md`** — ✅ landed. Folds in the three §7.1
+   trait-shape findings: an initial user message on
+   `runStreamingSpec` / `resumeStreamingSpec` (both pinned CLIs
+   need one before emitting init / thread_id); an explicit
+   `answerQuestion(toolUseId, answer)` for the §7.2 `tool_result`
+   path; and a `toolUseId` field on `AgentEvent.AskUserQuestion`
+   so the orchestrator can route the answer back. The interim
+   delta doc at
+   [`docs/slice-1/slice-1-findings.md`](slice-1/slice-1-findings.md)
+   is superseded by 1.2 and kept in-tree as an evolution record.
 2. **Layer 5 reviewer one-shots** — ✅ landed. `reviewDesign`,
    `reviewPr`, `refine` implemented on both connectors with the
    spawn-wait-parse-exit lifecycle, shared schema decoders + body
@@ -110,11 +112,16 @@ risks are integration-shaped.
    per schema, per reviewer) still ⏳ — gated on shipped schemas
    + reviewer system prompts, which land later in Slice 1 / early
    Slice 4 alongside `ForgePaths`.
-3. **Re-enable streaming spec connectors** — once (1) lands, swap
+3. **Re-enable streaming spec connectors** — next slice-1 PR. Swap
    the two `NotImplementedError` stubs in each connector for the
-   real spawn path. The wire-shape pieces (`-p`, JSON-frame
-   encoder, `UserMessage` mirror, stream-json argv) are already
-   in place and unit-tested.
+   real spawn path against the v1.2 trait signatures
+   (`runStreamingSpec(systemPrompt, initialUserMessage)`,
+   `resumeStreamingSpec(sessionId, message)`,
+   `StreamingSession.answerQuestion(toolUseId, answer)`); add the
+   `toolUseId` field to `AgentEvent.AskUserQuestion` in the
+   parser. The wire-shape pieces (`-p`, JSON-frame encoder,
+   `UserMessage` mirror, stream-json argv) are already in place
+   and unit-tested.
 4. **Full §17 forge-it test list** — gated on (3) and on the
    reviewer-side schemas/prompts mentioned in (2).
 
@@ -280,10 +287,11 @@ phase because the four sub-pieces unlock each other:
   runs at a time → parallel.
 
 **Treat this phase as needing its own design doc** — `forge-design-2.0.md`
-— before any code lands. v1.1 explicitly rejects pieces of this
-(`Multi-repo / monorepo split work`, `Long-running daemon`, `Parallel
-features`, `Worktrees devcontainer-incompatible`) and those rejections are
-correct *for v1*; v2 revisits them with a different set of constraints.
+— before any code lands. The v1 spec (1.1 / 1.2) explicitly rejects
+pieces of this (`Multi-repo / monorepo split work`, `Long-running
+daemon`, `Parallel features`, `Worktrees devcontainer-incompatible`)
+and those rejections are correct *for v1*; v2 revisits them with a
+different set of constraints.
 
 **Exit criterion:** one Forge instance manages the llm4s family (≥2
 repos), running ≥2 workstreams concurrently in containers, with the TUI
@@ -339,7 +347,7 @@ checkout, pinned tool versions, and host-isolated permissions."
   repo's `Forgefile` or equivalent.
 - Logs, processes, ports are inspectable from the daemon's status API
   and surfaced in the TUI — this is the CMUX-style visibility layer.
-- Worktrees stay rejected (v1.1 §1); containers are *not* worktrees,
+- Worktrees stay rejected (v1 spec §1); containers are *not* worktrees,
   they're isolated checkouts of full clones. Different mechanism, same
   goal of "concurrent work without colliding."
 - CMUX integration, if it happens, is a viewer over the container
@@ -406,13 +414,13 @@ project guidelines + project state; post inline comments.
 
 ---
 
-## 7. Divergences from v1.1 spec
+## 7. Divergences from the v1 spec
 
 Tracked here so they don't surprise anyone mid-implementation. None
-require changes to the v1.1 contract; all are deliberately deferred to
-Phase 3+.
+require changes to the v1 contract (1.1 / 1.2); all are deliberately
+deferred to Phase 3+.
 
-| Long-term direction | v1.1 spec stance | Phase that resolves it |
+| Long-term direction | v1 spec stance | Phase that resolves it |
 |---|---|---|
 | Forge instance per project group | §1 non-goal: "Multi-repo / monorepo split work" | 4 — promote instance to first-class concept |
 | Containerised execution | §1 rejection refers to *worktrees + devcontainers as working tree*; containers as *runtime* are a different design point | 4 — re-decide explicitly in `forge-design-2.0.md` |

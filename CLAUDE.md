@@ -5,7 +5,7 @@ that first; everything below is Claude-Code-specific.
 
 ## TL;DR
 
-- **Implementation contract:** [`docs/forge-design-1.1.md`](docs/forge-design-1.1.md).
+- **Implementation contract:** [`docs/forge-design-1.2.md`](docs/forge-design-1.2.md). The 1.1 revision is kept in-tree as an evolution record but is superseded.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
 - **Current state:** Slice 0 complete; Slice 1 (`forge-agents`) in
   progress. Landed: `Role`, `PriceTable`, `CodexPrompt`,
@@ -15,14 +15,18 @@ that first; everything below is Claude-Code-specific.
   `ClaudeConnector` (headless smoke-tested vs real `claude`,
   reviewer one-shots), `CodexConnector` (headless, reviewer
   one-shots), shared `ReviewDecoders` + `ReviewerPrompts` +
-  `ReviewerAssets` + typed `ReviewerError` adapter errors.
-  `runStreamingSpec` is stubbed in both connectors — both CLIs
-  need an initial user message before emitting init, which the
-  §7.1 trait doesn't carry; resolves with a forge-design-1.2
-  trait extension. Still to come: trait-extension PR (1.2),
-  orchestrator re-spawn loop, real-CLI reviewer regression suites
-  (gated on shipped schemas + reviewer prompts), full §17
-  integration-test list.
+  `ReviewerAssets` + typed `ReviewerError` adapter errors;
+  **v1.2 spec landed** with the §7.1 trait extension (initial
+  user message on streaming spawn/resume, `answerQuestion` for
+  the `tool_result` path, `toolUseId` on `AskUserQuestion`
+  events). `runStreamingSpec` / `resumeStreamingSpec` are still
+  stubbed in both connectors — the *code* change to the new
+  trait shape is the next slice-1 PR, gated on v1.2 (now
+  unblocked). Still to come: trait-shape code PR (re-enable
+  streaming spec connectors against the new signatures),
+  orchestrator re-spawn loop, real-CLI reviewer regression
+  suites (gated on shipped schemas + reviewer prompts), full
+  §17 integration-test list.
 - **Two architectural seams to preserve in v1 work:** `ForgePaths`
   helper (no `.forge/...` literals outside it) and `Role` indirection
   (no `match m: Mode` outside `Mode` and connector construction). See
@@ -63,11 +67,11 @@ their CLIs. A few cross-cutting points that show up while working on
 
 ## Claude-Code-specific etiquette in this repo
 
-- **Default to small, contract-conformant edits.** The v1.1 spec is
+- **Default to small, contract-conformant edits.** The v1.2 spec is
   long but settled; surprises usually mean a misread of the spec,
   not a needed change.
 - **Spec edits go to the next revision file.** Don't edit
-  `forge-design-1.1.md` in place — open a `forge-design-1.2.md` (per
+  `forge-design-1.2.md` in place — open a `forge-design-1.3.md` (per
   the §23 "standalone revisions" rule). The exception is the small
   inline pointer to `roadmap.md` already in §17, which exists to keep
   readers oriented.

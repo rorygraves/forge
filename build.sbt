@@ -1,4 +1,4 @@
-// Forge — Scala meta-orchestrator (see docs/forge-design-1.1.md).
+// Forge — Scala meta-orchestrator (see docs/forge-design-1.2.md).
 // Module layout per §3.2; build order per §17.
 
 ThisBuild / scalaVersion := "3.5.2"
