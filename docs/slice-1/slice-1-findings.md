@@ -33,7 +33,8 @@ Implementation contract: §17 slice-1 deliverables.
 | `ClaudeConnector` — streaming driver methods | ⚠️ stubbed | see §3 below |
 | `CodexConnector` — headless driver methods | ✅ | `forge-agents` |
 | `CodexConnector` — streaming driver methods | ⚠️ stubbed | see §3 below |
-| Reviewer one-shots (`reviewDesign` / `reviewPr` / `refine`) | ⏳ Layer 5 | both connectors |
+| Reviewer one-shots (`reviewDesign` / `reviewPr` / `refine`) — Layer 5 wiring, decoders, argv, fake-CLI tests | ✅ | both connectors |
+| Reviewer one-shots — real-CLI integration tests + ≥19/20 regression suites | ⏳ | gated on real schemas + reviewer prompts (Slice 4) |
 | `HaltWithQuestion` orchestrator-side re-spawn loop | ⏳ Slice 2 (FSM) | `forge-core` |
 | Real-CLI smoke (Claude headless hello-world) | ✅ | `forge-it` |
 | Full §17 forge-it test list | ⏳ | gated on the §3 follow-up |
@@ -199,6 +200,7 @@ spec follow-up in the meantime.
 | F2 | `CodexConnector.runStreamingSpec` docstring; `CodexConnectorSuite` "runStreamingSpec / resumeStreamingSpec raise NotImplementedError with a clear message" |
 | F3 | `AgentSession.scala` `StreamingSession` class-level docstring (note 2) |
 | Subprocess kill race | `SubprocessSuite` "kill escalates to SIGKILL when the process traps SIGTERM" |
+| Reviewer one-shot wiring | `ReviewerAssets`, `ReviewDecoders`, `ReviewerPrompts`, `AdapterError` — retryable `ReviewerProcessFailure` (§7.6) vs non-retryable `ReviewerNotConfigured` / `StructuredOutputMissing` / `StructuredOutputMalformed` (§7.5); `ClaudeConnector.{reviewerArgv,extractStructuredOutput,collectReviewerEnvelope}`; `CodexConnector.{extractAgentMessageText,collectReviewerPayload}`; suites: `ReviewDecodersSuite`, `ReviewerPromptsSuite`, plus the fake-CLI end-to-end tests in `ClaudeConnectorSuite` / `CodexConnectorSuite` |
 
 Rationale items: see [`design-rationale.md`](../design-rationale.md)
 C11 (F1), C12 (F3), C13 (subprocess kill).

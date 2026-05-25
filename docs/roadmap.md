@@ -62,12 +62,19 @@ risks are integration-shaped.
   event parsers, `Subprocess` + `StreamingDriver` plumbing
   (`send` JSON-encoder hook + `UserMessage` mirror event), Claude
   headless driver methods (real-CLI smoke test passes), Codex
-  headless driver methods. Remaining: reviewer one-shot methods
-  (`reviewDesign`, `reviewPr`, `refine`) for both. **Blocked on a
-  trait change:** `runStreamingSpec` / `resumeStreamingSpec` are
-  stubbed for both connectors because the §7.1 trait can't deliver
-  a populated `sessionId` at spawn time — both CLIs need an initial
-  user message before emitting init (verified empirically against
+  headless driver methods, **Layer 5 reviewer one-shots
+  (`reviewDesign` / `reviewPr` / `refine`) for both connectors**
+  with shared `ReviewDecoders` + `ReviewerPrompts`, typed adapter
+  errors (retryable `ReviewerProcessFailure` for §7.6
+  process-level failures vs non-retryable `ReviewerNotConfigured`
+  / `StructuredOutputMissing` / `StructuredOutputMalformed` for
+  §7.5 adapter / config errors so `reviewProcessRetries` never
+  burns its budget on a content or setup mistake), and fake-CLI
+  end-to-end tests proving the full plumbing. **Blocked on a trait change:**
+  `runStreamingSpec` / `resumeStreamingSpec` are stubbed for both
+  connectors because the §7.1 trait can't deliver a populated
+  `sessionId` at spawn time — both CLIs need an initial user
+  message before emitting init (verified empirically against
   Claude CLI 2.1.150 and via the Codex `exec` model). Resolves by
   adding an initial-message parameter in a forge-design-1.2
   revision; the `-p` flag, stream-json JSON-frame encoder, and
@@ -93,17 +100,23 @@ risks are integration-shaped.
    [`docs/slice-1/slice-1-findings.md`](slice-1/slice-1-findings.md);
    when 1.2 lands it incorporates that delta as a complete
    standalone spec per §23.
-2. **Layer 5 reviewer one-shots** — `reviewDesign`, `reviewPr`,
-   `refine` for both connectors. Independent of (1); could land in
-   parallel. Different lifecycle from streaming (spawn, wait,
-   parse single structured payload, exit), wrapped by
-   `RetryOnProcessFailure(reviewProcessRetries)`.
+2. **Layer 5 reviewer one-shots** — ✅ landed. `reviewDesign`,
+   `reviewPr`, `refine` implemented on both connectors with the
+   spawn-wait-parse-exit lifecycle, shared schema decoders + body
+   templates, typed adapter errors so the orchestrator's eventual
+   `RetryOnProcessFailure(reviewProcessRetries)` wrapper can
+   distinguish retryable process failures from §7.5 adapter
+   errors. Real-CLI integration tests (≥19/20 regression suites
+   per schema, per reviewer) still ⏳ — gated on shipped schemas
+   + reviewer system prompts, which land later in Slice 1 / early
+   Slice 4 alongside `ForgePaths`.
 3. **Re-enable streaming spec connectors** — once (1) lands, swap
    the two `NotImplementedError` stubs in each connector for the
    real spawn path. The wire-shape pieces (`-p`, JSON-frame
    encoder, `UserMessage` mirror, stream-json argv) are already
    in place and unit-tested.
-4. **Full §17 forge-it test list** — gated on (2) and (3).
+4. **Full §17 forge-it test list** — gated on (3) and on the
+   reviewer-side schemas/prompts mentioned in (2).
 
 ### 2.2 Slice 2 — FSM, Feature, ActionLog, StateCache (≈ week 2)
 

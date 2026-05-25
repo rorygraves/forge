@@ -12,13 +12,17 @@ that first; everything below is Claude-Code-specific.
   `CodexSessionSettings`, `ClaudeEventParser`, `CodexEventParser`,
   `HaltWithQuestion` decoder, `Subprocess` core, `StreamingDriver`
   (with stdin-encoder hook and `UserMessage` mirror event),
-  `ClaudeConnector` (headless smoke-tested vs real `claude`),
-  `CodexConnector` (headless). `runStreamingSpec` is stubbed in
-  both connectors — both CLIs need an initial user message before
-  emitting init, which the §7.1 trait doesn't carry; resolves with
-  a forge-design-1.2 trait extension. Still to come: reviewer
-  one-shot methods, the trait-extension PR, orchestrator re-spawn
-  loop, full §17 integration-test list.
+  `ClaudeConnector` (headless smoke-tested vs real `claude`,
+  reviewer one-shots), `CodexConnector` (headless, reviewer
+  one-shots), shared `ReviewDecoders` + `ReviewerPrompts` +
+  `ReviewerAssets` + typed `ReviewerError` adapter errors.
+  `runStreamingSpec` is stubbed in both connectors — both CLIs
+  need an initial user message before emitting init, which the
+  §7.1 trait doesn't carry; resolves with a forge-design-1.2
+  trait extension. Still to come: trait-extension PR (1.2),
+  orchestrator re-spawn loop, real-CLI reviewer regression suites
+  (gated on shipped schemas + reviewer prompts), full §17
+  integration-test list.
 - **Two architectural seams to preserve in v1 work:** `ForgePaths`
   helper (no `.forge/...` literals outside it) and `Role` indirection
   (no `match m: Mode` outside `Mode` and connector construction). See
