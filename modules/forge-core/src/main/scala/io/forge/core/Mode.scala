@@ -1,5 +1,7 @@
 package io.forge.core
 
+import upickle.default.{ReadWriter, readwriter}
+
 /** Driver/reviewer pairing for a feature. v1 supports two modes; mid-feature
   * switching is unsupported (§7, §1 non-goals). */
 enum Mode:
@@ -20,6 +22,11 @@ object Mode:
     def asString: String = m match
       case Mode.ClaudeDriver => "claude-driver"
       case Mode.CodexDriver  => "codex-driver"
+
+  given ReadWriter[Mode] = readwriter[String].bimap(
+    _.asString,
+    s => Mode.fromString(s).fold(msg => throw IllegalArgumentException(msg), identity)
+  )
 
 /** Per-connector question delivery (§7.2/§7.3). Captured at connector
   * construction; never changes mid-session. */

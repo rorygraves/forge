@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "featureId": "stripe-webhook",
+  "title": "Add Stripe webhook receiver",
+  "baseBranch": "main",
+  "branchPrefix": "forge",
+  "mode": "claude-driver",
+  "designPr": 4290,
+  "pieces": [
+    {
+      "id": "p1",
+      "order": 1,
+      "title": "Add webhook route and signature verification",
+      "summary": "Add POST /stripe/webhook. Verify signature against STRIPE_WEBHOOK_SECRET.",
+      "specPath": ".forge/specs/stripe-webhook/pieces/p1.md",
+      "acceptanceHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "status": "pending",
+      "baseSha": null,
+      "prNumber": null,
+      "mergeCommit": null,
+      "mergedAt": null,
+      "attempts": 0
+    }
+  ]
+}

@@ -3,7 +3,9 @@ package io.forge.core
 import scala.util.matching.Regex
 
 /** Opaque identifiers used throughout Forge. Each carries a validation rule
-  * sourced from the design doc; `apply` enforces it eagerly. */
+  * sourced from the design doc; `apply` enforces it eagerly. JSON codecs for
+  * these types live in `io.forge.core.Json` (see that object for the reason —
+  * opaque-type companions confuse upickle's implicit search). */
 
 opaque type FeatureId = String
 object FeatureId:
