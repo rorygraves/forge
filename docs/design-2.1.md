@@ -35,7 +35,7 @@ Six numbered sub-PRs. Each is independently mergeable; the dependency
 graph is linear apart from #5/#6 which can land in either order once #4
 is in.
 
-### 1.1 PR A — trait-shape code change (in progress)
+### 1.1 PR A — trait-shape code change ✅ landed 2026-05-25
 
 - [x] **A1.** Add `toolUseId: Option[String]` to
   `AgentEvent.AskUserQuestion`; remove the separate
@@ -117,15 +117,26 @@ is in.
   both routing through the resume path, `kill()` mid-turn finalising
   the channel, `resumeStreamingSpec` happy path, and resume
   thread-id-mismatch raising. Spec: v1.2 §7.1 / §7.3 / §7.10. Done.
-- [ ] **A7.** PR-A landing checklist:
-  - `sbt compile` clean under `-Xfatal-warnings`.
-  - `sbt test` green across the build (forge-core, forge-agents,
-    forge-specs).
-  - `sbt scalafmtCheckAll` clean.
-  - The two "stubbed pending Task #5/#6" sentinel tests are removed.
-  - `roadmap.md` §2.1 `ClaudeConnector and CodexConnector` bullet's
-    parenthetical updated to reflect that the trait-shape code PR has
-    landed; this file's PR-A section gets a final ✅ in §3 below.
+- [x] **A7.** PR-A landing checklist — all green:
+  - `sbt clean compile` clean under `-Xfatal-warnings` ✅.
+  - `sbt test` green: 173 unit tests across the build (forge-core,
+    forge-agents, forge-specs) ✅.
+  - `sbt scalafmtCheckAll` clean ✅.
+  - `sbt "project forge-it" test`: 1/1 (Claude headless smoke still
+    passes; the Task-#5/#6 sentinel tests are gone) ✅.
+  - Both "stubbed pending Task #5/#6" sentinel tests removed from
+    `ClaudeConnectorSuite`, `ClaudeHeadlessSmokeSuite`, and
+    `CodexConnectorSuite` ✅.
+  - `roadmap.md` §2.1 `ClaudeConnector and CodexConnector` parenthetical
+    rewritten to reflect that the trait-shape code PR landed; "What
+    unblocks slice-1 closure" item #3 marked ✅ landed; status line
+    bumped to v0.4 ✅.
+  - `AGENTS.md` "Current state" Slice 1 paragraph rewritten to mention
+    PR-A complete and the new `CodexStreamingSession` class ✅.
+  - `CLAUDE.md` TL;DR "Current state" rewritten to match ✅.
+  - This file's PR-A section flipped from "in progress" to
+    "✅ landed 2026-05-25" in the §1.1 header ✅.
+  Done.
 
 ### 1.2 PR B — Claude streaming integration tests (forge-it)
 
@@ -232,6 +243,13 @@ after PR-E lands.
   the channel; resume thread-id mismatch raises. Seven new fake-CLI
   tests in `CodexConnectorSuite` replace the Task-#6 sentinel. Next
   up: A7 (PR-A landing checklist).
+- 2026-05-25 — **PR-A complete.** A7 verified the landing checklist
+  (clean compile + 173 unit tests + 1 forge-it smoke + scalafmt clean
+  + no sentinel tests remaining); `roadmap.md`, `AGENTS.md`, and
+  `CLAUDE.md` brought up to date to reflect the trait-shape code PR
+  landing. Next up: PR-B (Claude real-CLI streaming integration tests).
+  PR-C (Codex) can land in parallel with PR-B once we have a real
+  `codex` binary available in CI.
 
 ## 4. Cross-references
 

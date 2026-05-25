@@ -23,27 +23,32 @@ fix this file.
 - **Slice 1 (`forge-agents` — connectors) — in progress.** Landed:
   `Role` indirection seam, `PriceTable` + shipped `prices.example.json`,
   `CodexPrompt` (§7.10(a)), `CodexSessionSettings` (§7.10(c)),
-  `ClaudeEventParser` / `CodexEventParser` (stream-json → `AgentEvent`),
-  `HaltWithQuestion` envelope decoder, `Subprocess` (spawn / line-based
-  stdio / SIGTERM→grace→SIGKILL), `StreamingDriver`
-  (Subprocess + parser → `StreamingSession` with init-event
-  synchronisation, stderr-drain buffer, `UserMessage` mirror event,
-  and connector-supplied stdin encoder), `ClaudeConnector` (headless
-  driver methods, end-to-end smoke-tested against real `claude`,
-  Layer-5 reviewer one-shots), `CodexConnector` (headless driver
-  methods, Layer-5 reviewer one-shots), shared `ReviewDecoders` +
-  `ReviewerPrompts` + `ReviewerAssets` + typed `ReviewerError`
-  adapter errors; **v1.2 spec landed** — §7.1 trait extension
-  (initial user message on streaming spawn/resume; `answerQuestion`
-  for the `tool_result` reply path; `toolUseId` on
-  `AskUserQuestion` events). `runStreamingSpec` /
-  `resumeStreamingSpec` are still stubbed for BOTH connectors —
-  the *code* change to the new trait shape is the next slice-1 PR,
-  now unblocked by v1.2. Still to come: trait-shape code PR
-  (re-enable streaming spec connectors against the new
-  signatures), orchestrator-side `HaltWithQuestion` re-spawn loop,
-  real-CLI reviewer regression suites (gated on shipped schemas +
-  reviewer prompts), full §17 forge-it integration test list.
+  `ClaudeEventParser` / `CodexEventParser` (stream-json → `AgentEvent`,
+  with `AskUserQuestion(toolUseId)` capturing the Native tool_use id
+  and emitting `None` on the §7.3 HaltWithQuestion path),
+  `Subprocess` (spawn / line-based stdio / SIGTERM→grace→SIGKILL),
+  `StreamingDriver` (Subprocess + parser → `StreamingSession` with
+  init-event synchronisation, stderr-drain buffer, `UserMessage`
+  mirror event, connector-supplied `encodeUserInput` /
+  `initialUserInput` / `encodeAnswer` hooks), `ClaudeConnector`
+  (headless + streaming-spec driver methods end-to-end against fake
+  CLIs and a real-`claude` smoke test for the headless path; §7.2
+  `tool_result` wire encoder + `MissingToolUseId` adapter error for
+  parser-regression diagnostics; Layer-5 reviewer one-shots),
+  `CodexConnector` + new `CodexStreamingSession` (multi-process facade
+  over `codex exec [resume] --json`: one subprocess per turn
+  serialised under `cats.effect.std.Mutex`, single shared events
+  channel with resume-turn Init filtered, thread-id mismatch on
+  resume raises; headless + Layer-5 reviewer one-shots also covered),
+  shared `ReviewDecoders` + `ReviewerPrompts` + `ReviewerAssets` +
+  typed `ReviewerError` adapter errors. **PR-A (trait-shape code
+  change) in `design-2.1.md` complete.** Still to come: real-CLI
+  streaming integration tests (PR-B Claude, PR-C Codex —
+  resume-with-session-id-preserved, kill mid-stream,
+  `answerQuestion` end-to-end), orchestrator-side `HaltWithQuestion`
+  re-spawn loop (lands with Slice 2 FSM), real-CLI reviewer
+  regression suites (PR-D, blocked on shipped schemas + reviewer
+  prompts), full §17 forge-it integration test list.
 - Slices 2–5 scoped in design §17.
 - Phase 4 (Forge-instance pivot: multi-repo, daemon, parallel,
   containerised) is post-v1 and needs its own design doc before any

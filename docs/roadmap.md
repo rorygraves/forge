@@ -6,9 +6,12 @@
 > §17 of the design); later phases capture direction and have not yet been
 > turned into specs.
 >
-> **Status:** draft v0.3 — 2026-05-25. Refreshed mid-Slice 1 again after
-> v1.2 landed (folds in the §7.1 trait-shape findings); full refresh due
-> when Slice 1 closes out.
+> **Status:** draft v0.4 — 2026-05-25. Refreshed after PR-A of Slice 1
+> landed (the v1.2 §7.1 trait-shape code change — see
+> [`design-2.1.md`](design-2.1.md)). Both connectors now implement the
+> streaming-spec driver methods end-to-end against fake CLIs; PR-B / PR-C
+> add the real-CLI integration tests. Full refresh due when Slice 1
+> closes out.
 
 ## 0. How to read this
 
@@ -61,7 +64,8 @@ risks are integration-shaped.
 - [~] `ClaudeConnector` and `CodexConnector`, both
   `schemaMechanism = Native`. Foundations landed: deterministic
   event parsers, `Subprocess` + `StreamingDriver` plumbing
-  (`send` JSON-encoder hook + `UserMessage` mirror event), Claude
+  (`send` JSON-encoder hook + `UserMessage` mirror event +
+  `initialUserInput` + `encodeAnswer` hooks per v1.2 §7.1), Claude
   headless driver methods (real-CLI smoke test passes), Codex
   headless driver methods, **Layer 5 reviewer one-shots
   (`reviewDesign` / `reviewPr` / `refine`) for both connectors**
@@ -71,15 +75,26 @@ risks are integration-shaped.
   / `StructuredOutputMissing` / `StructuredOutputMalformed` for
   §7.5 adapter / config errors so `reviewProcessRetries` never
   burns its budget on a content or setup mistake), and fake-CLI
-  end-to-end tests proving the full plumbing. **Spec unblock landed:**
-  forge-design-1.2 carries the §7.1 trait extension (initial
-  user message on streaming spawn/resume; `answerQuestion` for
-  the §7.2 `tool_result` path; `toolUseId` on `AskUserQuestion`
-  events). `runStreamingSpec` / `resumeStreamingSpec` are still
-  stubbed in the code — the trait-shape code PR is next and
-  re-enables them against the new signatures; the `-p` flag,
-  stream-json JSON-frame encoder, and `UserMessage` mirror
-  plumbing are already in place for that PR.
+  end-to-end tests proving the full plumbing. **Trait-shape code
+  PR (PR-A in `design-2.1.md`) landed:** `AgentEvent.AskUserQuestion`
+  carries `toolUseId: Option[String]` (Native parser captures the
+  block-level id, HaltWithQuestion emits `None`);
+  `StreamingSession.answerQuestion(toolUseId, answer)` plumbed
+  through `StreamingDriver` with a connector-supplied `encodeAnswer`
+  hook; `ClaudeConnector.runStreamingSpec` / `resumeStreamingSpec`
+  wired through `StreamingDriver` with the §7.2 `tool_result` frame
+  encoder (`encodeToolResultJson`) and a new `MissingToolUseId`
+  adapter error for the parser-regression path;
+  `CodexConnector.runStreamingSpec` / `resumeStreamingSpec` /
+  `answerQuestion` implemented as a new `CodexStreamingSession`
+  multi-process facade (one `codex exec [resume] --json` subprocess
+  per turn, serialised under `cats.effect.std.Mutex`, single shared
+  events Channel with resume-turn Init filtered, thread-id mismatch
+  on resume raises). Both connectors covered by fake-CLI round-trip
+  tests in their `*ConnectorSuite`. **Still ⏳:** real-CLI streaming
+  integration tests (PR-B Claude, PR-C Codex in `design-2.1.md`) and
+  the reviewer schema regression suite (PR-D, blocked on shipped
+  schemas + reviewer prompts).
 - [~] `HaltWithQuestion` parsing + re-spawn loop for Codex. Envelope
   decoder landed (`HaltWithQuestion.detect` / `tryParse`); the
   orchestrator-side re-spawn loop lands with slice 2 (FSM).
@@ -112,18 +127,23 @@ risks are integration-shaped.
    per schema, per reviewer) still ⏳ — gated on shipped schemas
    + reviewer system prompts, which land later in Slice 1 / early
    Slice 4 alongside `ForgePaths`.
-3. **Re-enable streaming spec connectors** — next slice-1 PR. Swap
-   the two `NotImplementedError` stubs in each connector for the
-   real spawn path against the v1.2 trait signatures
-   (`runStreamingSpec(systemPrompt, initialUserMessage)`,
-   `resumeStreamingSpec(sessionId, message)`,
-   `StreamingSession.answerQuestion(toolUseId, answer)`); add the
-   `toolUseId` field to `AgentEvent.AskUserQuestion` in the
-   parser. The wire-shape pieces (`-p`, JSON-frame encoder,
-   `UserMessage` mirror, stream-json argv) are already in place
-   and unit-tested.
-4. **Full §17 forge-it test list** — gated on (3) and on the
-   reviewer-side schemas/prompts mentioned in (2).
+3. **Re-enable streaming spec connectors** — ✅ landed as PR-A in
+   [`design-2.1.md`](design-2.1.md). Both connectors now implement
+   `runStreamingSpec(systemPrompt, initialUserMessage)`,
+   `resumeStreamingSpec(sessionId, message)`, and
+   `StreamingSession.answerQuestion(toolUseId, answer)` against the
+   v1.2 §7.1 trait. `AgentEvent.AskUserQuestion` carries `toolUseId:
+   Option[String]`; `ClaudeConnector` requires `Some(id)` for the
+   Native `tool_result` reply path (raising `MissingToolUseId` on
+   `None`); `CodexConnector` runs as a multi-process facade
+   (`CodexStreamingSession`) ignoring `toolUseId` per §7.3. Covered
+   by fake-CLI round-trips in both `*ConnectorSuite`s.
+4. **Full §17 forge-it test list** — ⏳ next up, as PR-B / PR-C in
+   [`design-2.1.md`](design-2.1.md). Real-CLI streaming round-trips
+   (resume preserving session id, kill mid-stream, `answerQuestion`
+   exercised end-to-end) for both connectors. PR-D (reviewer schema
+   regression suite) still blocked on shipped reviewer schemas +
+   system prompts.
 
 ### 2.2 Slice 2 — FSM, Feature, ActionLog, StateCache (≈ week 2)
 
