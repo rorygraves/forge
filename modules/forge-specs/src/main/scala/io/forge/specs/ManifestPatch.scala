@@ -48,9 +48,13 @@ object ManifestPatchOp:
       *
       * This is the lowest layer of patch validation. Op-local rules give
       * targeted errors ("cannot edit merged piece p1"); structural invariants
-      * (every field/status combination, the merged-prefix contiguity) are
-      * caught by `Manifest.validate` after the op lands. `ManifestPatch.applyTo`
-      * threads both layers per-op. */
+      * (every field/status combination, the merged-prefix contiguity, the
+      * order-field mirror) are caught by `Manifest.validate` after the op
+      * lands. `ManifestPatch.applyTo` threads both layers per-op.
+      *
+      * Structural ops (Add, Remove, Reorder) call `withRenumberedOrder` so the
+      * `Piece.order` mirror of vector position stays in sync regardless of
+      * what `order` the caller put on the new/existing pieces. */
     def applyTo(m: Manifest): Either[String, Manifest] = op match
       case ManifestPatchOp.AddPiece(after, piece) =>
         if m.pieces.exists(_.id == piece.id) then
@@ -63,7 +67,7 @@ object ManifestPatchOp:
               if m.pieces.exists(_.status == PieceStatus.Merged) then
                 Left("cannot insert at head while pieces are merged; specify the last merged piece as 'after'")
               else
-                Right(m.copy(pieces = piece +: m.pieces))
+                Right(m.copy(pieces = piece +: m.pieces).withRenumberedOrder)
             case Some(aid) =>
               m.pieces.indexWhere(_.id == aid) match
                 case -1 => Left(s"'after' references unknown piece '${aid.value}'")
@@ -75,7 +79,7 @@ object ManifestPatchOp:
                     Left(s"'after' refers to merged piece '${aid.value}' that is not the last merged piece")
                   else
                     val (before, tail) = m.pieces.splitAt(i + 1)
-                    Right(m.copy(pieces = before ++ Vector(piece) ++ tail))
+                    Right(m.copy(pieces = before ++ Vector(piece) ++ tail).withRenumberedOrder)
 
       case ManifestPatchOp.RemovePiece(id) =>
         m.pieces.indexWhere(_.id == id) match
@@ -83,7 +87,7 @@ object ManifestPatchOp:
           case i if m.pieces(i).status == PieceStatus.Merged =>
             Left(s"cannot remove merged piece '${id.value}'")
           case i =>
-            Right(m.copy(pieces = m.pieces.patch(i, Nil, 1)))
+            Right(m.copy(pieces = m.pieces.patch(i, Nil, 1)).withRenumberedOrder)
 
       case ManifestPatchOp.EditPiece(id, title, summary, specPath, acceptanceHash) =>
         m.pieces.indexWhere(_.id == id) match
@@ -98,6 +102,7 @@ object ManifestPatchOp:
               specPath       = specPath.getOrElse(p.specPath),
               acceptanceHash = acceptanceHash.getOrElse(p.acceptanceHash)
             )
+            // EditPiece is structure-preserving; no renumber needed.
             Right(m.copy(pieces = m.pieces.updated(i, edited)))
 
       case ManifestPatchOp.ReorderPieces(newOrder) =>
@@ -116,7 +121,7 @@ object ManifestPatchOp:
             Left(s"merged prefix changed (expected [${expectedPrefix.mkString(", ")}]; got [${actualPrefix.mkString(", ")}])")
           else
             val byId = m.pieces.iterator.map(p => p.id -> p).toMap
-            Right(m.copy(pieces = newOrder.map(byId(_))))
+            Right(m.copy(pieces = newOrder.map(byId(_))).withRenumberedOrder)
 
 /** §6 — a named bundle of ops applied as a unit. `validate` and `applyTo`
   * thread the ops sequentially: each op sees the manifest that the previous

@@ -239,6 +239,39 @@ class ManifestPatchSuite extends munit.FunSuite:
     assert(errs.exists(_.contains("op[0] AddPiece")))
     assert(errs.exists(_.contains("cannot insert at head")))
 
+  // --- Piece.order renormalisation -------------------------------------------
+
+  test("AddPiece renumbers order so vector position is canonical"):
+    // twoMerged = [p1(1), p2(2), p3(3), p4(4)]. Insert p5 (any order field) after p2.
+    val newPiece = piece("p5").copy(order = 999)
+    val patch    = ManifestPatch("add", Vector(AddPiece(Some(PieceId("p2")), newPiece)))
+    val Right(applied) = patch.applyTo(twoMerged): @unchecked
+    assertEquals(applied.pieces.map(_.id.value), Vector("p1", "p2", "p5", "p3", "p4"))
+    assertEquals(applied.pieces.map(_.order), Vector(1, 2, 3, 4, 5))
+
+  test("RemovePiece renumbers order so the gap closes"):
+    // twoMerged = [p1(1), p2(2), p3(3), p4(4)]. Remove p3.
+    val patch = ManifestPatch("drop", Vector(RemovePiece(PieceId("p3"))))
+    val Right(applied) = patch.applyTo(twoMerged): @unchecked
+    assertEquals(applied.pieces.map(_.id.value), Vector("p1", "p2", "p4"))
+    assertEquals(applied.pieces.map(_.order), Vector(1, 2, 3))
+
+  test("ReorderPieces renumbers order to follow the new vector position"):
+    val patch = ManifestPatch("reorder",
+      Vector(ReorderPieces(Vector(PieceId("p1"), PieceId("p2"), PieceId("p4"), PieceId("p3"))))
+    )
+    val Right(applied) = patch.applyTo(twoMerged): @unchecked
+    assertEquals(applied.pieces.map(_.id.value), Vector("p1", "p2", "p4", "p3"))
+    assertEquals(applied.pieces.map(_.order), Vector(1, 2, 3, 4))
+
+  test("EditPiece preserves vector position and order field"):
+    val patch = ManifestPatch("edit",
+      Vector(EditPiece(PieceId("p3"), Some("New title"), None, None, None))
+    )
+    val Right(applied) = patch.applyTo(twoMerged): @unchecked
+    assertEquals(applied.pieces.map(_.order), Vector(1, 2, 3, 4))
+    assertEquals(applied.pieces(2).title, "New title")
+
   // --- JSON round-trip -------------------------------------------------------
 
   test("ManifestPatch JSON round-trips through upickle"):

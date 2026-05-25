@@ -28,6 +28,8 @@ final case class Manifest(
     *
     * Structural rules:
     *   - piece ids are unique
+    *   - piece order field matches vector position (1-indexed); structural patch
+    *     ops are responsible for renormalising via `withRenumberedOrder`
     *   - merged pieces form a contiguous prefix of the piece list (§5.5) */
   def validate: Either[Vector[String], Manifest] =
     val errs = Vector.newBuilder[String]
@@ -35,8 +37,11 @@ final case class Manifest(
     val ids = pieces.map(_.id.value)
     if ids.distinct.size != ids.size then errs += "duplicate piece ids in manifest"
 
-    pieces.foreach: p =>
+    pieces.zipWithIndex.foreach: (p, i) =>
       val tag = s"piece ${p.id.value}"
+      val expectedOrder = i + 1
+      if p.order != expectedOrder then
+        errs += s"$tag: order ${p.order} does not match position $expectedOrder"
       p.status match
         case PieceStatus.Pending =>
           if p.baseSha.isDefined     then errs += s"$tag: pending status requires null baseSha"
@@ -62,6 +67,12 @@ final case class Manifest(
 
     val list = errs.result()
     if list.isEmpty then Right(this) else Left(list)
+
+  /** Return a copy whose `pieces(i).order == i + 1` for every piece. The
+    * vector position is canonical; `order` mirrors it. Called by every
+    * structural patch op so callers never have to renumber by hand. */
+  def withRenumberedOrder: Manifest =
+    copy(pieces = pieces.zipWithIndex.map((p, i) => p.copy(order = i + 1)))
 
   /** §5.1: design branch derived from prefix + featureId. */
   def designBranch: BranchName =

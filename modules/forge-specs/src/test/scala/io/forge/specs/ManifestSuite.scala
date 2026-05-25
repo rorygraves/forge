@@ -144,6 +144,20 @@ class ManifestSuite extends munit.FunSuite:
     )
     assert(emptyManifest.copy(pieces = Vector(ok)).validate.isRight)
 
+  test("validator rejects a piece whose order field does not mirror its position"):
+    val p1 = basePending
+    val p2 = basePending.copy(id = PieceId("p2"), order = 99)
+    val errs = emptyManifest.copy(pieces = Vector(p1, p2)).validate.swap.toOption.get
+    assert(errs.exists(_.contains("order 99 does not match position 2")))
+
+  test("withRenumberedOrder sets pieces(i).order = i + 1"):
+    val p1 = basePending.copy(order = 100)
+    val p2 = basePending.copy(id = PieceId("p2"), order = 7)
+    val p3 = basePending.copy(id = PieceId("p3"), order = 3)
+    val renumbered = emptyManifest.copy(pieces = Vector(p1, p2, p3)).withRenumberedOrder
+    assertEquals(renumbered.pieces.map(_.order), Vector(1, 2, 3))
+    assert(renumbered.validate.isRight)
+
   test("validator rejects a manifest where merged pieces are not a contiguous prefix"):
     val merged1 = basePending.copy(
       id = PieceId("p1"),
