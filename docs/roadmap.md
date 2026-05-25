@@ -59,13 +59,19 @@ risks are integration-shaped.
   `isCompatibleForResume`, §7.10(c)).
 - [~] `ClaudeConnector` and `CodexConnector`, both
   `schemaMechanism = Native`. Foundations landed: deterministic
-  event parsers, `Subprocess` + `StreamingDriver` plumbing,
-  `ClaudeConnector` streaming + headless methods (real-CLI smoke
-  test passes in `forge-it`), `CodexConnector` headless methods.
-  Remaining: reviewer one-shot methods (`reviewDesign`, `reviewPr`,
-  `refine`) for both; Codex `runStreamingSpec`/`resumeStreamingSpec`
-  multi-turn facade — see open design point in
-  `CodexConnector.scala`.
+  event parsers, `Subprocess` + `StreamingDriver` plumbing
+  (`send` JSON-encoder hook + `UserMessage` mirror event), Claude
+  headless driver methods (real-CLI smoke test passes), Codex
+  headless driver methods. Remaining: reviewer one-shot methods
+  (`reviewDesign`, `reviewPr`, `refine`) for both. **Blocked on a
+  trait change:** `runStreamingSpec` / `resumeStreamingSpec` are
+  stubbed for both connectors because the §7.1 trait can't deliver
+  a populated `sessionId` at spawn time — both CLIs need an initial
+  user message before emitting init (verified empirically against
+  Claude CLI 2.1.150 and via the Codex `exec` model). Resolves by
+  adding an initial-message parameter in a forge-design-1.2
+  revision; the `-p` flag, stream-json JSON-frame encoder, and
+  UserMessage mirror plumbing are already in place for that PR.
 - [~] `HaltWithQuestion` parsing + re-spawn loop for Codex. Envelope
   decoder landed (`HaltWithQuestion.detect` / `tryParse`); the
   orchestrator-side re-spawn loop is the remaining piece.

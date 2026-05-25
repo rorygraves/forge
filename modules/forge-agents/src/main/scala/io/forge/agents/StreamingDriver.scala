@@ -58,20 +58,27 @@ object StreamingDriver:
     * @param initTimeout
     *   How long to wait for the first `Init` event before raising [[Error.InitTimedOut]]. Defaults to 30s — generous
     *   for a cold-start CLI on the user's laptop; the orchestrator's settle timeouts kick in once the session is live.
+    * @param encodeUserInput
+    *   Connector-specific transform applied to each `session.send(input)` payload before it's written to stdin. The
+    *   driver doesn't know the wire shape: Claude with `--input-format stream-json` expects each line to be a JSON
+    *   frame like `{"type":"user","message":{"role":"user","content":"..."}}`; a plain-text CLI would want identity.
+    *   Default is identity — fine for tests and for connectors that genuinely speak raw lines.
     */
   def fromSubprocess(
       subprocess: Resource[IO, Subprocess],
       parseLine: String => Either[String, Vector[AgentEvent]],
-      initTimeout: FiniteDuration = 30.seconds
+      initTimeout: FiniteDuration = 30.seconds,
+      encodeUserInput: String => String = identity
   ): IO[StreamingSessionWithDiagnostics] =
     subprocess.allocated.flatMap: (sp, release) =>
-      buildSession(sp, release, parseLine, initTimeout)
+      buildSession(sp, release, parseLine, initTimeout, encodeUserInput)
 
   private def buildSession(
       sp: Subprocess,
       release: IO[Unit],
       parseLine: String => Either[String, Vector[AgentEvent]],
-      initTimeout: FiniteDuration
+      initTimeout: FiniteDuration,
+      encodeUserInput: String => String
   ): IO[StreamingSessionWithDiagnostics] =
     for
       initDef <- Deferred[IO, Either[Error, String]]
@@ -98,7 +105,20 @@ object StreamingDriver:
     yield new StreamingSessionWithDiagnostics:
       val sessionId: String = sid
       def events: Stream[IO, AgentEvent] = eventChan.stream
-      def send(input: String): IO[Unit] = sp.sendLine(input)
+
+      /** Per the `AgentSession.send` contract, this emits a mirror `UserMessage` event onto the events channel BEFORE
+        * writing to stdin, so the action log captures every prompt in order (UserMessage → AssistantText/ToolUse →
+        * Result). The `encodeUserInput` callback transforms the payload into the wire shape the CLI expects (Claude's
+        * stream-json JSON frame, raw line for simpler CLIs).
+        *
+        * NOTE: this is the *normal user-message* path. The §7.2 `AskUserQuestion` → `tool_result` answer path is NOT
+        * yet wired here — sending a free-text answer via `send` will be interpreted by Claude as a new user message,
+        * not as the awaited tool_result. The orchestrator layer that does Q&A needs to track the outstanding
+        * `tool_use_id` and send a different JSON frame; that lives in the slice-1 follow-up.
+        */
+      def send(input: String): IO[Unit] =
+        eventChan.send(AgentEvent.UserMessage(summary = input.take(200))).void *>
+          sp.sendLine(encodeUserInput(input))
       def stderrSnapshot: IO[Vector[String]] = stderrBuf.get
       def exitValue: IO[Int] = sp.waitFor
       def close(): IO[Unit] =

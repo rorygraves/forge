@@ -26,14 +26,20 @@ PR to fix this file.
   `HaltWithQuestion` envelope decoder, `Subprocess` (spawn / line-based
   stdio / SIGTERM→grace→SIGKILL), `StreamingDriver`
   (Subprocess + parser → `StreamingSession` with init-event
-  synchronisation and stderr-drain buffer), `ClaudeConnector`
-  (streaming + headless driver methods, end-to-end smoke-tested against
-  real `claude`), `CodexConnector` (headless driver methods,
-  `runStreamingSpec`/`resumeStreamingSpec` stubbed pending multi-turn
-  facade design — see `CodexConnector.scala`). Still to come: the
-  reviewer one-shot methods (Layer 5), the Codex multi-turn streaming
-  facade, the orchestrator-side `HaltWithQuestion` re-spawn loop, and
-  the full §17 forge-it integration test list.
+  synchronisation, stderr-drain buffer, `UserMessage` mirror event,
+  and connector-supplied stdin encoder), `ClaudeConnector` (headless
+  driver methods, end-to-end smoke-tested against real `claude`),
+  `CodexConnector` (headless driver methods).
+  `runStreamingSpec` / `resumeStreamingSpec` are stubbed for BOTH
+  connectors: a runtime probe surfaced that the §7.1 trait can't
+  deliver a populated `sessionId` at spawn time — both CLIs need an
+  initial user message before emitting init. Resolves with a
+  forge-design-1.2 trait extension; the wire-shape pieces (`-p`,
+  stream-json JSON-frame encoder, `UserMessage` mirror) are already
+  in place pending that. Still to come: reviewer one-shot methods
+  (Layer 5), the trait-extension PR + streaming spec re-enablement,
+  orchestrator-side `HaltWithQuestion` re-spawn loop, full §17
+  forge-it integration test list.
 - Slices 2–5 scoped in design §17.
 - Phase 4 (Forge-instance pivot: multi-repo, daemon, parallel,
   containerised) is post-v1 and needs its own design doc before any

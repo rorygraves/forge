@@ -21,9 +21,12 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     assertEquals(c.costFrom(AgentEvent.Result(true, 0L)), None)
     assertEquals(c.costFrom(AgentEvent.Init("sid")), None)
 
-  test("streamingSpecArgv includes isolation, bidirectional stream-json I/O, and system prompt flags"):
+  test("streamingSpecArgv includes -p, isolation, bidirectional stream-json I/O, and system prompt flags"):
     val argv = ClaudeConnector.streamingSpecArgv("claude", os.Path("/tmp/spec.md"))
     assert(argv.startsWith(List("claude")), clue = argv)
+    // -p is required: `claude --help` says --input-format / --output-format only work with --print. Without it the
+    // CLI enters interactive TUI mode and never emits Init events.
+    assert(argv.contains("-p"), clue = argv)
     assert(argv.containsSlice(List("--setting-sources", "project,local")), clue = argv)
     assert(argv.contains("--strict-mcp-config"), clue = argv)
     // Streaming spec mode reads JSON user messages on stdin.
@@ -34,10 +37,29 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     // Negative: never include --bare (would disable OAuth — see Slice 0 §2.1).
     assert(!argv.contains("--bare"), clue = argv)
 
-  test("resumeStreamingSpecArgv carries --resume and omits --system-prompt-file"):
+  test("resumeStreamingSpecArgv includes -p, carries --resume, omits --system-prompt-file"):
     val argv = ClaudeConnector.resumeStreamingSpecArgv("claude", "abc-123")
+    assert(argv.contains("-p"), clue = argv)
     assert(argv.containsSlice(List("--resume", "abc-123")), clue = argv)
     assert(!argv.contains("--system-prompt-file"), clue = argv)
+    // Same input-format/output-format flags as streamingSpec; same -p requirement.
+    assert(argv.containsSlice(List("--input-format", "stream-json")), clue = argv)
+    assert(argv.containsSlice(List("--output-format", "stream-json")), clue = argv)
+
+  test("encodeUserMessageJson wraps text in the wire shape `--input-format stream-json` expects"):
+    val frame = ClaudeConnector.encodeUserMessageJson("hello")
+    val parsed = ujson.read(frame)
+    assertEquals(parsed("type").str, "user")
+    assertEquals(parsed("message")("role").str, "user")
+    assertEquals(parsed("message")("content").str, "hello")
+
+  test("encodeUserMessageJson properly escapes special characters"):
+    val frame = ClaudeConnector.encodeUserMessageJson("line 1\nline 2 with \"quotes\"")
+    // JSON-parseable.
+    val parsed = ujson.read(frame)
+    assertEquals(parsed("message")("content").str, "line 1\nline 2 with \"quotes\"")
+    // No raw newlines in the frame body — `sendLine` adds a single trailing `\n` to separate frames.
+    assert(!frame.contains("\n"), clue = frame)
 
   test("headlessArgv: prompt as -p positional, output stream-json, NO --input-format stream-json"):
     val argv = ClaudeConnector.headlessArgv("claude", os.Path("/tmp/impl.md"), "do the thing")
@@ -67,6 +89,19 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     val c = ClaudeConnector(binary = "/opt/foo/claude")
     // Smoke: instantiation doesn't throw and identity holds.
     assertEquals(c.name, "claude")
+
+  test("runStreamingSpec / resumeStreamingSpec raise NotImplementedError with a clear message"):
+    val c = ClaudeConnector()
+    val r1 = c.runStreamingSpec(os.Path("/tmp/spec.md")).attempt.unsafeRunSync()
+    val r2 = c.resumeStreamingSpec("abc").attempt.unsafeRunSync()
+    assert(
+      r1.left.exists(_.getMessage.contains("emits init only after the first")),
+      clue = r1
+    )
+    assert(
+      r2.left.exists(_.getMessage.contains("trait-level blocker")),
+      clue = r2
+    )
 
   test("reviewer methods are not yet implemented (Layer 5 follow-up)"):
     val c = ClaudeConnector()

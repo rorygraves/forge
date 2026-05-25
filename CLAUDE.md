@@ -10,13 +10,15 @@ that first; everything below is Claude-Code-specific.
 - **Current state:** Slice 0 complete; Slice 1 (`forge-agents`) in
   progress. Landed: `Role`, `PriceTable`, `CodexPrompt`,
   `CodexSessionSettings`, `ClaudeEventParser`, `CodexEventParser`,
-  `HaltWithQuestion` decoder, `Subprocess` core,
-  `StreamingDriver` factory, `ClaudeConnector` (streaming + headless
-  driver methods, smoke-tested against real `claude` in `forge-it`),
-  `CodexConnector` (headless driver methods). Still to come:
-  reviewer one-shot methods (Layer 5), Codex `runStreamingSpec`
-  multi-turn facade, orchestrator-side re-spawn loop, full §17
-  integration-test list in `forge-it`.
+  `HaltWithQuestion` decoder, `Subprocess` core, `StreamingDriver`
+  (with stdin-encoder hook and `UserMessage` mirror event),
+  `ClaudeConnector` (headless smoke-tested vs real `claude`),
+  `CodexConnector` (headless). `runStreamingSpec` is stubbed in
+  both connectors — both CLIs need an initial user message before
+  emitting init, which the §7.1 trait doesn't carry; resolves with
+  a forge-design-1.2 trait extension. Still to come: reviewer
+  one-shot methods, the trait-extension PR, orchestrator re-spawn
+  loop, full §17 integration-test list.
 - **Two architectural seams to preserve in v1 work:** `ForgePaths`
   helper (no `.forge/...` literals outside it) and `Role` indirection
   (no `match m: Mode` outside `Mode` and connector construction). See

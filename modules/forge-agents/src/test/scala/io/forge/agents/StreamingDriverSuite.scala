@@ -119,3 +119,50 @@ class StreamingDriverSuite extends munit.FunSuite:
     val (events, stderr) = program.unsafeRunSync()
     assert(events.exists { case AgentEvent.AssistantText(t, _) => t == "after garbage"; case _ => false })
     assert(stderr.exists(_.contains("parse error")), clue = stderr)
+
+  test("send() emits a UserMessage mirror event BEFORE writing to stdin, then encodes via the callback"):
+    assume(os.exists(os.Path("/bin/sh")))
+    // Fake CLI that emits Init, then echoes each stdin line back as an assistant text event so we can observe both
+    // the wire shape of `send` and the order of events. The fake parser turns each echoed line into a flag we can
+    // inspect from the test.
+    val script =
+      """|echo '{"type":"system","subtype":"init","session_id":"sid-x"}'
+         |while IFS= read -r line; do
+         |  echo "$line"
+         |done""".stripMargin
+    val sp = Subprocess.spawn(List("/bin/sh", "-c", script))
+    // Custom encoder: wrap in <<<text>>> so we can assert the encoded form reaches stdin (and thus the echo loop).
+    val encoder: String => String = t => s"<<<$t>>>"
+    val recorder: String => Either[String, Vector[AgentEvent]] = line =>
+      ClaudeEventParser.parse(line) match
+        case r @ Right(events) if events.nonEmpty => r
+        case _ =>
+          // Treat unparseable echoed lines as AssistantText so we can read the wire form back.
+          Right(Vector(AgentEvent.AssistantText(line, 0)))
+    val program = StreamingDriver
+      .fromSubprocess(sp, recorder, encodeUserInput = encoder)
+      .flatMap: session =>
+        for
+          _ <- session.send("hello")
+          _ <- session.send("world")
+          _ <- session.close()
+          events <- session.events.compile.toVector
+        yield events
+    val events = program.unsafeRunSync()
+
+    // UserMessage mirror events appear in order, ahead of the corresponding echoed AssistantText events.
+    val userMessages = events.collect { case AgentEvent.UserMessage(s) => s }
+    assertEquals(userMessages, Vector("hello", "world"))
+
+    // Echoed lines (encoded form) appear as AssistantText after each send.
+    val texts = events.collect { case AgentEvent.AssistantText(t, _) => t }
+    assert(texts.contains("<<<hello>>>"), clue = events)
+    assert(texts.contains("<<<world>>>"), clue = events)
+
+    // Ordering: each UserMessage("X") precedes the echoed AssistantText("<<<X>>>").
+    val helloUserIdx = events.indexOf(AgentEvent.UserMessage("hello"))
+    val helloEchoIdx = events.indexWhere {
+      case AgentEvent.AssistantText("<<<hello>>>", _) => true; case _ => false
+    }
+    assert(helloUserIdx >= 0 && helloEchoIdx >= 0, clue = events)
+    assert(helloUserIdx < helloEchoIdx, clue = (helloUserIdx, helloEchoIdx, events))

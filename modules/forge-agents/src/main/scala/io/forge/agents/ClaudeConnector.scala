@@ -8,10 +8,10 @@ import scala.concurrent.duration.*
 
 /** §7.1 Claude driver/reviewer adapter.
   *
-  * v1 covers the streaming + headless driver methods using [[Subprocess]] + [[StreamingDriver]] + [[ClaudeEventParser]]
-  * end-to-end. The reviewer methods (`reviewDesign` / `reviewPr` / `refine`) are stubbed — they have a one-shot
-  * lifecycle (spawn, parse `structured_output`, exit) that's distinct enough to live in its own layer. They will land
-  * with the Slice 1 follow-up.
+  * v1 covers the **headless** driver methods (`runHeadlessImplementation`, `runFixup`) end-to-end via [[Subprocess]] +
+  * [[StreamingDriver]] + [[ClaudeEventParser]]. The streaming methods (`runStreamingSpec`, `resumeStreamingSpec`) are
+  * stubbed — see their docstrings; the blocker is a trait-level design point shared with `CodexConnector`. The reviewer
+  * methods (`reviewDesign` / `reviewPr` / `refine`) are also stubbed, awaiting the Layer 5 one-shot lifecycle.
   *
   * Flags pinned in Slice 0 (`docs/slice-0/slice-0-report.md` §2.1):
   *
@@ -39,17 +39,44 @@ final class ClaudeConnector(
 
   // --- driver methods ----
 
+  /** **Stub — same root cause as `CodexConnector.runStreamingSpec`.**
+    *
+    * Runtime probe against Claude CLI 2.1.150: with `-p --input-format stream-json --output-format stream-json
+    * --verbose --system-prompt-file <path>`, **the CLI emits the `init` event only after the first user-message JSON
+    * frame arrives on stdin**, not at spawn time. Empty stdin → CLI exits silently with no events at all.
+    *
+    * That conflicts with the §7.1 trait's synchronous `def sessionId: String` accessor and the
+    * `StreamingDriver.fromSubprocess` model (block on Init, then return a session ready for `send`). Both connectors
+    * really want an initial user message at spawn time, which the trait doesn't carry.
+    *
+    * Lands when the trait grows an initial-message parameter (forge-design-1.2 territory — see roadmap). Until then
+    * this method raises so callers can't silently rely on a half-working session.
+    *
+    * The pieces needed when this re-enables — the `-p` flag, the `encodeUserMessageJson` wire-shape, the JSON frame
+    * schema — are already in this module and unit-tested.
+    */
   def runStreamingSpec(systemPromptPath: os.Path): IO[StreamingSession] =
-    spawnStreaming(ClaudeConnector.streamingSpecArgv(binary, systemPromptPath))
+    IO.raiseError(
+      NotImplementedError(
+        "ClaudeConnector.runStreamingSpec — Claude `--input-format stream-json` emits init only after the first " +
+          "user message; the §7.1 trait can't deliver a session with a populated sessionId without an initial " +
+          "message. Same blocker as CodexConnector; resolves with the slice-1 follow-up + trait extension."
+      )
+    )
 
+  /** Same blocker as [[runStreamingSpec]]. */
   def resumeStreamingSpec(sessionId: String): IO[StreamingSession] =
-    spawnStreaming(ClaudeConnector.resumeStreamingSpecArgv(binary, sessionId))
+    IO.raiseError(
+      NotImplementedError(
+        "ClaudeConnector.resumeStreamingSpec — same trait-level blocker as runStreamingSpec; see its docstring."
+      )
+    )
 
   def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] =
-    spawnStreaming(ClaudeConnector.headlessArgv(binary, prompt.systemPromptPath, prompt.body)).widen
+    spawnHeadless(ClaudeConnector.headlessArgv(binary, prompt.systemPromptPath, prompt.body)).widen
 
   def runFixup(prompt: FixupPrompt): IO[AgentSession] =
-    spawnStreaming(ClaudeConnector.headlessArgv(binary, prompt.systemPromptPath, prompt.body)).widen
+    spawnHeadless(ClaudeConnector.headlessArgv(binary, prompt.systemPromptPath, prompt.body)).widen
 
   // --- reviewer methods (Layer 5 follow-up) ----
 
@@ -70,7 +97,11 @@ final class ClaudeConnector(
 
   // --- private helpers ----
 
-  private def spawnStreaming(argv: List[String]): IO[StreamingSession] =
+  /** Headless one-shot: prompt is on argv, the CLI doesn't read stdin. `send()` on the returned session is a protocol
+    * error (writes a stray byte to an unused stdin) but we don't actively guard against it here — the orchestrator's
+    * headless paths don't call `send` on what they treat as one-shot.
+    */
+  private def spawnHeadless(argv: List[String]): IO[StreamingSession] =
     StreamingDriver.fromSubprocess(
       Subprocess.spawn(argv, cwd = cwd, env = extraEnv),
       ClaudeEventParser.parse,
@@ -102,16 +133,22 @@ object ClaudeConnector:
     "stream-json"
   )
 
-  /** argv for `runStreamingSpec` — bidirectional streaming, prompt comes via stdin. */
+  /** argv for `runStreamingSpec` — bidirectional streaming, prompt comes via stdin as stream-json frames.
+    *
+    * `-p`/`--print` is mandatory: `claude --help` says `--input-format`, `--output-format`, and
+    * `--include-partial-messages` ALL "only work with --print". Without it the CLI enters interactive/TUI mode and
+    * either ignores or rejects the streaming flags. Verified empirically — the first version of this argv (without
+    * `-p`) hit the StreamingDriver init timeout because no events were emitted.
+    */
   def streamingSpecArgv(binary: String, systemPromptPath: os.Path): List[String] =
-    (binary :: IsolationFlags) ++ OutputFlags ++ StreamingInputFlags ++
+    (binary :: "-p" :: IsolationFlags) ++ OutputFlags ++ StreamingInputFlags ++
       List("--system-prompt-file", systemPromptPath.toString)
 
   /** argv for `resumeStreamingSpec`. Resume already encodes the prior system prompt in the session state, so no
-    * `--system-prompt-file` is supplied here.
+    * `--system-prompt-file` is supplied here. `-p` still required for the same reason as `streamingSpecArgv`.
     */
   def resumeStreamingSpecArgv(binary: String, sessionId: String): List[String] =
-    (binary :: IsolationFlags) ++ OutputFlags ++ StreamingInputFlags ++ List("--resume", sessionId)
+    (binary :: "-p" :: IsolationFlags) ++ OutputFlags ++ StreamingInputFlags ++ List("--resume", sessionId)
 
   /** argv for headless (`-p <prompt>`) one-shot runs. No `--input-format stream-json` — the prompt is on argv and the
     * CLI should not wait on stdin.
@@ -119,3 +156,20 @@ object ClaudeConnector:
   def headlessArgv(binary: String, systemPromptPath: os.Path, prompt: String): List[String] =
     (binary :: "-p" :: prompt :: IsolationFlags) ++ OutputFlags ++
       List("--system-prompt-file", systemPromptPath.toString)
+
+  /** Wire encoder for streaming-spec / resume sessions: wraps a plain-text user message as the JSON frame
+    * `--input-format stream-json` expects. Confirmed against Claude CLI 2.1.150:
+    *
+    * {{{
+    *   {"type":"user","message":{"role":"user","content":"<text>"}}
+    * }}}
+    *
+    * Public so connector tests and the slice-1 follow-up (Q&A tool_result path) can reuse the JSON shaping logic.
+    */
+  def encodeUserMessageJson(text: String): String =
+    ujson.write(
+      ujson.Obj(
+        "type" -> "user",
+        "message" -> ujson.Obj("role" -> "user", "content" -> text)
+      )
+    )
