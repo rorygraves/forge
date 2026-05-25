@@ -1399,9 +1399,9 @@ Stacked PRs, auto-merge, role pluggability for arbitrary agents, GitLab — expl
 ## 23. Document conventions
 
 - This spec is **standalone**. No section references prior version files.
-- 0.1 → 0.9 → 1.0 documents and their commentaries remain in the workspace as a record of design evolution but are not required reading.
-- This revision (v1.1) is the first post-1.0 update — prompted by Slice 0 findings. Future revisions (1.2, 1.3, ...) prompted by Slice 0 / Slice 1 findings or production lessons will also be standalone.
-- Commentaries continue to be delta-only — they're inherently about what *changed* between versions. `forge-design-1.1-commentary.md` cites line ranges in 1.0.
+- The 0.1 → 0.9 → 1.0 documents and their per-version commentaries have been retired from the tree; consolidated non-obvious rationale from that evolution lives in [`design-rationale.md`](design-rationale.md), categorised with cross-references back into this spec.
+- This revision (v1.1) is the first post-1.0 update — prompted by Slice 0 findings. Future revisions (1.2, 1.3, ...) prompted by Slice 0 / Slice 1 findings or production lessons will also be standalone, sitting alongside this file as `docs/forge-design-1.x.md`.
+- When a revision introduces a decision worth preserving for future contributors (e.g., a non-obvious tradeoff or a now-settled debate), add an entry to `design-rationale.md` rather than retaining a revision-specific commentary in the tree.
 
 ---
 
