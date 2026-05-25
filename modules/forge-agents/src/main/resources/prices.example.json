@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "models": {
+    "gpt-5-codex": {
+      "inputPerMillionUsd": 1.25,
+      "cachedInputPerMillionUsd": 0.125,
+      "outputPerMillionUsd": 10.00,
+      "reasoningOutputPerMillionUsd": 10.00
+    },
+    "gpt-5.1-codex": {
+      "inputPerMillionUsd": 1.25,
+      "cachedInputPerMillionUsd": 0.125,
+      "outputPerMillionUsd": 10.00,
+      "reasoningOutputPerMillionUsd": 10.00
+    },
+    "gpt-5.1-codex-max": {
+      "inputPerMillionUsd": 1.25,
+      "cachedInputPerMillionUsd": 0.125,
+      "outputPerMillionUsd": 10.00,
+      "reasoningOutputPerMillionUsd": 10.00
+    },
+    "gpt-5.1-codex-mini": {
+      "inputPerMillionUsd": 0.25,
+      "cachedInputPerMillionUsd": 0.025,
+      "outputPerMillionUsd": 2.00,
+      "reasoningOutputPerMillionUsd": 2.00
+    },
+    "gpt-5.2-codex": {
+      "inputPerMillionUsd": 1.75,
+      "cachedInputPerMillionUsd": 0.175,
+      "outputPerMillionUsd": 14.00,
+      "reasoningOutputPerMillionUsd": 14.00
+    },
+    "gpt-5.3-codex": {
+      "inputPerMillionUsd": 1.75,
+      "cachedInputPerMillionUsd": 0.175,
+      "outputPerMillionUsd": 14.00,
+      "reasoningOutputPerMillionUsd": 14.00
+    },
+    "codex-mini-latest": {
+      "inputPerMillionUsd": 1.50,
+      "cachedInputPerMillionUsd": 0.375,
+      "outputPerMillionUsd": 6.00,
+      "reasoningOutputPerMillionUsd": 6.00
+    }
+  }
+}
