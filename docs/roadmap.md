@@ -57,8 +57,18 @@ risks are integration-shaped.
   §7.10(a)).
 - [x] Codex sticky-settings rule (`CodexSessionSettings` value type +
   `isCompatibleForResume`, §7.10(c)).
-- [ ] `ClaudeConnector` and `CodexConnector`, both `schemaMechanism = Native`.
-- [ ] `HaltWithQuestion` parsing + re-spawn loop for Codex.
+- [~] `ClaudeConnector` and `CodexConnector`, both
+  `schemaMechanism = Native`. Foundations landed: deterministic
+  event parsers, `Subprocess` + `StreamingDriver` plumbing,
+  `ClaudeConnector` streaming + headless methods (real-CLI smoke
+  test passes in `forge-it`), `CodexConnector` headless methods.
+  Remaining: reviewer one-shot methods (`reviewDesign`, `reviewPr`,
+  `refine`) for both; Codex `runStreamingSpec`/`resumeStreamingSpec`
+  multi-turn facade — see open design point in
+  `CodexConnector.scala`.
+- [~] `HaltWithQuestion` parsing + re-spawn loop for Codex. Envelope
+  decoder landed (`HaltWithQuestion.detect` / `tryParse`); the
+  orchestrator-side re-spawn loop is the remaining piece.
 - [ ] Integration tests on real CLIs — see §17 slice 1 for the full list; the
   ≥19/20 schema and HaltWithQuestion measurements happen here.
 

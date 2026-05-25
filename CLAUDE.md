@@ -8,11 +8,15 @@ that first; everything below is Claude-Code-specific.
 - **Implementation contract:** [`docs/forge-design-1.1.md`](docs/forge-design-1.1.md).
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
 - **Current state:** Slice 0 complete; Slice 1 (`forge-agents`) in
-  progress. Landed: `Role` indirection, `PriceTable` (+
-  `prices.example.json`), `CodexPrompt` (system-prompt prepend),
-  `CodexSessionSettings` (sticky-settings value type). Still to come:
-  `ClaudeConnector` / `CodexConnector` skeletons, `HaltWithQuestion`
-  parsing + re-spawn loop, integration tests in `forge-it`.
+  progress. Landed: `Role`, `PriceTable`, `CodexPrompt`,
+  `CodexSessionSettings`, `ClaudeEventParser`, `CodexEventParser`,
+  `HaltWithQuestion` decoder, `Subprocess` core,
+  `StreamingDriver` factory, `ClaudeConnector` (streaming + headless
+  driver methods, smoke-tested against real `claude` in `forge-it`),
+  `CodexConnector` (headless driver methods). Still to come:
+  reviewer one-shot methods (Layer 5), Codex `runStreamingSpec`
+  multi-turn facade, orchestrator-side re-spawn loop, full §17
+  integration-test list in `forge-it`.
 - **Two architectural seams to preserve in v1 work:** `ForgePaths`
   helper (no `.forge/...` literals outside it) and `Role` indirection
   (no `match m: Mode` outside `Mode` and connector construction). See
