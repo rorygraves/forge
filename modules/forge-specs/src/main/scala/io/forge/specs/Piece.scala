@@ -6,9 +6,9 @@ import io.forge.core.Json.given
 import java.time.Instant
 import upickle.default.ReadWriter
 
-/** §5.1 manifest piece. The nullable fields (`baseSha`, `prNumber`,
-  * `mergeCommit`, `mergedAt`) are set at specific FSM transitions named in
-  * §11. The validator `Manifest.validate` cross-checks them against `status`. */
+/** §5.1 manifest piece. The nullable fields (`baseSha`, `prNumber`, `mergeCommit`, `mergedAt`) are set at specific FSM
+  * transitions named in §11. The validator `Manifest.validate` cross-checks them against `status`.
+  */
 final case class Piece(
     id: PieceId,
     order: Int,

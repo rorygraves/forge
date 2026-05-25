@@ -5,8 +5,9 @@ import io.forge.core.{QuestionMechanism, SchemaMechanism}
 
 /** §7.1 — driver + reviewer over a single CLI.
   *
-  * Both `ClaudeConnector` and `CodexConnector` implement this; the
-  * orchestrator picks driver vs reviewer based on the feature's `Mode`. */
+  * Both `ClaudeConnector` and `CodexConnector` implement this; the orchestrator picks driver vs reviewer based on the
+  * feature's `Mode`.
+  */
 trait Connector:
 
   /** "claude" or "codex". Recorded in the action log as the `actor` field. */
@@ -14,13 +15,13 @@ trait Connector:
 
   // --- driver methods ----
 
-  /** Long-running spec-phase session, attached to stdout for events and
-    * stdin for `send`. */
+  /** Long-running spec-phase session, attached to stdout for events and stdin for `send`.
+    */
   def runStreamingSpec(systemPromptPath: os.Path): IO[StreamingSession]
 
-  /** Resume a previously closed spec session by its CLI session id. Returns a
-    * fresh `StreamingSession` whose `sessionId` is the new (post-resume) id —
-    * §6.1 invariant: `feature.designSessionId` is updated to the *new* id. */
+  /** Resume a previously closed spec session by its CLI session id. Returns a fresh `StreamingSession` whose
+    * `sessionId` is the new (post-resume) id — §6.1 invariant: `feature.designSessionId` is updated to the *new* id.
+    */
   def resumeStreamingSpec(sessionId: String): IO[StreamingSession]
 
   /** Headless implementation run; settle-bounded by the orchestrator. */
@@ -48,6 +49,7 @@ trait Connector:
 
   // --- telemetry ----
 
-  /** Extract a `Cost` from an event, when the event carries cost info.
-    * Per-connector because each CLI emits its own shape. */
+  /** Extract a `Cost` from an event, when the event carries cost info. Per-connector because each CLI emits its own
+    * shape.
+    */
   def costFrom(event: AgentEvent): Option[Cost]

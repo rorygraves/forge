@@ -1,2 +1,3 @@
-// Plugins will be added in later slices (e.g. sbt-scalafmt, sbt-assembly).
-// Kept empty for now so the first iteration build is reproducible without extras.
+// sbt-scalafmt wires `scalafmtAll` / `scalafmtCheckAll` — required by
+// README and AGENTS.md. Other plugins (e.g. sbt-assembly) land later.
+addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.5.4")

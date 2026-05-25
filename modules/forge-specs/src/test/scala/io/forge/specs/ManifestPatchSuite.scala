@@ -9,7 +9,7 @@ class ManifestPatchSuite extends munit.FunSuite:
   // --- fixtures --------------------------------------------------------------
 
   private val sampleSha = Sha("abcdef0123456789abcdef0123456789abcdef01")
-  private val sampleAt  = Instant.parse("2026-05-25T00:00:00Z")
+  private val sampleAt = Instant.parse("2026-05-25T00:00:00Z")
 
   private def piece(id: String, status: PieceStatus = PieceStatus.Pending): Piece =
     val merged = status == PieceStatus.Merged
@@ -40,23 +40,25 @@ class ManifestPatchSuite extends munit.FunSuite:
       pieces = pieces.toVector
     )
 
-  private val allPending     = manifest(piece("p1"), piece("p2"), piece("p3"))
-  private val oneMerged      = manifest(piece("p1", PieceStatus.Merged), piece("p2"), piece("p3"))
-  private val twoMerged      = manifest(
-    piece("p1", PieceStatus.Merged), piece("p2", PieceStatus.Merged),
-    piece("p3"), piece("p4")
+  private val allPending = manifest(piece("p1"), piece("p2"), piece("p3"))
+  private val oneMerged = manifest(piece("p1", PieceStatus.Merged), piece("p2"), piece("p3"))
+  private val twoMerged = manifest(
+    piece("p1", PieceStatus.Merged),
+    piece("p2", PieceStatus.Merged),
+    piece("p3"),
+    piece("p4")
   )
 
   // --- AddPiece --------------------------------------------------------------
 
   test("AddPiece: valid new piece with after=last-merged"):
     val newPiece = piece("p5")
-    val patch    = ManifestPatch("add", Vector(AddPiece(Some(PieceId("p2")), newPiece)))
+    val patch = ManifestPatch("add", Vector(AddPiece(Some(PieceId("p2")), newPiece)))
     assert(patch.validate(twoMerged).isRight)
 
   test("AddPiece: valid new piece appended after pending"):
     val newPiece = piece("p4")
-    val patch    = ManifestPatch("add", Vector(AddPiece(Some(PieceId("p3")), newPiece)))
+    val patch = ManifestPatch("add", Vector(AddPiece(Some(PieceId("p3")), newPiece)))
     assert(patch.validate(oneMerged).isRight)
 
   test("AddPiece: after=None is fine when nothing is merged"):
@@ -65,36 +67,36 @@ class ManifestPatchSuite extends munit.FunSuite:
 
   test("AddPiece: after=None is rejected when pieces are merged"):
     val patch = ManifestPatch("add", Vector(AddPiece(None, piece("p5"))))
-    val errs  = patch.validate(twoMerged).swap.toOption.get
+    val errs = patch.validate(twoMerged).swap.toOption.get
     assert(errs.exists(_.contains("cannot insert at head")))
 
   test("AddPiece: rejects collision with existing id"):
     val patch = ManifestPatch("add", Vector(AddPiece(Some(PieceId("p2")), piece("p3"))))
-    val errs  = patch.validate(twoMerged).swap.toOption.get
+    val errs = patch.validate(twoMerged).swap.toOption.get
     assert(errs.exists(_.contains("already exists")))
 
   test("AddPiece: rejects non-pending new piece"):
     val newPiece = piece("p5", PieceStatus.InProgress)
-    val patch    = ManifestPatch("add", Vector(AddPiece(Some(PieceId("p2")), newPiece)))
-    val errs     = patch.validate(twoMerged).swap.toOption.get
+    val patch = ManifestPatch("add", Vector(AddPiece(Some(PieceId("p2")), newPiece)))
+    val errs = patch.validate(twoMerged).swap.toOption.get
     assert(errs.exists(_.contains("must have status=pending")))
 
   test("AddPiece: rejects new piece with baseSha set"):
     val newPiece = piece("p5").copy(baseSha = Some(sampleSha))
-    val patch    = ManifestPatch("add", Vector(AddPiece(Some(PieceId("p2")), newPiece)))
-    val errs     = patch.validate(twoMerged).swap.toOption.get
+    val patch = ManifestPatch("add", Vector(AddPiece(Some(PieceId("p2")), newPiece)))
+    val errs = patch.validate(twoMerged).swap.toOption.get
     assert(errs.exists(_.contains("null baseSha")))
 
   test("AddPiece: rejects 'after' that points to a non-last merged piece"):
     val newPiece = piece("p5")
-    val patch    = ManifestPatch("add", Vector(AddPiece(Some(PieceId("p1")), newPiece)))
-    val errs     = patch.validate(twoMerged).swap.toOption.get
+    val patch = ManifestPatch("add", Vector(AddPiece(Some(PieceId("p1")), newPiece)))
+    val errs = patch.validate(twoMerged).swap.toOption.get
     assert(errs.exists(_.contains("not the last merged piece")))
 
   test("AddPiece: rejects 'after' that references unknown piece"):
     val newPiece = piece("p5")
-    val patch    = ManifestPatch("add", Vector(AddPiece(Some(PieceId("p99")), newPiece)))
-    val errs     = patch.validate(twoMerged).swap.toOption.get
+    val patch = ManifestPatch("add", Vector(AddPiece(Some(PieceId("p99")), newPiece)))
+    val errs = patch.validate(twoMerged).swap.toOption.get
     assert(errs.exists(_.contains("unknown piece")))
 
   // --- RemovePiece -----------------------------------------------------------
@@ -105,12 +107,12 @@ class ManifestPatchSuite extends munit.FunSuite:
 
   test("RemovePiece: rejects removing a merged piece"):
     val patch = ManifestPatch("drop", Vector(RemovePiece(PieceId("p1"))))
-    val errs  = patch.validate(twoMerged).swap.toOption.get
+    val errs = patch.validate(twoMerged).swap.toOption.get
     assert(errs.exists(_.contains("cannot remove merged piece")))
 
   test("RemovePiece: rejects unknown piece"):
     val patch = ManifestPatch("drop", Vector(RemovePiece(PieceId("p99"))))
-    val errs  = patch.validate(twoMerged).swap.toOption.get
+    val errs = patch.validate(twoMerged).swap.toOption.get
     assert(errs.exists(_.contains("unknown piece")))
 
   // --- EditPiece -------------------------------------------------------------
@@ -121,13 +123,14 @@ class ManifestPatchSuite extends munit.FunSuite:
 
   test("EditPiece: rejects editing a merged piece"):
     val patch = ManifestPatch("edit", Vector(EditPiece(PieceId("p1"), Some("X"), None, None, None)))
-    val errs  = patch.validate(twoMerged).swap.toOption.get
+    val errs = patch.validate(twoMerged).swap.toOption.get
     assert(errs.exists(_.contains("cannot edit merged piece")))
 
   // --- ReorderPieces — §5.5 invariant ---------------------------------------
 
   test("ReorderPieces: shuffling the pending tail is allowed"):
-    val patch = ManifestPatch("reorder",
+    val patch = ManifestPatch(
+      "reorder",
       Vector(ReorderPieces(Vector(PieceId("p1"), PieceId("p2"), PieceId("p4"), PieceId("p3"))))
     )
     assert(patch.validate(twoMerged).isRight)
@@ -135,50 +138,51 @@ class ManifestPatchSuite extends munit.FunSuite:
   test("ReorderPieces: reordering across the merged boundary is rejected"):
     // Move 'p2' (merged) after 'p1' (merged) is fine (same prefix), but swapping
     // p2 to position 3 changes the merged prefix and must be rejected.
-    val patch = ManifestPatch("reorder",
+    val patch = ManifestPatch(
+      "reorder",
       Vector(ReorderPieces(Vector(PieceId("p1"), PieceId("p3"), PieceId("p2"), PieceId("p4"))))
     )
-    val errs  = patch.validate(twoMerged).swap.toOption.get
+    val errs = patch.validate(twoMerged).swap.toOption.get
     assert(errs.exists(_.contains("merged prefix changed")))
 
   test("ReorderPieces: swapping merged pieces among themselves is rejected"):
-    val patch = ManifestPatch("reorder",
+    val patch = ManifestPatch(
+      "reorder",
       Vector(ReorderPieces(Vector(PieceId("p2"), PieceId("p1"), PieceId("p3"), PieceId("p4"))))
     )
-    val errs  = patch.validate(twoMerged).swap.toOption.get
+    val errs = patch.validate(twoMerged).swap.toOption.get
     assert(errs.exists(_.contains("merged prefix changed")))
 
   test("ReorderPieces: non-permutation is rejected"):
-    val patch = ManifestPatch("reorder",
+    val patch = ManifestPatch(
+      "reorder",
       Vector(ReorderPieces(Vector(PieceId("p1"), PieceId("p2"), PieceId("p3"), PieceId("p99"))))
     )
-    val errs  = patch.validate(twoMerged).swap.toOption.get
+    val errs = patch.validate(twoMerged).swap.toOption.get
     assert(errs.exists(_.contains("not a permutation")))
 
   test("ReorderPieces: duplicates are rejected"):
-    val patch = ManifestPatch("reorder",
+    val patch = ManifestPatch(
+      "reorder",
       Vector(ReorderPieces(Vector(PieceId("p1"), PieceId("p2"), PieceId("p3"), PieceId("p3"))))
     )
-    val errs  = patch.validate(twoMerged).swap.toOption.get
+    val errs = patch.validate(twoMerged).swap.toOption.get
     assert(errs.exists(_.contains("duplicates")))
 
   test("ReorderPieces: size mismatch is rejected"):
-    val patch = ManifestPatch("reorder",
-      Vector(ReorderPieces(Vector(PieceId("p1"), PieceId("p2"))))
-    )
-    val errs  = patch.validate(twoMerged).swap.toOption.get
+    val patch = ManifestPatch("reorder", Vector(ReorderPieces(Vector(PieceId("p1"), PieceId("p2")))))
+    val errs = patch.validate(twoMerged).swap.toOption.get
     assert(errs.exists(_.contains("does not match current")))
 
   test("ReorderPieces: when nothing is merged the whole list may be reordered"):
-    val patch = ManifestPatch("reorder",
-      Vector(ReorderPieces(Vector(PieceId("p3"), PieceId("p1"), PieceId("p2"))))
-    )
+    val patch = ManifestPatch("reorder", Vector(ReorderPieces(Vector(PieceId("p3"), PieceId("p1"), PieceId("p2")))))
     assert(patch.validate(allPending).isRight)
 
   // --- Sequence-aware validation (review high) ------------------------------
 
   test("ManifestPatch.applyTo applies ops sequentially and returns the new manifest"):
-    val patch = ManifestPatch("two-step",
+    val patch = ManifestPatch(
+      "two-step",
       Vector(
         EditPiece(PieceId("p3"), title = Some("Edited title"), None, None, None),
         AddPiece(Some(PieceId("p4")), piece("p5"))
@@ -190,7 +194,8 @@ class ManifestPatchSuite extends munit.FunSuite:
     assertEquals(applied.pieces.last.id.value, "p5")
 
   test("ManifestPatch.validate rejects two AddPiece ops for the same id"):
-    val patch = ManifestPatch("dup add",
+    val patch = ManifestPatch(
+      "dup add",
       Vector(
         AddPiece(Some(PieceId("p4")), piece("p5")),
         AddPiece(Some(PieceId("p5")), piece("p5"))
@@ -202,7 +207,8 @@ class ManifestPatchSuite extends munit.FunSuite:
     assert(errs.exists(_.contains("already exists")))
 
   test("ManifestPatch.validate rejects RemovePiece followed by EditPiece on the same id"):
-    val patch = ManifestPatch("delete-then-edit",
+    val patch = ManifestPatch(
+      "delete-then-edit",
       Vector(
         RemovePiece(PieceId("p3")),
         EditPiece(PieceId("p3"), Some("X"), None, None, None)
@@ -214,7 +220,8 @@ class ManifestPatchSuite extends munit.FunSuite:
 
   test("ManifestPatch.validate accepts AddPiece then ReorderPieces that includes the new id"):
     // twoMerged = [p1m, p2m, p3, p4]. Add p5 after p4, then reorder pending tail.
-    val patch = ManifestPatch("add-then-reorder",
+    val patch = ManifestPatch(
+      "add-then-reorder",
       Vector(
         AddPiece(Some(PieceId("p4")), piece("p5")),
         ReorderPieces(Vector(PieceId("p1"), PieceId("p2"), PieceId("p5"), PieceId("p3"), PieceId("p4")))
@@ -232,9 +239,7 @@ class ManifestPatchSuite extends munit.FunSuite:
     // case below.
     //
     // Here we instead verify that op[0]'s error is correctly prefixed.
-    val patch = ManifestPatch("bad",
-      Vector(AddPiece(None, piece("p5")))
-    )
+    val patch = ManifestPatch("bad", Vector(AddPiece(None, piece("p5"))))
     val errs = patch.validate(twoMerged).swap.toOption.get
     assert(errs.exists(_.contains("op[0] AddPiece")))
     assert(errs.exists(_.contains("cannot insert at head")))
@@ -244,7 +249,7 @@ class ManifestPatchSuite extends munit.FunSuite:
   test("AddPiece renumbers order so vector position is canonical"):
     // twoMerged = [p1(1), p2(2), p3(3), p4(4)]. Insert p5 (any order field) after p2.
     val newPiece = piece("p5").copy(order = 999)
-    val patch    = ManifestPatch("add", Vector(AddPiece(Some(PieceId("p2")), newPiece)))
+    val patch = ManifestPatch("add", Vector(AddPiece(Some(PieceId("p2")), newPiece)))
     val Right(applied) = patch.applyTo(twoMerged): @unchecked
     assertEquals(applied.pieces.map(_.id.value), Vector("p1", "p2", "p5", "p3", "p4"))
     assertEquals(applied.pieces.map(_.order), Vector(1, 2, 3, 4, 5))
@@ -257,7 +262,8 @@ class ManifestPatchSuite extends munit.FunSuite:
     assertEquals(applied.pieces.map(_.order), Vector(1, 2, 3))
 
   test("ReorderPieces renumbers order to follow the new vector position"):
-    val patch = ManifestPatch("reorder",
+    val patch = ManifestPatch(
+      "reorder",
       Vector(ReorderPieces(Vector(PieceId("p1"), PieceId("p2"), PieceId("p4"), PieceId("p3"))))
     )
     val Right(applied) = patch.applyTo(twoMerged): @unchecked
@@ -265,9 +271,7 @@ class ManifestPatchSuite extends munit.FunSuite:
     assertEquals(applied.pieces.map(_.order), Vector(1, 2, 3, 4))
 
   test("EditPiece preserves vector position and order field"):
-    val patch = ManifestPatch("edit",
-      Vector(EditPiece(PieceId("p3"), Some("New title"), None, None, None))
-    )
+    val patch = ManifestPatch("edit", Vector(EditPiece(PieceId("p3"), Some("New title"), None, None, None)))
     val Right(applied) = patch.applyTo(twoMerged): @unchecked
     assertEquals(applied.pieces.map(_.order), Vector(1, 2, 3, 4))
     assertEquals(applied.pieces(2).title, "New title")
@@ -282,6 +286,6 @@ class ManifestPatchSuite extends munit.FunSuite:
         AddPiece(Some(PieceId("p2")), piece("p3"))
       )
     )
-    val json    = upickle.default.write(patch)
-    val parsed  = upickle.default.read[ManifestPatch](json)
+    val json = upickle.default.write(patch)
+    val parsed = upickle.default.read[ManifestPatch](json)
     assertEquals(parsed, patch)

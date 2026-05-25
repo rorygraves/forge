@@ -2,7 +2,7 @@ package io.forge.core
 
 class FeatureIdSluggerSuite extends munit.FunSuite:
 
-  import FeatureIdSlugger.{slugify, assignUnique, assign}
+  import FeatureIdSlugger.{assign, assignUnique, slugify}
 
   // §5.2 table — every documented example must round-trip exactly.
 
@@ -31,7 +31,7 @@ class FeatureIdSluggerSuite extends munit.FunSuite:
   test("oversize input truncates at the last hyphen within 40 chars"):
     // 47 chars; the last '-' at or before index 40 is at index 38.
     val title = "the-quick-brown-fox-jumps-over-the-lazy-dog-now"
-    val slug  = slugify(title)
+    val slug = slugify(title)
     assert(slug.value.length <= 40)
     assertEquals(slug.value, "the-quick-brown-fox-jumps-over-the-lazy")
 
@@ -42,17 +42,17 @@ class FeatureIdSluggerSuite extends munit.FunSuite:
   // §5.2 collision suffix
 
   test("assignUnique returns the base slug if no collision"):
-    val base  = FeatureId("hello")
+    val base = FeatureId("hello")
     val taken = Set.empty[String]
     assertEquals(assignUnique(base, id => taken(id.value)).value, "hello")
 
   test("assignUnique appends '-2' on first collision"):
-    val base  = FeatureId("hello")
+    val base = FeatureId("hello")
     val taken = Set("hello")
     assertEquals(assignUnique(base, id => taken(id.value)).value, "hello-2")
 
   test("assignUnique keeps incrementing until a free slot is found"):
-    val base  = FeatureId("hello")
+    val base = FeatureId("hello")
     val taken = Set("hello", "hello-2", "hello-3")
     assertEquals(assignUnique(base, id => taken(id.value)).value, "hello-4")
 

@@ -2,18 +2,19 @@ package io.forge.agents
 
 import io.forge.core.*
 
-/** §7.1 reviewer-method types. These are the schemas a reviewer connector
-  * binds against (`~/.forge/schemas/{design-review,code-review,refine}.json`).
-  * The Scala model is a mirror of those JSON schemas.
+/** §7.1 reviewer-method types. These are the schemas a reviewer connector binds against
+  * (`~/.forge/schemas/{design-review,code-review,refine}.json`). The Scala model is a mirror of those JSON schemas.
   *
-  * NOTE(slice-1): kept minimal until the actual schemas exist. */
+  * NOTE(slice-1): kept minimal until the actual schemas exist.
+  */
 
 enum ReviewVerdict:
   case Approve
   case RequestChanges
 
-/** Inline blocker from a code review (§10.2). `path = None` means the blocker
-  * belongs in the summary comment rather than as an inline thread. */
+/** Inline blocker from a code review (§10.2). `path = None` means the blocker belongs in the summary comment rather
+  * than as an inline thread.
+  */
 final case class ReviewBlocker(
     summary: String,
     path: Option[String],
@@ -68,8 +69,9 @@ final case class RefineInput(
     manifestJson: String
 )
 
-/** §14.3 refine result. `outcome = UpdatePlan` carries a patch the orchestrator
-  * later validates against the live manifest. */
+/** §14.3 refine result. `outcome = UpdatePlan` carries a patch the orchestrator later validates against the live
+  * manifest.
+  */
 final case class RefineResult(
     outcome: RefineOutcome,
     reason: String,

@@ -2,11 +2,11 @@ package io.forge.agents
 
 import io.forge.core.Question
 
-/** §7.1 — events emitted by a driver session's stdout. The orchestrator
-  * translates these into action-log entries (§19); the connector itself is
-  * actor-agnostic, so no `actor` field lives here.
+/** §7.1 — events emitted by a driver session's stdout. The orchestrator translates these into action-log entries (§19);
+  * the connector itself is actor-agnostic, so no `actor` field lives here.
   *
-  * Slice 1 will extend this enum as we observe what each CLI actually emits. */
+  * Slice 1 will extend this enum as we observe what each CLI actually emits.
+  */
 enum AgentEvent:
   /** First event of every session; carries the CLI-assigned session id. */
   case Init(sessionId: String)
@@ -23,8 +23,8 @@ enum AgentEvent:
   /** Native `AskUserQuestion` event (Claude). */
   case AskUserQuestion(question: Question)
 
-  /** §7.3 — driver halted with a structured question; the orchestrator must
-    * re-spawn after collecting an answer. */
+  /** §7.3 — driver halted with a structured question; the orchestrator must re-spawn after collecting an answer.
+    */
   case HaltWithQuestion(question: Question)
 
   /** Cost increment (§12). */

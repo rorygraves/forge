@@ -44,8 +44,8 @@ class ManifestSuite extends munit.FunSuite:
   // Codec round-trip ---
 
   test("Manifest deserialises the §5.1 fixture and round-trips back identically"):
-    val raw      = loadFixture()
-    val parsed   = Manifest.fromJson(raw)
+    val raw = loadFixture()
+    val parsed = Manifest.fromJson(raw)
     assertEquals(parsed.featureId.value, "stripe-webhook")
     assertEquals(parsed.mode, Mode.ClaudeDriver)
     assertEquals(parsed.designPr.map(_.value), Some(4290))
@@ -70,7 +70,7 @@ class ManifestSuite extends munit.FunSuite:
       mergedAt = Some(Instant.parse("2026-05-25T15:42:18.341Z")),
       attempts = 1
     )
-    val m       = emptyManifest.copy(pieces = Vector(merged))
+    val m = emptyManifest.copy(pieces = Vector(merged))
     val rendered = Manifest.toJson(m)
     assertEquals(Manifest.fromJson(rendered), m)
 
@@ -96,7 +96,9 @@ class ManifestSuite extends munit.FunSuite:
     val bad = basePending.copy(
       status = PieceStatus.Merged,
       baseSha = Some(Sha("abc1234")),
-      prNumber = None, mergeCommit = None, mergedAt = None
+      prNumber = None,
+      mergeCommit = None,
+      mergedAt = None
     )
     val errs = emptyManifest.copy(pieces = Vector(bad)).validate.swap.toOption.get
     assert(errs.exists(_.contains("requires prNumber")))
@@ -185,5 +187,5 @@ class ManifestSuite extends munit.FunSuite:
     )
     val p2 = basePending.copy(id = PieceId("p2"), order = 2)
     val p3 = basePending.copy(id = PieceId("p3"), order = 3)
-    val m  = emptyManifest.copy(pieces = Vector(merged, p2, p3))
+    val m = emptyManifest.copy(pieces = Vector(merged, p2, p3))
     assertEquals(m.nextPending.map(_.value), Some("p2"))
