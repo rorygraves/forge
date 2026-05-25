@@ -5,9 +5,11 @@ CLIs, breaks features into reviewable pieces, and shepherds each one
 through design → implement → PR → merge with cross-model review and
 human-in-the-loop.
 
-**Author:** Rory  •  **License:** MIT  •  **Status:** pre-implementation —
-Slice 0 (CLI capability validation) complete; Slice 1 (agent connectors)
-next.
+**Author:** Rory  •  **License:** MIT  •  **Status:** Slice 0 (CLI
+capability validation) complete; Slice 1 (agent connectors) in progress —
+`Role` indirection + Codex adapter helpers (price table, prompt prepend,
+sticky settings) landed; Claude/Codex connector skeletons, the
+`HaltWithQuestion` loop, and integration tests still to come.
 
 ## What Forge is for
 
@@ -84,7 +86,7 @@ silently support older ones:
 | Phase | Outcome | State |
 |---|---|---|
 | Slice 0 — CLI validation | Three v1.1 corrections folded in | ✅ complete |
-| Slice 1 — Agent connectors | `forge-agents` standalone with integration tests | next |
+| Slice 1 — Agent connectors | `forge-agents` standalone with integration tests | 🚧 in progress (Role + Codex helpers landed) |
 | Slices 2–4 | FSM → git → headless loop | scoped |
 | Slice 5 — TUI | termflow + Elm | scoped |
 | Phase 4 — Forge-instance pivot | Multi-repo, daemon, parallel, containerised | post-1.0, needs own design doc |

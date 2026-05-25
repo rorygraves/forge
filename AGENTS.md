@@ -19,7 +19,13 @@ PR to fix this file.
 
 - **Slice 0 (CLI validation) — complete.** Findings folded into design
   v1.1.
-- **Slice 1 (`forge-agents` — connectors) — next.**
+- **Slice 1 (`forge-agents` — connectors) — in progress.** Landed:
+  `Role` indirection seam, `PriceTable` + shipped `prices.example.json`,
+  `CodexPrompt` (system-prompt prepending, §7.10(a)),
+  `CodexSessionSettings` (sticky session-scoped flags, §7.10(c)). Still
+  to come: `ClaudeConnector` / `CodexConnector` skeletons,
+  `HaltWithQuestion` parsing + re-spawn loop, integration tests in
+  `forge-it`.
 - Slices 2–5 scoped in design §17.
 - Phase 4 (Forge-instance pivot: multi-repo, daemon, parallel,
   containerised) is post-v1 and needs its own design doc before any

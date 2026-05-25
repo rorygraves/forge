@@ -7,8 +7,12 @@ that first; everything below is Claude-Code-specific.
 
 - **Implementation contract:** [`docs/forge-design-1.1.md`](docs/forge-design-1.1.md).
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
-- **Current state:** Slice 0 complete; Slice 1 (`forge-agents`) is the
-  next deliverable.
+- **Current state:** Slice 0 complete; Slice 1 (`forge-agents`) in
+  progress. Landed: `Role` indirection, `PriceTable` (+
+  `prices.example.json`), `CodexPrompt` (system-prompt prepend),
+  `CodexSessionSettings` (sticky-settings value type). Still to come:
+  `ClaudeConnector` / `CodexConnector` skeletons, `HaltWithQuestion`
+  parsing + re-spawn loop, integration tests in `forge-it`.
 - **Two architectural seams to preserve in v1 work:** `ForgePaths`
   helper (no `.forge/...` literals outside it) and `Role` indirection
   (no `match m: Mode` outside `Mode` and connector construction). See

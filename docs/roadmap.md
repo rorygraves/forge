@@ -6,7 +6,8 @@
 > §17 of the design); later phases capture direction and have not yet been
 > turned into specs.
 >
-> **Status:** draft v0.1 — 2026-05-25. Refresh after each phase ships.
+> **Status:** draft v0.2 — 2026-05-25. Refreshed mid-Slice 1 to reflect
+> landed work; full refresh due when Slice 1 closes out.
 
 ## 0. How to read this
 
@@ -45,13 +46,20 @@ risks are integration-shaped.
 
 `forge-agents` standalone with CLI demo + integration tests.
 
-- `AgentSession`, `StreamingSession`, `Connector` traits per §7.1.
-- `ClaudeConnector` and `CodexConnector`, both `schemaMechanism = Native`.
-- `HaltWithQuestion` parsing + re-spawn loop for Codex.
-- Codex price-table (`~/.forge/prices.json`) + ship `prices.example.json`.
-- Codex system-prompt prepending (`## System` block).
-- Codex sticky-settings rule: any settings change spawns a fresh session.
-- Integration tests on real CLIs — see §17 slice 1 for the full list; the
+- [x] `AgentSession`, `StreamingSession`, `Connector` traits per §7.1.
+- [x] `Role` indirection seam (Phase 4/5 enabler — see §2.6 below).
+- [x] Codex price-table (`PriceTable` + `ModelPrice` + `CodexTokens`) and
+  shipped `prices.example.json` resource covering the current Codex
+  lineup (`gpt-5-codex`, `gpt-5.1-codex{,-max,-mini}`, `gpt-5.2-codex`,
+  `gpt-5.3-codex`, `codex-mini-latest`). Formula follows OpenAI's usage
+  shape (cached as subset of input, reasoning as subset of output).
+- [x] Codex system-prompt prepending (`CodexPrompt.withSystemBlock`,
+  §7.10(a)).
+- [x] Codex sticky-settings rule (`CodexSessionSettings` value type +
+  `isCompatibleForResume`, §7.10(c)).
+- [ ] `ClaudeConnector` and `CodexConnector`, both `schemaMechanism = Native`.
+- [ ] `HaltWithQuestion` parsing + re-spawn loop for Codex.
+- [ ] Integration tests on real CLIs — see §17 slice 1 for the full list; the
   ≥19/20 schema and HaltWithQuestion measurements happen here.
 
 ### 2.2 Slice 2 — FSM, Feature, ActionLog, StateCache (≈ week 2)
@@ -368,8 +376,9 @@ Phase 3+.
    pairings.
 2. **`.forge/state/` and `.forge/log/` location.** Committed audit/specs
    stay in-repo (correct, §4). Local state/log paths get routed through
-   a helper from Slice 4 onward so Phase 4 can re-root them at an
-   instance directory without touching every callsite.
+   a helper from Slice 2 onward (see §2.6 and design §17 Slice 2) so
+   Phase 4 can re-root them at an instance directory without touching
+   every callsite.
 
 ---
 
