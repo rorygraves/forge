@@ -1,0 +1,28 @@
+# sbt / Scala
+target/
+.bsp/
+.bloop/
+.metals/
+metals.sbt
+project/project/
+project/target/
+project/metals.sbt
+
+# IDE
+.idea/
+.idea_modules/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Forge runtime artefacts (per design 1.0 §4)
+.forge/log/
+.forge/state/
+
+# Local env
+*.local.conf
+.env
+.env.*
