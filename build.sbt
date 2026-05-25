@@ -4,6 +4,7 @@
 ThisBuild / scalaVersion := "3.5.2"
 ThisBuild / organization := "io.forge"
 ThisBuild / version      := "0.1.0-SNAPSHOT"
+ThisBuild / licenses     := Seq("MIT" -> url("https://opensource.org/licenses/MIT"))
 
 ThisBuild / scalacOptions ++= Seq(
   "-deprecation",
