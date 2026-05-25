@@ -68,8 +68,8 @@ class CodexConnectorSuite extends munit.FunSuite:
     val c = newConnector
     val r1 = c.runStreamingSpec(os.Path("/tmp/spec.md")).attempt.unsafeRunSync()
     val r2 = c.resumeStreamingSpec("abc").attempt.unsafeRunSync()
-    assert(r1.left.exists(_.getMessage.contains("multi-turn facade")), clue = r1)
-    assert(r2.left.exists(_.getMessage.contains("multi-turn facade")), clue = r2)
+    assert(r1.left.exists(_.getMessage.contains("requires an initial user message")), clue = r1)
+    assert(r2.left.exists(_.getMessage.contains("trait-level blocker")), clue = r2)
 
   test("reviewer methods are not yet implemented (Layer 5 follow-up)"):
     val c = newConnector

@@ -483,6 +483,8 @@ Mode is set at feature creation (`forge new --mode ...` or `config.mode`) and pe
 
 ### 7.1 `AgentSession`, `StreamingSession`, and `Connector` traits
 
+> **Reader pointer (added 2026-05-25, post-Slice 1).** Two corrections to this section's trait shape surfaced during slice-1 implementation and have been left out of 1.1 to keep this revision stable: (a) `runStreamingSpec` / `resumeStreamingSpec` need an initial user message — both pinned CLIs emit init only after one arrives; (b) the §7.2 `tool_result` answer path needs its own trait method, not `send(text)`. Until [`forge-design-1.2.md`] lands, the proposed delta + runtime evidence lives in [`docs/slice-1/slice-1-findings.md`](slice-1/slice-1-findings.md), and the two connectors stub `runStreamingSpec` / `resumeStreamingSpec` with `NotImplementedError` rather than ship against the stale shape.
+
 Every driver subprocess (streaming or headless) is wrapped in an `AgentSession`. Streaming sessions extend it with `send`.
 
 ```scala

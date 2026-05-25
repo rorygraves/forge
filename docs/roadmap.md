@@ -74,9 +74,36 @@ risks are integration-shaped.
   UserMessage mirror plumbing are already in place for that PR.
 - [~] `HaltWithQuestion` parsing + re-spawn loop for Codex. Envelope
   decoder landed (`HaltWithQuestion.detect` / `tryParse`); the
-  orchestrator-side re-spawn loop is the remaining piece.
-- [ ] Integration tests on real CLIs — see §17 slice 1 for the full list; the
-  ≥19/20 schema and HaltWithQuestion measurements happen here.
+  orchestrator-side re-spawn loop lands with slice 2 (FSM).
+- [~] Integration tests on real CLIs — Claude headless hello-world
+  smoke passes in `forge-it`. Remaining: §17 slice-1 full list
+  (resume round-trip with `oldSessionId == newSessionId`, kill
+  mid-stream, HaltWithQuestion reliability ≥19/20, reviewer ≥19/20
+  schema regression suites). Most of these depend on the reviewer
+  one-shots + the trait-extension PR landing first.
+
+**What unblocks slice-1 closure** (in dependency order):
+
+1. **`forge-design-1.2.md`** — extend the §7.1 trait to model two
+   findings 1.1 doesn't carry: an initial user message on
+   `runStreamingSpec` / `resumeStreamingSpec` (both pinned CLIs need
+   one before emitting init / thread_id), and an explicit
+   `answerQuestion(toolUseId, answer)` for the §7.2 tool_result
+   path. Proposed delta + runtime evidence is captured in
+   [`docs/slice-1/slice-1-findings.md`](slice-1/slice-1-findings.md);
+   when 1.2 lands it incorporates that delta as a complete
+   standalone spec per §23.
+2. **Layer 5 reviewer one-shots** — `reviewDesign`, `reviewPr`,
+   `refine` for both connectors. Independent of (1); could land in
+   parallel. Different lifecycle from streaming (spawn, wait,
+   parse single structured payload, exit), wrapped by
+   `RetryOnProcessFailure(reviewProcessRetries)`.
+3. **Re-enable streaming spec connectors** — once (1) lands, swap
+   the two `NotImplementedError` stubs in each connector for the
+   real spawn path. The wire-shape pieces (`-p`, JSON-frame
+   encoder, `UserMessage` mirror, stream-json argv) are already
+   in place and unit-tested.
+4. **Full §17 forge-it test list** — gated on (2) and (3).
 
 ### 2.2 Slice 2 — FSM, Feature, ActionLog, StateCache (≈ week 2)
 

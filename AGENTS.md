@@ -53,6 +53,7 @@ Where to look first when starting a task:
 | Why was X decided that way? | `docs/design-rationale.md` |
 | What's the phase plan beyond v1? | `docs/roadmap.md` |
 | What did Slice 0 actually find? | `docs/slice-0/slice-0-report.md` |
+| What did Slice 1 find that 1.1 doesn't carry? | `docs/slice-1/slice-1-findings.md` |
 
 ## Code conventions
 

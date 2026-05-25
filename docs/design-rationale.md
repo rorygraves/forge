@@ -217,6 +217,26 @@
 **Rejected:** "Resume driver design session" as prose without a method.
 **In v1.1:** §7.1, §6.1.
 
+### C11. Streaming-spec sessions need an initial user message at spawn time (slice-1 runtime finding)
+**Decision (pending in 1.2):** Extend `runStreamingSpec` / `resumeStreamingSpec` to take an initial user message alongside the system prompt path.
+**Why:** A slice-1 runtime probe against Claude CLI 2.1.150 (`-p --input-format stream-json --output-format stream-json --verbose --system-prompt-file <path>`) showed the CLI emits the `init` event **only after the first user-message JSON frame arrives on stdin**. Empty stdin → CLI exits silently with no events at all. Codex's `exec` model is the same: a positional prompt is required at spawn. The v1.1 trait's synchronous `sessionId: String` accessor + the `StreamingDriver.fromSubprocess` "block on Init, then return session" pattern can't be honored without an initial message — which the trait doesn't carry.
+**Rejected for v1:** (a) Priming the session internally with a sentinel like `"<INIT>"` to elicit init (pollutes conversation history; system prompt would have to know about it). (b) `sessionId: Option[String]` / `IO[String]` (drags through every caller; the synchronous shape is itself a contract). (c) Letting `runStreamingSpec` return a session whose `sessionId` is empty until first `send` (silently breaks `feature.designSessionId` recording in §11.1 step 2).
+**State today:** Both connectors stub `runStreamingSpec` / `resumeStreamingSpec` with `NotImplementedError` carrying the runtime evidence. The wire-shape pieces (`-p`, `encodeUserMessageJson`, `UserMessage` mirror, stream-json argv) are already in place pending the trait extension.
+**In v1.1:** §7.1 (current trait). Resolves in forge-design-1.2.
+
+### C12. `AskUserQuestion` → `tool_result` answer path needs an explicit trait method (slice-1 design gap)
+**Decision (pending in 1.2):** Add `answerQuestion(toolUseId, answer): IO[Unit]` to `StreamingSession`, or replace `send(input: String)` with a richer payload ADT (`UserMessage(text) | ToolResult(toolUseId, content)`).
+**Why:** §7.2 step 4 says the orchestrator "sends the answer back on stdin as the `tool_result`." That's a different JSON frame than a plain user message — it carries the outstanding `tool_use_id` from the `AskUserQuestion` event. The current `send(input: String)` is plain user-message only; passing a free-text answer this way would be interpreted by Claude as a new user message, not the awaited `tool_result`. The orchestrator would also need to track the pending `tool_use_id` to call this correctly.
+**Rejected for v1:** Letting `send` be the dual-purpose channel by sniffing the input (fragile and undocumented). Doing nothing (silently breaks the §7.2 Native question flow).
+**State today:** `StreamingSession`'s class-level docstring spells out both this gap and C11; the gap is documented but not yet implemented.
+**In v1.1:** §7.2 (protocol prose), no trait method. Resolves in forge-design-1.2.
+
+### C13. ChatCLI subprocess kill: SIGTERM → grace race → SIGKILL must be implemented as a wall-clock race, not a fixed sleep
+**Decision:** `Subprocess.kill(grace)` calls `process.destroy()` (SIGTERM), races `process.onExit()` against `IO.sleep(grace)`, and only escalates to `destroyForcibly()` if the sleep wins. Returns immediately once the process is fully exited.
+**Why:** Slice 0 measured ~100ms (Codex) and ~400ms (Claude) clean-exit times for SIGTERM. A naive `destroy(); IO.sleep(5s); if alive then destroyForcibly()` would always block 5s on every kill — that's the per-feature settle path × every fix-up cycle. Race-based escalation gives sub-second kill when the child is well-behaved, falls back at the configured grace when it's not.
+**Test sharpness:** The SIGKILL-path test had to be reworked twice — first to use a shell loop that doesn't get exec'd away by `/bin/sh` (so the trap stays effective), then to wait for a synchronization line on stdout before sending SIGTERM (so the test doesn't race the trap installation itself). Both adjustments are documented inline in `SubprocessSuite.scala`; the underlying behaviour is correct.
+**In v1.1:** §7.9 (kill semantics specified). Implementation in `forge-agents/Subprocess.scala`.
+
 ---
 
 ## CI policy
