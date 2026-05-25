@@ -60,19 +60,24 @@ is in.
   initial-input ordering, the encoded answer path, encoder failure
   propagation, and the default `encodeAnswer = None`
   → `NotImplementedError` behaviour. Spec: v1.2 §7.1. Done.
-- [ ] **A5.** Implement `ClaudeConnector.runStreamingSpec(systemPrompt,
+- [x] **A5.** Implement `ClaudeConnector.runStreamingSpec(systemPrompt,
   initialUserMessage)` / `resumeStreamingSpec(sessionId, message)`
   against `StreamingDriver` (passing `initialUserInput` and an
   `encodeAnswer` that requires `Some(toolUseId)` and raises an adapter
-  error on `None`). Add a public `encodeToolResultJson(toolUseId,
-  answer)` helper alongside `encodeUserMessageJson`. Replace the
-  Task-#5-sentinel test with fake-CLI round-trip tests:
-  - spawn → init → drain (with initial-message stdin write verified)
-  - resume → asserts `--resume <sid>` argv shape
+  error on `None`). Added public `encodeToolResultJson(toolUseId,
+  answer)` + `encodeAnswer` helpers alongside `encodeUserMessageJson`;
+  new `MissingToolUseId` adapter-error case in `AdapterError.scala`.
+  Replaced the Task-#5-sentinel tests (one in `ClaudeConnectorSuite`,
+  one in `ClaudeHeadlessSmokeSuite`) with fake-CLI round-trip tests:
+  - spawn → init → drain (initial-message stdin write verified by
+    echoing the encoded frame back as an `AssistantText` event)
+  - resume → asserts `--resume <sid>` argv shape and end-to-end
+    round-trip through the same fake-CLI machinery
   - answerQuestion(Some(id), text) writes the `tool_result` JSON frame
-  - answerQuestion(None, _) raises an adapter error (parser-regression
+    (verified by echo round-trip)
+  - answerQuestion(None, _) raises `MissingToolUseId` (parser-regression
     diagnostic)
-  Spec: v1.2 §7.1 / §7.2.
+  Spec: v1.2 §7.1 / §7.2. Done.
 - [ ] **A6.** Implement `CodexConnector.runStreamingSpec(systemPrompt,
   initialUserMessage)` / `resumeStreamingSpec(sessionId, message)` /
   `answerQuestion(toolUseId, answer)` as a multi-process facade over
@@ -190,6 +195,13 @@ after PR-E lands.
 
 - 2026-05-25 — design-2.1.md created. A1–A4 landed in this session
   (single working branch, not yet committed). Continuing with A5 next.
+- 2026-05-25 — A5 landed: `ClaudeConnector.runStreamingSpec` /
+  `resumeStreamingSpec` wired through `StreamingDriver`;
+  `encodeToolResultJson` / `encodeAnswer` helpers added; new
+  `MissingToolUseId` adapter error; sentinel tests replaced with
+  fake-CLI round-trips covering init, resume, `answerQuestion(Some)`,
+  and `answerQuestion(None)` paths. Next up: A6 (Codex multi-process
+  facade).
 
 ## 4. Cross-references
 

@@ -87,11 +87,3 @@ class ClaudeHeadlessSmokeSuite extends munit.FunSuite:
         assertEquals(success, true)
         assert(durationMs > 0, clue = durationMs)
       case other => fail(s"expected Result as last event, got $other")
-
-  test("Claude streaming spec is currently stubbed (pending Task #5 of the Slice 1 trait-shape PR)"):
-    // The v1.2 §7.1 trait signatures are in place (initialUserMessage on spawn, answerQuestion on the session);
-    // the spawn implementation lands with Task #5. Until then, runStreamingSpec raises so callers can't silently
-    // rely on a half-working session. This test fails as soon as Task #5 lands — that's the cue to remove it.
-    val connector = ClaudeConnector(binary = claudeOnPath.map(_.toString).getOrElse("claude"))
-    val r1 = connector.runStreamingSpec(os.Path("/tmp/x.md"), "hi").attempt.unsafeRunSync()
-    assert(r1.left.exists(_.getMessage.contains("Task #5")), clue = r1)

@@ -38,3 +38,12 @@ final case class StructuredOutputMissing(detail: String) extends RuntimeExceptio
   */
 final case class StructuredOutputMalformed(detail: String) extends RuntimeException with ReviewerError:
   def message: String = detail
+
+/** Adapter-level failure on the §7.2 `tool_result` reply path: `ClaudeConnector.answerQuestion` was invoked with
+  * `toolUseId = None` even though `QuestionMechanism = Native` requires `Some(id)` (v1.2 §7.1, design-rationale C12).
+  * Almost always means `ClaudeEventParser` failed to capture the originating `AskUserQuestion` event's `tool_use_id` —
+  * a parser regression rather than a transient process failure. Not retried; surfaces directly so the orchestrator can
+  * route it as `NeedsHumanIntervention` and the action log records what was missing.
+  */
+final case class MissingToolUseId(detail: String) extends RuntimeException:
+  override def getMessage: String = detail

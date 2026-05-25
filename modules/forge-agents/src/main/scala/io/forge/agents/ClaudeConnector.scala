@@ -10,10 +10,10 @@ import scala.concurrent.duration.*
 /** §7.1 Claude driver/reviewer adapter.
   *
   * v1 covers the **headless** driver methods (`runHeadlessImplementation`, `runFixup`) end-to-end via [[Subprocess]] +
-  * [[StreamingDriver]] + [[ClaudeEventParser]], and the **Layer 5 reviewer one-shots** (`reviewDesign` / `reviewPr` /
-  * `refine`) via the `--json-schema` Native schema mechanism (§7.4). The streaming methods (`runStreamingSpec`,
-  * `resumeStreamingSpec`) match the v1.2 §7.1 trait shape but remain stubbed pending Task #5 of the Slice 1 trait-shape
-  * PR.
+  * [[StreamingDriver]] + [[ClaudeEventParser]], the **streaming-spec driver methods** (`runStreamingSpec`,
+  * `resumeStreamingSpec`) via the same plumbing plus the v1.2 §7.1 initial-user-message + `answerQuestion`
+  * (`tool_result`) hooks, and the **Layer 5 reviewer one-shots** (`reviewDesign` / `reviewPr` / `refine`) via the
+  * `--json-schema` Native schema mechanism (§7.4).
   *
   * Flags pinned in Slice 0 (`docs/slice-0/slice-0-report.md` §2.1):
   *
@@ -47,24 +47,27 @@ final class ClaudeConnector(
 
   // --- driver methods ----
 
-  /** v1.2 §7.1 stub — Task #5 wires the real spawn path against the new trait signature. The pieces are already in
-    * place: `streamingSpecArgv` (with `-p`), `encodeUserMessageJson`, the StreamingDriver init synchroniser, and the
-    * `StreamingSession.answerQuestion` trait method.
+  /** v1.2 §7.1 — spawn a streaming-spec Claude session. The `initialUserMessage` is mandatory: with `-p --input-format
+    * stream-json --output-format stream-json --verbose` the CLI emits `init` only after the first user-message JSON
+    * frame arrives on stdin (verified empirically against Claude CLI 2.1.150), so the trait's synchronous `sessionId:
+    * String` accessor can only be honoured if the driver writes a frame at spawn. The returned session supports `send`
+    * (further user messages) and `answerQuestion` (§7.2 `tool_result` reply path).
     */
   def runStreamingSpec(systemPromptPath: os.Path, initialUserMessage: String): IO[StreamingSession] =
-    IO.raiseError(
-      NotImplementedError(
-        "ClaudeConnector.runStreamingSpec — implementation lands with Task #5 of the Slice 1 trait-shape PR."
-      )
-    )
+    spawnStreaming(
+      ClaudeConnector.streamingSpecArgv(binary, systemPromptPath),
+      initialUserMessage
+    ).widen
 
-  /** v1.2 §7.1 stub — same as [[runStreamingSpec]]; lands with Task #5. */
+  /** v1.2 §7.1 — resume a closed spec session by id. `--resume` argv carries the session id; the `message` is the user
+    * message that drives the resumed turn. Same init-after-first-message contract as [[runStreamingSpec]], so the
+    * message is mandatory. §6.1 invariant on the pinned CLI: the returned `sessionId` equals the input.
+    */
   def resumeStreamingSpec(sessionId: String, message: String): IO[StreamingSession] =
-    IO.raiseError(
-      NotImplementedError(
-        "ClaudeConnector.resumeStreamingSpec — implementation lands with Task #5 of the Slice 1 trait-shape PR."
-      )
-    )
+    spawnStreaming(
+      ClaudeConnector.resumeStreamingSpecArgv(binary, sessionId),
+      message
+    ).widen
 
   def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] =
     spawnHeadless(ClaudeConnector.headlessArgv(binary, prompt.systemPromptPath, prompt.body)).widen
@@ -113,6 +116,22 @@ final class ClaudeConnector(
       ClaudeEventParser.parse,
       initTimeout
     )
+
+  /** Streaming-spec / resume spawn helper. Wires the connector-specific encoders into
+    * [[StreamingDriver.fromSubprocess]] so the same driver shape carries the initial-user-message and `answerQuestion`
+    * paths transparently.
+    */
+  private def spawnStreaming(argv: List[String], initialUserMessage: String): IO[StreamingSession] =
+    StreamingDriver
+      .fromSubprocess(
+        Subprocess.spawn(argv, cwd = cwd, env = extraEnv),
+        ClaudeEventParser.parse,
+        initTimeout,
+        encodeUserInput = ClaudeConnector.encodeUserMessageJson,
+        initialUserInput = Some(initialUserMessage),
+        encodeAnswer = Some(ClaudeConnector.encodeAnswer)
+      )
+      .widen
 
   /** Shared reviewer-one-shot path. Reads the schema content from disk (Claude wants it inline as a flag argument),
     * spawns the CLI with `--output-format json` so stdout is a single envelope, collects exit + stdout, extracts the
@@ -239,6 +258,53 @@ object ClaudeConnector:
         "message" -> ujson.Obj("role" -> "user", "content" -> text)
       )
     )
+
+  /** Wire encoder for the §7.2 `tool_result` reply path. The frame is a `user` message whose content is a single
+    * `tool_result` block carrying the originating `tool_use_id`:
+    *
+    * {{{
+    *   {"type":"user","message":{"role":"user","content":[
+    *     {"type":"tool_result","tool_use_id":"<id>","content":"<text>"}
+    *   ]}}
+    * }}}
+    *
+    * Matches the Anthropic Messages API tool_result shape; that's what `--input-format stream-json` accepts. The CLI
+    * uses the id to re-attach the answer to the deferred `AskUserQuestion` tool use instead of treating it as a fresh
+    * user message (the failure mode if we routed through [[encodeUserMessageJson]] instead).
+    */
+  def encodeToolResultJson(toolUseId: String, answer: String): String =
+    ujson.write(
+      ujson.Obj(
+        "type" -> "user",
+        "message" -> ujson.Obj(
+          "role" -> "user",
+          "content" -> ujson.Arr(
+            ujson.Obj(
+              "type" -> "tool_result",
+              "tool_use_id" -> toolUseId,
+              "content" -> answer
+            )
+          )
+        )
+      )
+    )
+
+  /** `StreamingDriver.fromSubprocess` `encodeAnswer` hook. Requires `Some(toolUseId)` — Native Claude always carries an
+    * id on its `AskUserQuestion` events, so `None` means the parser dropped it (regression). Raises
+    * [[MissingToolUseId]] in that case rather than emitting a `tool_result` frame with an empty id, which the CLI would
+    * reject silently.
+    */
+  def encodeAnswer(toolUseId: Option[String], answer: String): IO[String] =
+    toolUseId match
+      case Some(id) => IO.pure(encodeToolResultJson(id, answer))
+      case None =>
+        IO.raiseError(
+          MissingToolUseId(
+            "ClaudeConnector.answerQuestion called with toolUseId=None; Native (QuestionMechanism = Native) " +
+              "always populates the id on AgentEvent.AskUserQuestion. None almost certainly means " +
+              "ClaudeEventParser dropped the tool_use block-level id — treat as a parser regression."
+          )
+        )
 
   // --- reviewer helpers (extracted for unit testing) ----
 

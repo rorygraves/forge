@@ -1,5 +1,6 @@
 package io.forge.agents
 
+import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import io.forge.core.{FeatureId, PieceId, QuestionMechanism, SchemaMechanism}
 import scala.concurrent.duration.*
@@ -90,14 +91,139 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     // Smoke: instantiation doesn't throw and identity holds.
     assertEquals(c.name, "claude")
 
-  test("runStreamingSpec / resumeStreamingSpec are stubbed pending Task #5 of the Slice 1 trait-shape PR"):
-    // Sentinel test — fails as soon as Task #5 lands so we don't forget to remove it. v1.2 §7.1 trait signatures are
-    // in place; the spawn paths are not yet wired up.
-    val c = ClaudeConnector()
-    val r1 = c.runStreamingSpec(os.Path("/tmp/spec.md"), "hi").attempt.unsafeRunSync()
-    val r2 = c.resumeStreamingSpec("abc", "next").attempt.unsafeRunSync()
-    assert(r1.left.exists(_.getMessage.contains("Task #5")), clue = r1)
-    assert(r2.left.exists(_.getMessage.contains("Task #5")), clue = r2)
+  test("encodeToolResultJson wraps the answer in the §7.2 tool_result wire shape"):
+    val frame = ClaudeConnector.encodeToolResultJson("toolu_01ABC", "yes please")
+    val parsed = ujson.read(frame)
+    assertEquals(parsed("type").str, "user")
+    assertEquals(parsed("message")("role").str, "user")
+    val content = parsed("message")("content").arr
+    assertEquals(content.length, 1)
+    assertEquals(content(0)("type").str, "tool_result")
+    assertEquals(content(0)("tool_use_id").str, "toolu_01ABC")
+    assertEquals(content(0)("content").str, "yes please")
+    // No raw newlines — `sendLine` is responsible for framing.
+    assert(!frame.contains("\n"), clue = frame)
+
+  test("encodeAnswer: Some(id) → tool_result JSON; None → MissingToolUseId adapter error"):
+    val ok = ClaudeConnector.encodeAnswer(Some("toolu_42"), "answer").unsafeRunSync()
+    assertEquals(ok, ClaudeConnector.encodeToolResultJson("toolu_42", "answer"))
+    val bad = ClaudeConnector.encodeAnswer(None, "answer").attempt.unsafeRunSync()
+    assert(bad.left.exists(_.isInstanceOf[MissingToolUseId]), clue = bad)
+    assert(bad.left.exists(_.getMessage.contains("toolUseId=None")), clue = bad)
+
+  /** Build a fake `claude` shell script that reads ONE JSON frame on stdin, then drives a transcript through stdout
+    * (init → echo body → result). Used to verify the full streaming pipeline: argv → spawn → initial-message stdin
+    * write → init → drain.
+    */
+  private def fakeStreamingClaude(sessionId: String): os.Path =
+    val script =
+      s"""#!/bin/sh
+         |IFS= read -r line
+         |# Echo init keyed on the supplied session id.
+         |echo '{"type":"system","subtype":"init","session_id":"$sessionId"}'
+         |# Echo the received frame verbatim — lets the test assert the wire shape that reached stdin.
+         |# Wrap as an assistant text event so the parser surfaces it.
+         |body=$$(printf '%s' "$$line" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+         |echo "{\\"type\\":\\"assistant\\",\\"message\\":{\\"content\\":[{\\"type\\":\\"text\\",\\"text\\":\\"$$body\\"}],\\"usage\\":{\\"output_tokens\\":1}}}"
+         |echo '{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"session_id":"'"$sessionId"'"}'
+         |""".stripMargin
+    val f = os.temp(contents = script, prefix = "fake-claude-stream-", suffix = ".sh", deleteOnExit = true)
+    os.perms.set(f, "rwx------")
+    f
+
+  test("runStreamingSpec: spawns the CLI, writes the initial user message frame, drains init + body + result"):
+    val sid = "sid-stream-1"
+    val fake = fakeStreamingClaude(sid)
+    val systemPrompt = os.temp(contents = "be helpful", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val connector = ClaudeConnector(binary = fake.toString)
+    val (returnedSid, events) = connector
+      .runStreamingSpec(systemPrompt, "hello there")
+      .flatMap: session =>
+        for
+          drained <- session.events.compile.toVector
+          _ <- session.close()
+        yield (session.sessionId, drained)
+      .unsafeRunSync()
+    assertEquals(returnedSid, sid)
+    assertEquals(events.headOption, Some(AgentEvent.Init(sid)))
+    assert(events.exists(_.isInstanceOf[AgentEvent.Result]), clue = events)
+    // The fake CLI echoes back the encoded frame as an AssistantText. Assert that the wire shape that reached stdin is
+    // the §7.1 stream-json user-message frame (not raw text).
+    val echoed = events.collectFirst { case AgentEvent.AssistantText(t, _) => t }
+    val expectedFrame = ClaudeConnector.encodeUserMessageJson("hello there")
+    assertEquals(echoed, Some(expectedFrame))
+    // Mirror UserMessage event lands after Init.
+    assert(events.contains(AgentEvent.UserMessage("hello there")), clue = events)
+
+  test("resumeStreamingSpec: same pipeline, argv carries --resume <sid>, initial message still required"):
+    // Smoke-test the argv shape on its own (already covered exhaustively above) — the round-trip via the fake CLI
+    // doesn't exercise argv parsing, only the stdin frame contract. Catches future regressions where the resume path
+    // silently drops --resume.
+    val argv = ClaudeConnector.resumeStreamingSpecArgv("claude", "abc-123")
+    assert(argv.containsSlice(List("--resume", "abc-123")), clue = argv)
+    // Functional round-trip through the same fake CLI machinery.
+    val sid = "sid-resume-1"
+    val fake = fakeStreamingClaude(sid)
+    val connector = ClaudeConnector(binary = fake.toString)
+    val (returnedSid, events) = connector
+      .resumeStreamingSpec(sid, "next turn please")
+      .flatMap: session =>
+        for
+          drained <- session.events.compile.toVector
+          _ <- session.close()
+        yield (session.sessionId, drained)
+      .unsafeRunSync()
+    assertEquals(returnedSid, sid)
+    val echoed = events.collectFirst { case AgentEvent.AssistantText(t, _) => t }
+    assertEquals(echoed, Some(ClaudeConnector.encodeUserMessageJson("next turn please")))
+
+  test("answerQuestion(Some(id), text): writes the tool_result JSON frame on stdin"):
+    // Fake CLI that emits init then echoes each subsequent stdin line as an assistant text — lets us read back what
+    // answerQuestion actually wrote.
+    val script =
+      """|#!/bin/sh
+         |IFS= read -r initial
+         |echo '{"type":"system","subtype":"init","session_id":"sid-q"}'
+         |# drop the initial frame; just keep streaming subsequent stdin lines back.
+         |while IFS= read -r line; do
+         |  body=$(printf '%s' "$line" | sed 's/\\/\\\\/g; s/"/\\"/g')
+         |  echo "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"$body\"}],\"usage\":{\"output_tokens\":1}}}"
+         |done""".stripMargin
+    val fake = os.temp(contents = script, prefix = "fake-claude-q-", suffix = ".sh", deleteOnExit = true)
+    os.perms.set(fake, "rwx------")
+    val systemPrompt = os.temp(contents = "x", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val connector = ClaudeConnector(binary = fake.toString)
+    val events = connector
+      .runStreamingSpec(systemPrompt, "hi")
+      .flatMap: session =>
+        for
+          _ <- session.answerQuestion(Some("toolu_99"), "yes")
+          _ <- IO.sleep(150.millis) // let the echo land before we drain
+          _ <- session.close()
+          drained <- session.events.compile.toVector
+        yield drained
+      .unsafeRunSync()
+    // The echo we want to find is the encoded tool_result frame.
+    val expectedFrame = ClaudeConnector.encodeToolResultJson("toolu_99", "yes")
+    val texts = events.collect { case AgentEvent.AssistantText(t, _) => t }
+    assert(texts.contains(expectedFrame), clue = (expectedFrame, texts))
+    // Mirror event for the answer uses the [answer] prefix (driver convention).
+    assert(
+      events.exists { case AgentEvent.UserMessage(s) => s.startsWith("[answer] yes"); case _ => false },
+      clue = events
+    )
+
+  test("answerQuestion(None, _): raises MissingToolUseId (parser-regression diagnostic), no stdin write"):
+    val fake = fakeStreamingClaude("sid-none")
+    val systemPrompt = os.temp(contents = "x", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val connector = ClaudeConnector(binary = fake.toString)
+    val result = connector
+      .runStreamingSpec(systemPrompt, "hi")
+      .flatMap: session =>
+        session.answerQuestion(None, "answer").attempt.flatTap(_ => session.kill())
+      .unsafeRunSync()
+    assert(result.left.exists(_.isInstanceOf[MissingToolUseId]), clue = result)
+    assert(result.left.exists(_.getMessage.contains("toolUseId=None")), clue = result)
 
   test("reviewer methods raise ReviewerNotConfigured (non-retryable) when no ReviewerAssets are configured"):
     val c = ClaudeConnector()
