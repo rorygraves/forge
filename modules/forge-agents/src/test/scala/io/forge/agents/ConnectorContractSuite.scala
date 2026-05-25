@@ -24,9 +24,12 @@ class ConnectorContractSuite extends munit.FunSuite:
       def close(): IO[Unit] = IO.unit
       def kill(): IO[Unit] = IO.unit
       def send(input: String): IO[Unit] = IO.unit
+      def answerQuestion(toolUseId: Option[String], answer: String): IO[Unit] = IO.unit
 
-    def runStreamingSpec(systemPromptPath: os.Path): IO[StreamingSession] = IO.pure(NoopSession)
-    def resumeStreamingSpec(sessionId: String): IO[StreamingSession] = IO.pure(NoopSession)
+    def runStreamingSpec(systemPromptPath: os.Path, initialUserMessage: String): IO[StreamingSession] =
+      IO.pure(NoopSession)
+    def resumeStreamingSpec(sessionId: String, message: String): IO[StreamingSession] =
+      IO.pure(NoopSession)
     def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] = IO.pure(NoopSession)
     def runFixup(prompt: FixupPrompt): IO[AgentSession] = IO.pure(NoopSession)
     def reviewDesign(input: DesignReviewInput): IO[DesignReview] = notImplemented
@@ -43,7 +46,7 @@ class ConnectorContractSuite extends munit.FunSuite:
     assertEquals(c.schemaMechanism, SchemaMechanism.SchemaFallback)
 
   test("StreamingSession extends AgentSession"):
-    val s: AgentSession = NoopConnector.runStreamingSpec(os.root / "tmp" / "fake").unsafeRunSync()
+    val s: AgentSession = NoopConnector.runStreamingSpec(os.root / "tmp" / "fake", "hello").unsafeRunSync()
     assertEquals(s.sessionId, "noop-session")
     s.close().unsafeRunSync()
 

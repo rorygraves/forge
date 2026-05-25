@@ -63,22 +63,38 @@ object StreamingDriver:
     *   driver doesn't know the wire shape: Claude with `--input-format stream-json` expects each line to be a JSON
     *   frame like `{"type":"user","message":{"role":"user","content":"..."}}`; a plain-text CLI would want identity.
     *   Default is identity — fine for tests and for connectors that genuinely speak raw lines.
+    * @param initialUserInput
+    *   v1.2 §7.1: if present, written to stdin (after `encodeUserInput`) immediately after the parse fibers start, so
+    *   the CLI can produce its init event. Both pinned streaming-spec CLIs require this — Claude (`-p --input-format
+    *   stream-json`) emits init only after the first JSON frame; Codex's `exec` model takes its prompt positionally
+    *   anyway, so streaming Codex won't use this parameter. Default `None` — fine for headless one-shots where the
+    *   prompt is on argv.
+    * @param encodeAnswer
+    *   v1.2 §7.1 `StreamingSession.answerQuestion` encoder. `Some(encode)` means the driver supports the §7.2
+    *   `tool_result` path: each `answerQuestion(toolUseId, answer)` call runs the encoder to produce the wire frame,
+    *   then writes it on stdin. The encoder returns `IO[String]` so it can `IO.raiseError(adapterError)` for invalid
+    *   inputs (e.g. Claude requires `Some(toolUseId)`; `None` is a parser regression). `None` means the driver was not
+    *   built for streaming Q&A — calling `answerQuestion` on the returned session raises `NotImplementedError`.
     */
   def fromSubprocess(
       subprocess: Resource[IO, Subprocess],
       parseLine: String => Either[String, Vector[AgentEvent]],
       initTimeout: FiniteDuration = 30.seconds,
-      encodeUserInput: String => String = identity
+      encodeUserInput: String => String = identity,
+      initialUserInput: Option[String] = None,
+      encodeAnswer: Option[(Option[String], String) => IO[String]] = None
   ): IO[StreamingSessionWithDiagnostics] =
     subprocess.allocated.flatMap: (sp, release) =>
-      buildSession(sp, release, parseLine, initTimeout, encodeUserInput)
+      buildSession(sp, release, parseLine, initTimeout, encodeUserInput, initialUserInput, encodeAnswer)
 
   private def buildSession(
       sp: Subprocess,
       release: IO[Unit],
       parseLine: String => Either[String, Vector[AgentEvent]],
       initTimeout: FiniteDuration,
-      encodeUserInput: String => String
+      encodeUserInput: String => String,
+      initialUserInput: Option[String],
+      encodeAnswer: Option[(Option[String], String) => IO[String]]
   ): IO[StreamingSessionWithDiagnostics] =
     for
       initDef <- Deferred[IO, Either[Error, String]]
@@ -89,6 +105,10 @@ object StreamingDriver:
       stderrPipeline = sp.stderr.evalMap(stderrSink).compile.drain
       parseFiber <- parsePipeline.compile.drain.start
       stderrFiber <- stderrPipeline.start
+      // Write the initial user input (if any) BEFORE blocking on Init: both pinned streaming-spec CLIs need a user
+      // message before they'll emit it. The mirror UserMessage event is pushed *after* Init arrives so the events
+      // stream's first element stays Init (channel-order contract).
+      _ <- initialUserInput.traverse_(input => sp.sendLine(encodeUserInput(input)))
       initResult <-
         initDef.get.timeoutTo(
           initTimeout,
@@ -102,6 +122,8 @@ object StreamingDriver:
             stderrFiber.cancel.attempt.void *>
             release.attempt.void *>
             IO.raiseError(RuntimeException(err.message))
+      // Mirror the initial input as a UserMessage so the action log captures it ordering-wise after Init.
+      _ <- initialUserInput.traverse_(input => eventChan.send(AgentEvent.UserMessage(summary = input.take(200))).void)
     yield new StreamingSessionWithDiagnostics:
       val sessionId: String = sid
       def events: Stream[IO, AgentEvent] = eventChan.stream
@@ -110,15 +132,36 @@ object StreamingDriver:
         * writing to stdin, so the action log captures every prompt in order (UserMessage → AssistantText/ToolUse →
         * Result). The `encodeUserInput` callback transforms the payload into the wire shape the CLI expects (Claude's
         * stream-json JSON frame, raw line for simpler CLIs).
-        *
-        * NOTE: this is the *normal user-message* path. The §7.2 `AskUserQuestion` → `tool_result` answer path is NOT
-        * yet wired here — sending a free-text answer via `send` will be interpreted by Claude as a new user message,
-        * not as the awaited tool_result. The orchestrator layer that does Q&A needs to track the outstanding
-        * `tool_use_id` and send a different JSON frame; that lives in the slice-1 follow-up.
         */
       def send(input: String): IO[Unit] =
         eventChan.send(AgentEvent.UserMessage(summary = input.take(200))).void *>
           sp.sendLine(encodeUserInput(input))
+
+      /** v1.2 §7.1 — Native `tool_result` reply path. Behaviour:
+        *
+        *   - With `encodeAnswer = Some(encode)`: runs the encoder to produce the wire frame (which may raise an adapter
+        *     error — e.g. Claude needs `Some(toolUseId)` and rejects `None`), pushes a mirror `UserMessage` summarising
+        *     the answer, and writes the frame on stdin.
+        *   - With `encodeAnswer = None`: raises `NotImplementedError` — this driver wasn't built for streaming Q&A.
+        *     Headless implementations and `send`-only adapters land here.
+        */
+      def answerQuestion(toolUseId: Option[String], answer: String): IO[Unit] =
+        encodeAnswer match
+          case None =>
+            IO.raiseError(
+              NotImplementedError(
+                "StreamingDriver.answerQuestion — this session was constructed without an encodeAnswer hook " +
+                  "(headless / send-only). The connector must pass one to support the §7.2 tool_result path."
+              )
+            )
+          case Some(encode) =>
+            for
+              wire <- encode(toolUseId, answer)
+              // Mirror the answer with an [answer] prefix so the action log can tell it apart from plain `send`
+              // calls when replaying the events stream without per-call context.
+              _ <- eventChan.send(AgentEvent.UserMessage(summary = s"[answer] ${answer.take(190)}")).void
+              _ <- sp.sendLine(wire)
+            yield ()
       def stderrSnapshot: IO[Vector[String]] = stderrBuf.get
       def exitValue: IO[Int] = sp.waitFor
       def close(): IO[Unit] =

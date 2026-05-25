@@ -20,12 +20,13 @@ enum AgentEvent:
   /** A tool call (Read/Write/Edit/Bash/...). */
   case ToolUse(tool: String, summary: String)
 
-  /** Native `AskUserQuestion` event (Claude). */
-  case AskUserQuestion(question: Question)
-
-  /** §7.3 — driver halted with a structured question; the orchestrator must re-spawn after collecting an answer.
+  /** Driver question — mechanism-agnostic per v1.2 §7.1. `toolUseId` is `Some(id)` for Native (Claude's
+    * `AskUserQuestion` tool use; the orchestrator routes the answer back as a `tool_result` carrying that id), `None`
+    * for `HaltWithQuestion` (the question came from a final-output JSON envelope, §7.3 — there is no wire-level tool
+    * use to reference, and `CodexConnector.answerQuestion` ignores the field and re-spawns the driver with the answer
+    * in the prompt body).
     */
-  case HaltWithQuestion(question: Question)
+  case AskUserQuestion(question: Question, toolUseId: Option[String])
 
   /** Cost increment (§12). */
   case CostUpdate(cost: Cost)

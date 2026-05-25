@@ -47,18 +47,21 @@ class CodexEventParserSuite extends munit.FunSuite:
       case Vector(AgentEvent.AssistantText(t, _)) => assertEquals(t, "hello")
       case other => fail(s"expected AssistantText, got $other")
 
-  test("item.completed agent_message whose text is a halt envelope → HaltWithQuestion"):
+  test("item.completed agent_message whose text is a halt envelope → AskUserQuestion(_, None)"):
+    // v1.2 §7.1: Codex's HaltWithQuestion path emits the same AgentEvent.AskUserQuestion as Claude's Native path,
+    // distinguished only by `toolUseId = None` (no wire-level tool use exists for the §7.3 envelope).
     val envelope =
       """{\"status\":\"needs_human\",\"question\":\"q?\",\"options\":[\"A\",\"B\"],\"allowFreeText\":true,\"severity\":\"blocking\"}"""
     val line =
       s"""{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"$envelope"}}"""
     parse(parser, line) match
-      case Vector(AgentEvent.HaltWithQuestion(q)) =>
+      case Vector(AgentEvent.AskUserQuestion(q, toolUseId)) =>
         assertEquals(q.text, "q?")
         assertEquals(q.options, Vector("A", "B"))
         assertEquals(q.allowFreeText, true)
         assertEquals(q.severity, QuestionSeverity.Blocking)
-      case other => fail(s"expected HaltWithQuestion, got $other")
+        assertEquals(toolUseId, None)
+      case other => fail(s"expected AskUserQuestion(_, None), got $other")
 
   test("item.completed of unrecognised item type is skipped"):
     val line =

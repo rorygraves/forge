@@ -90,18 +90,14 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     // Smoke: instantiation doesn't throw and identity holds.
     assertEquals(c.name, "claude")
 
-  test("runStreamingSpec / resumeStreamingSpec raise NotImplementedError with a clear message"):
+  test("runStreamingSpec / resumeStreamingSpec are stubbed pending Task #5 of the Slice 1 trait-shape PR"):
+    // Sentinel test — fails as soon as Task #5 lands so we don't forget to remove it. v1.2 §7.1 trait signatures are
+    // in place; the spawn paths are not yet wired up.
     val c = ClaudeConnector()
-    val r1 = c.runStreamingSpec(os.Path("/tmp/spec.md")).attempt.unsafeRunSync()
-    val r2 = c.resumeStreamingSpec("abc").attempt.unsafeRunSync()
-    assert(
-      r1.left.exists(_.getMessage.contains("emits init only after the first")),
-      clue = r1
-    )
-    assert(
-      r2.left.exists(_.getMessage.contains("trait-level blocker")),
-      clue = r2
-    )
+    val r1 = c.runStreamingSpec(os.Path("/tmp/spec.md"), "hi").attempt.unsafeRunSync()
+    val r2 = c.resumeStreamingSpec("abc", "next").attempt.unsafeRunSync()
+    assert(r1.left.exists(_.getMessage.contains("Task #5")), clue = r1)
+    assert(r2.left.exists(_.getMessage.contains("Task #5")), clue = r2)
 
   test("reviewer methods raise ReviewerNotConfigured (non-retryable) when no ReviewerAssets are configured"):
     val c = ClaudeConnector()

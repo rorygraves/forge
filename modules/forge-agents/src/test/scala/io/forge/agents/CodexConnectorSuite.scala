@@ -64,12 +64,12 @@ class CodexConnectorSuite extends munit.FunSuite:
     Seq("--sandbox", "--output-schema", "--add-dir", "--ask-for-approval", "-C").foreach: flag =>
       assert(!argv.contains(flag), clue = s"$flag should not appear in resume argv: $argv")
 
-  test("runStreamingSpec / resumeStreamingSpec raise NotImplementedError with a clear message"):
+  test("runStreamingSpec / resumeStreamingSpec are stubbed pending Task #6 of the Slice 1 trait-shape PR"):
     val c = newConnector
-    val r1 = c.runStreamingSpec(os.Path("/tmp/spec.md")).attempt.unsafeRunSync()
-    val r2 = c.resumeStreamingSpec("abc").attempt.unsafeRunSync()
-    assert(r1.left.exists(_.getMessage.contains("requires an initial user message")), clue = r1)
-    assert(r2.left.exists(_.getMessage.contains("trait-level blocker")), clue = r2)
+    val r1 = c.runStreamingSpec(os.Path("/tmp/spec.md"), "hi").attempt.unsafeRunSync()
+    val r2 = c.resumeStreamingSpec("abc", "next").attempt.unsafeRunSync()
+    assert(r1.left.exists(_.getMessage.contains("Task #6")), clue = r1)
+    assert(r2.left.exists(_.getMessage.contains("Task #6")), clue = r2)
 
   test("reviewer methods raise ReviewerNotConfigured (non-retryable) when no ReviewerAssets are configured"):
     val c = newConnector

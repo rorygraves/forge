@@ -166,3 +166,102 @@ class StreamingDriverSuite extends munit.FunSuite:
     }
     assert(helloUserIdx >= 0 && helloEchoIdx >= 0, clue = events)
     assert(helloUserIdx < helloEchoIdx, clue = (helloUserIdx, helloEchoIdx, events))
+
+  test("initialUserInput: written to stdin before Init; mirrored as UserMessage AFTER Init in the event stream"):
+    assume(os.exists(os.Path("/bin/sh")))
+    // Fake CLI that reads ONE line from stdin, then emits Init, then echoes the line as an assistant text, then a
+    // result. Models the Claude `-p --input-format stream-json` contract: init only after the first user-message
+    // frame arrives.
+    val script =
+      """|IFS= read -r line
+         |echo '{"type":"system","subtype":"init","session_id":"sid-init"}'
+         |echo "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"got: $line\"}]}}"
+         |echo '{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"session_id":"sid-init"}'""".stripMargin
+    val sp = Subprocess.spawn(List("/bin/sh", "-c", script))
+    val program = StreamingDriver
+      .fromSubprocess(
+        sp,
+        ClaudeEventParser.parse,
+        encodeUserInput = t => s"<<$t>>",
+        initialUserInput = Some("hi-there")
+      )
+      .flatMap: session =>
+        for
+          events <- session.events.compile.toVector
+          _ <- session.close()
+        yield (session.sessionId, events)
+    val (sid, events) = program.unsafeRunSync()
+    assertEquals(sid, "sid-init")
+    // Init is first in the stream — channel-order contract preserved even though initial input was written first to
+    // stdin.
+    assertEquals(events.headOption, Some(AgentEvent.Init("sid-init")))
+    // Mirror UserMessage for the initial input appears after Init.
+    val userIdx = events.indexOf(AgentEvent.UserMessage("hi-there"))
+    assert(userIdx > 0, clue = events)
+    // The fake CLI saw the *encoded* form on stdin (so it actually went through encodeUserInput, not raw).
+    assert(
+      events.exists { case AgentEvent.AssistantText(t, _) => t == "got: <<hi-there>>"; case _ => false },
+      clue = events
+    )
+
+  test("answerQuestion: when encodeAnswer is Some, encoded frame is written and a mirror UserMessage [answer] lands"):
+    assume(os.exists(os.Path("/bin/sh")))
+    val script =
+      """|echo '{"type":"system","subtype":"init","session_id":"sid-q"}'
+         |while IFS= read -r line; do
+         |  echo "$line"
+         |done""".stripMargin
+    val sp = Subprocess.spawn(List("/bin/sh", "-c", script))
+    val recorder: String => Either[String, Vector[AgentEvent]] = line =>
+      ClaudeEventParser.parse(line) match
+        case r @ Right(events) if events.nonEmpty => r
+        case _ => Right(Vector(AgentEvent.AssistantText(line, 0)))
+    // Encoder that requires Some(id): returns a fake `tool_result` frame on Some, errors on None — modelling the
+    // Claude contract from §7.1.
+    val encode: (Option[String], String) => IO[String] = {
+      case (Some(id), ans) => IO.pure(s"TR[$id]=$ans")
+      case (None, _) => IO.raiseError(RuntimeException("answerQuestion called with None toolUseId on Claude path"))
+    }
+    val program = StreamingDriver
+      .fromSubprocess(sp, recorder, encodeAnswer = Some(encode))
+      .flatMap: session =>
+        for
+          _ <- session.answerQuestion(Some("toolu_42"), "yes please")
+          _ <- session.close()
+          events <- session.events.compile.toVector
+        yield events
+    val events = program.unsafeRunSync()
+    // Mirror event with the [answer] prefix.
+    val answerMirror = events.collectFirst { case AgentEvent.UserMessage(s) if s.startsWith("[answer]") => s }
+    assertEquals(answerMirror, Some("[answer] yes please"))
+    // Encoded frame was echoed back by the fake CLI.
+    assert(
+      events.exists { case AgentEvent.AssistantText(t, _) => t == "TR[toolu_42]=yes please"; case _ => false },
+      clue = events
+    )
+
+  test("answerQuestion: encoder failure surfaces as the IO error (no mirror, no stdin write)"):
+    assume(os.exists(os.Path("/bin/sh")))
+    val script =
+      """|echo '{"type":"system","subtype":"init","session_id":"sid-q"}'
+         |sleep 1""".stripMargin
+    val sp = Subprocess.spawn(List("/bin/sh", "-c", script))
+    val encode: (Option[String], String) => IO[String] = (_, _) => IO.raiseError(RuntimeException("encoder rejected"))
+    val program = StreamingDriver
+      .fromSubprocess(sp, ClaudeEventParser.parse, encodeAnswer = Some(encode))
+      .flatMap: session =>
+        session.answerQuestion(None, "shouldnt matter").attempt.flatTap(_ => session.kill())
+    val result = program.unsafeRunSync()
+    assert(result.left.exists(_.getMessage.contains("encoder rejected")), clue = result)
+
+  test("answerQuestion: with encodeAnswer=None (default) raises NotImplementedError"):
+    assume(os.exists(os.Path("/bin/sh")))
+    val script = """echo '{"type":"system","subtype":"init","session_id":"sid-x"}' && sleep 1"""
+    val sp = Subprocess.spawn(List("/bin/sh", "-c", script))
+    val program = StreamingDriver
+      .fromSubprocess(sp, ClaudeEventParser.parse)
+      .flatMap: session =>
+        session.answerQuestion(Some("toolu_1"), "ans").attempt.flatTap(_ => session.kill())
+    val result = program.unsafeRunSync()
+    assert(result.left.exists(_.isInstanceOf[NotImplementedError]), clue = result)
+    assert(result.left.exists(_.getMessage.contains("encodeAnswer hook")), clue = result)

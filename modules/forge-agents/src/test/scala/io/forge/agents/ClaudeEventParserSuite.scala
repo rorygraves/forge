@@ -70,10 +70,10 @@ class ClaudeEventParserSuite extends munit.FunSuite:
         assert(summary.contains("/tmp/foo.scala"), clue = summary)
       case other => fail(s"expected single ToolUse, got $other")
 
-  test("AskUserQuestion tool_use maps to AgentEvent.AskUserQuestion"):
+  test("AskUserQuestion tool_use maps to AgentEvent.AskUserQuestion with Some(toolUseId)"):
     val line =
       """{"type":"assistant","message":{"content":[
-        |  {"type":"tool_use","name":"AskUserQuestion","input":{
+        |  {"type":"tool_use","id":"toolu_01ABC","name":"AskUserQuestion","input":{
         |    "questions":[{
         |      "question":"Which database?",
         |      "options":[
@@ -85,17 +85,31 @@ class ClaudeEventParserSuite extends munit.FunSuite:
         |  }}
         |]},"session_id":"s"}""".stripMargin
     parse(line) match
-      case Vector(AgentEvent.AskUserQuestion(q)) =>
+      case Vector(AgentEvent.AskUserQuestion(q, toolUseId)) =>
         assertEquals(q.text, "Which database?")
         assertEquals(q.options, Vector("Postgres", "Redis"))
         assertEquals(q.allowFreeText, true)
         assertEquals(q.severity, QuestionSeverity.Clarifying)
+        // Native always carries an id — captured from the tool_use block for the §7.2 tool_result reply path.
+        assertEquals(toolUseId, Some("toolu_01ABC"))
       case other => fail(s"expected single AskUserQuestion, got $other")
 
   test("AskUserQuestion with malformed input is dropped (not raised)"):
     val line =
       """{"type":"assistant","message":{"content":[
-        |  {"type":"tool_use","name":"AskUserQuestion","input":{}}
+        |  {"type":"tool_use","id":"toolu_01XYZ","name":"AskUserQuestion","input":{}}
+        |]},"session_id":"s"}""".stripMargin
+    assertEquals(parse(line), Vector.empty)
+
+  test("AskUserQuestion missing the block-level `id` is dropped (would mis-route as HaltWithQuestion path)"):
+    // Defensive: a Native AskUserQuestion event MUST have a tool_use id. Emitting AskUserQuestion(_, None) would
+    // look like the HaltWithQuestion path to the orchestrator and silently route the answer through the wrong
+    // mechanism. Drop instead.
+    val line =
+      """{"type":"assistant","message":{"content":[
+        |  {"type":"tool_use","name":"AskUserQuestion","input":{
+        |    "questions":[{"question":"q?","options":[],"header":"x","multiSelect":false}]
+        |  }}
         |]},"session_id":"s"}""".stripMargin
     assertEquals(parse(line), Vector.empty)
 

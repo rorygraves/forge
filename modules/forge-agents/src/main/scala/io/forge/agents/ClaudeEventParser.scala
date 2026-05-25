@@ -71,11 +71,14 @@ object ClaudeEventParser:
       case Some("tool_use") =>
         val name = block.obj.get("name").flatMap(_.strOpt).getOrElse("?")
         if name == "AskUserQuestion" then
-          block.obj
-            .get("input")
-            .flatMap(_.objOpt)
-            .flatMap(askUserQuestionInputToQuestion)
-            .map(AgentEvent.AskUserQuestion(_))
+          // The block-level `id` is the `tool_use_id` the orchestrator must echo back in the §7.2 `tool_result` frame.
+          // Drop the event entirely if it's missing — emitting one with `toolUseId = None` would falsely look like the
+          // HaltWithQuestion path and mis-route the answer.
+          for
+            input <- block.obj.get("input").flatMap(_.objOpt)
+            question <- askUserQuestionInputToQuestion(input)
+            id <- block.obj.get("id").flatMap(_.strOpt)
+          yield AgentEvent.AskUserQuestion(question, Some(id))
         else Some(AgentEvent.ToolUse(name, toolSummary(name, block)))
       case _ => None
 

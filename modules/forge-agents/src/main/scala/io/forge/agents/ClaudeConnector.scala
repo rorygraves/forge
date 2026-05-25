@@ -12,8 +12,8 @@ import scala.concurrent.duration.*
   * v1 covers the **headless** driver methods (`runHeadlessImplementation`, `runFixup`) end-to-end via [[Subprocess]] +
   * [[StreamingDriver]] + [[ClaudeEventParser]], and the **Layer 5 reviewer one-shots** (`reviewDesign` / `reviewPr` /
   * `refine`) via the `--json-schema` Native schema mechanism (§7.4). The streaming methods (`runStreamingSpec`,
-  * `resumeStreamingSpec`) are stubbed — see their docstrings; the blocker is a trait-level design point shared with
-  * `CodexConnector`.
+  * `resumeStreamingSpec`) match the v1.2 §7.1 trait shape but remain stubbed pending Task #5 of the Slice 1 trait-shape
+  * PR.
   *
   * Flags pinned in Slice 0 (`docs/slice-0/slice-0-report.md` §2.1):
   *
@@ -47,37 +47,22 @@ final class ClaudeConnector(
 
   // --- driver methods ----
 
-  /** **Stub — same root cause as `CodexConnector.runStreamingSpec`.**
-    *
-    * Runtime probe against Claude CLI 2.1.150: with `-p --input-format stream-json --output-format stream-json
-    * --verbose --system-prompt-file <path>`, **the CLI emits the `init` event only after the first user-message JSON
-    * frame arrives on stdin**, not at spawn time. Empty stdin → CLI exits silently with no events at all.
-    *
-    * That conflicts with the §7.1 trait's synchronous `def sessionId: String` accessor and the
-    * `StreamingDriver.fromSubprocess` model (block on Init, then return a session ready for `send`). Both connectors
-    * really want an initial user message at spawn time, which the trait doesn't carry.
-    *
-    * forge-design-1.2 §7.1 grew the initial-message parameter; the code change to that trait shape is the next slice-1
-    * PR. Until then this method raises so callers can't silently rely on a half-working session.
-    *
-    * The pieces needed when this re-enables — the `-p` flag, the `encodeUserMessageJson` wire-shape, the JSON frame
-    * schema — are already in this module and unit-tested.
+  /** v1.2 §7.1 stub — Task #5 wires the real spawn path against the new trait signature. The pieces are already in
+    * place: `streamingSpecArgv` (with `-p`), `encodeUserMessageJson`, the StreamingDriver init synchroniser, and the
+    * `StreamingSession.answerQuestion` trait method.
     */
-  def runStreamingSpec(systemPromptPath: os.Path): IO[StreamingSession] =
+  def runStreamingSpec(systemPromptPath: os.Path, initialUserMessage: String): IO[StreamingSession] =
     IO.raiseError(
       NotImplementedError(
-        "ClaudeConnector.runStreamingSpec — Claude `--input-format stream-json` emits init only after the first " +
-          "user message; the §7.1 trait (pre-v1.2) can't deliver a session with a populated sessionId without an " +
-          "initial message. Same blocker as CodexConnector; the v1.2 trait extension is now shipped, the trait-shape " +
-          "code change is the next slice-1 PR."
+        "ClaudeConnector.runStreamingSpec — implementation lands with Task #5 of the Slice 1 trait-shape PR."
       )
     )
 
-  /** Same blocker as [[runStreamingSpec]]. */
-  def resumeStreamingSpec(sessionId: String): IO[StreamingSession] =
+  /** v1.2 §7.1 stub — same as [[runStreamingSpec]]; lands with Task #5. */
+  def resumeStreamingSpec(sessionId: String, message: String): IO[StreamingSession] =
     IO.raiseError(
       NotImplementedError(
-        "ClaudeConnector.resumeStreamingSpec — same trait-level blocker as runStreamingSpec; see its docstring."
+        "ClaudeConnector.resumeStreamingSpec — implementation lands with Task #5 of the Slice 1 trait-shape PR."
       )
     )
 

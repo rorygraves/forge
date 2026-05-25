@@ -7,26 +7,15 @@ that first; everything below is Claude-Code-specific.
 
 - **Implementation contract:** [`docs/forge-design-1.2.md`](docs/forge-design-1.2.md). The 1.1 revision is kept in-tree as an evolution record but is superseded.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
+- **Active implementation plan:** [`docs/design-2.1.md`](docs/design-2.1.md) — Slice 1 / Agent connectors. Per-section breakdown into named sub-PRs (A, B, C…) with checkbox items. See `AGENTS.md` §"Per-section implementation plans" for the pattern. Read this *before* picking up Slice-1 work — it tells you what's done, what's next, and which sub-PR each task belongs to.
 - **Current state:** Slice 0 complete; Slice 1 (`forge-agents`) in
-  progress. Landed: `Role`, `PriceTable`, `CodexPrompt`,
-  `CodexSessionSettings`, `ClaudeEventParser`, `CodexEventParser`,
-  `HaltWithQuestion` decoder, `Subprocess` core, `StreamingDriver`
-  (with stdin-encoder hook and `UserMessage` mirror event),
-  `ClaudeConnector` (headless smoke-tested vs real `claude`,
-  reviewer one-shots), `CodexConnector` (headless, reviewer
-  one-shots), shared `ReviewDecoders` + `ReviewerPrompts` +
-  `ReviewerAssets` + typed `ReviewerError` adapter errors;
-  **v1.2 spec landed** with the §7.1 trait extension (initial
-  user message on streaming spawn/resume, `answerQuestion` for
-  the `tool_result` path, `toolUseId` on `AskUserQuestion`
-  events). `runStreamingSpec` / `resumeStreamingSpec` are still
-  stubbed in both connectors — the *code* change to the new
-  trait shape is the next slice-1 PR, gated on v1.2 (now
-  unblocked). Still to come: trait-shape code PR (re-enable
-  streaming spec connectors against the new signatures),
-  orchestrator re-spawn loop, real-CLI reviewer regression
-  suites (gated on shipped schemas + reviewer prompts), full
-  §17 integration-test list.
+  progress. Trait-shape code PR (PR-A in `design-2.1.md`) is in
+  flight: items A1–A4 landed (event-shape change, trait extension,
+  connector signatures, StreamingDriver `initialUserInput` +
+  `encodeAnswer` hooks). Next up: A5 (Claude streaming-spec
+  implementation) and A6 (Codex multi-process facade). After PR-A,
+  PRs B/C/D add the real-CLI integration tests, and PR-E does the
+  roadmap close-out.
 - **Two architectural seams to preserve in v1 work:** `ForgePaths`
   helper (no `.forge/...` literals outside it) and `Role` indirection
   (no `match m: Mode` outside `Mode` and connector construction). See
@@ -70,6 +59,12 @@ their CLIs. A few cross-cutting points that show up while working on
 - **Default to small, contract-conformant edits.** The v1.2 spec is
   long but settled; surprises usually mean a misread of the spec,
   not a needed change.
+- **Tick the active design-`<section>`.md as items land.** When you
+  complete a sub-PR item (e.g. `A5` in `design-2.1.md`), flip its
+  checkbox in the same change and add a one-line dated entry under
+  `§3. Status log`. Don't tick the roadmap bullet — that happens only
+  after a code review on the whole section. See `AGENTS.md`
+  §"Per-section implementation plans".
 - **Spec edits go to the next revision file.** Don't edit
   `forge-design-1.2.md` in place — open a `forge-design-1.3.md` (per
   the §23 "standalone revisions" rule). The exception is the small

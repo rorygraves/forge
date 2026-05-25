@@ -15,14 +15,26 @@ trait Connector:
 
   // --- driver methods ----
 
-  /** Long-running spec-phase session, attached to stdout for events and stdin for `send`.
+  /** Long-running spec-phase session, attached to stdout for events and stdin for `send` / `answerQuestion`.
+    *
+    * v1.2 §7.1: the initial user message is part of the spawn call because both pinned CLIs emit the init / `thread_id`
+    * event only after the first user message arrives (Slice 1 finding F1/F2 — see `design-rationale.md` C11). The
+    * returned session therefore has a populated `sessionId` by the time the IO completes.
     */
-  def runStreamingSpec(systemPromptPath: os.Path): IO[StreamingSession]
+  def runStreamingSpec(
+      systemPromptPath: os.Path,
+      initialUserMessage: String
+  ): IO[StreamingSession]
 
-  /** Resume a previously closed spec session by its CLI session id. Returns a fresh `StreamingSession` whose
-    * `sessionId` is the new (post-resume) id — §6.1 invariant: `feature.designSessionId` is updated to the *new* id.
+  /** Resume a previously closed spec session by its CLI session id, supplying the message that will drive the resumed
+    * turn. Same rationale as `runStreamingSpec`: both pinned CLIs need a user message at spawn to produce events.
+    * Returns a fresh `StreamingSession` whose `sessionId` is the new (post-resume) id — §6.1 invariant:
+    * `feature.designSessionId` is updated to the *new* id (pinned CLIs guarantee `oldSessionId == newSessionId`).
     */
-  def resumeStreamingSpec(sessionId: String): IO[StreamingSession]
+  def resumeStreamingSpec(
+      sessionId: String,
+      message: String
+  ): IO[StreamingSession]
 
   /** Headless implementation run; settle-bounded by the orchestrator. */
   def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession]

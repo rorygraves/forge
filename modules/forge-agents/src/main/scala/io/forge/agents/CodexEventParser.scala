@@ -9,7 +9,9 @@ import ujson.Value
   *   - `{type:"thread.started", thread_id}` → [[AgentEvent.Init]]
   *   - `{type:"turn.started"}` → skip
   *   - `{type:"item.completed", item:{type:"agent_message", text}}` → [[AgentEvent.AssistantText]] **or**
-  *     [[AgentEvent.HaltWithQuestion]] when the text parses as the §7.3 halt envelope
+  *     [[AgentEvent.AskUserQuestion]] (with `toolUseId = None`) when the text parses as the §7.3 halt envelope — see
+  *     v1.2 §7.1: the same event represents both Native (Claude tool use) and HaltWithQuestion paths, distinguished by
+  *     whether `toolUseId` is `Some(id)` or `None`
   *   - `{type:"item.completed", item:{type:"<other>", ...}}` → skipped in v1 (Slice 0 didn't pin tool-event shapes)
   *   - `{type:"turn.completed", usage:{...}}` → [[AgentEvent.CostUpdate]] (USD via [[PriceTable]]) then
   *     [[AgentEvent.Result]] with `durationMs = 0` — wall-clock is the connector's job, not the parser's
@@ -55,7 +57,7 @@ final class CodexEventParser(priceTable: PriceTable, model: String):
               case None => Right(Vector.empty) // shape claims agent_message but no text — drop quietly
               case Some(text) =>
                 HaltWithQuestion.tryParse(text) match
-                  case Some(q) => Right(Vector(AgentEvent.HaltWithQuestion(q)))
+                  case Some(q) => Right(Vector(AgentEvent.AskUserQuestion(q, toolUseId = None)))
                   case None => Right(Vector(AgentEvent.AssistantText(text, outputTokens = 0)))
           case _ => Right(Vector.empty) // other item types deferred (tool calls etc.)
 

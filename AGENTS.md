@@ -54,10 +54,47 @@ Where to look first when starting a task:
 | Question | File |
 |---|---|
 | What's the v1 contract? | `docs/forge-design-1.2.md` |
+| What's actively being worked on right now? | `docs/design-<section>.md` for the open roadmap section (see "Per-section implementation plans" below) |
 | Why was X decided that way? | `docs/design-rationale.md` |
 | What's the phase plan beyond v1? | `docs/roadmap.md` |
 | What did Slice 0 actually find? | `docs/slice-0/slice-0-report.md` |
 | What did Slice 1 find before v1.2 folded it in? | `docs/slice-1/slice-1-findings.md` (now superseded by v1.2) |
+
+## Per-section implementation plans
+
+Each in-progress roadmap section (`docs/roadmap.md` §2.1, §2.2, …) has a
+companion `docs/design-<section>.md` carrying the detailed implementation
+plan and the checklist used to track progress. Three docs in three
+layers — read top-down on a new task:
+
+| Layer | File | Purpose | Lifecycle |
+|---|---|---|---|
+| Contract | `docs/forge-design-1.2.md` | What the system is *for*; signatures and invariants. | Standalone revisions (`forge-design-1.x.md`) when corrections land. |
+| Phase plan | `docs/roadmap.md` | Direction, exit criteria, gates between phases. | Stays terse; ticks bullets `[~]` → `[x]` only after a section's code review passes. |
+| Implementation plan | `docs/design-<section>.md` | Per-task checklist for one roadmap section, broken into named sub-PRs. | Created when work on the section starts; lives until the section closes; ticks granular checkboxes as items land. |
+
+### Workflow
+
+1. **Starting a new section** — create `docs/design-<section>.md`
+   (mirror the structure of `docs/design-2.1.md`). Break the roadmap
+   bullet list into named sub-PRs (A, B, C…) and within each, atomic
+   checkbox items (A1, A2, …). Cross-reference v1.2 spec sections and
+   design-rationale entries that bear on each item.
+2. **Mid-section** — tick items off as they land. Add a dated entry to
+   the doc's `§3. Status log` whenever a sub-PR closes.
+3. **Closing a section** — only after every sub-PR has landed *and* a
+   code review on the section as a whole has passed, flip the roadmap
+   bullet from `[~]` to `[x]`. The roadmap is the contract that the
+   section is done; design-`<section>`.md is the audit trail.
+
+### Active design-`<section>`.md files
+
+- `docs/design-2.1.md` — Slice 1 (Phase 1 / Agent connectors). In
+  progress.
+
+Don't pre-write design-`<section>`.md files for sections that aren't
+being actively worked. They drift; the roadmap is enough until the
+section opens.
 
 ## Code conventions
 

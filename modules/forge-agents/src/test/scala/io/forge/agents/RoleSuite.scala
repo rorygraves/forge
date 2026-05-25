@@ -19,9 +19,10 @@ class RoleSuite extends munit.FunSuite:
       def close(): IO[Unit] = IO.unit
       def kill(): IO[Unit] = IO.unit
       def send(input: String): IO[Unit] = IO.unit
+      def answerQuestion(toolUseId: Option[String], answer: String): IO[Unit] = IO.unit
 
-    def runStreamingSpec(systemPromptPath: os.Path): IO[StreamingSession] = IO.pure(Sess)
-    def resumeStreamingSpec(sessionId: String): IO[StreamingSession] = IO.pure(Sess)
+    def runStreamingSpec(systemPromptPath: os.Path, initialUserMessage: String): IO[StreamingSession] = IO.pure(Sess)
+    def resumeStreamingSpec(sessionId: String, message: String): IO[StreamingSession] = IO.pure(Sess)
     def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] = IO.pure(Sess)
     def runFixup(prompt: FixupPrompt): IO[AgentSession] = IO.pure(Sess)
     def reviewDesign(input: DesignReviewInput): IO[DesignReview] = notImplemented

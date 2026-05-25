@@ -12,7 +12,7 @@ import scala.concurrent.duration.*
   * v1 covers the **headless** driver methods (`runHeadlessImplementation`, `runFixup`) end-to-end, plus full argv
   * construction and telemetry, and the **Layer 5 reviewer one-shots** (`reviewDesign` / `reviewPr` / `refine`) via the
   * `--output-schema` Native schema mechanism (§7.4). The streaming methods (`runStreamingSpec`, `resumeStreamingSpec`)
-  * are stubbed — see each method's docstring; same trait-level blocker as `ClaudeConnector`.
+  * match the v1.2 §7.1 trait shape but remain stubbed pending Task #6 of the Slice 1 trait-shape PR.
   *
   * Slice 0 (`docs/slice-0/slice-0-report.md` §2.2) pinned:
   *
@@ -53,36 +53,23 @@ final class CodexConnector(
 
   // --- driver methods ----
 
-  /** **Stub — same root cause as `ClaudeConnector.runStreamingSpec`.**
-    *
-    * Codex's `exec` model spawns one process per turn (Slice 0 §2.2): a streaming-spec session that accepts multiple
-    * `send(...)` calls maps onto N invocations of `codex exec resume <thread-id>` rather than a single long-lived
-    * process. That multi-turn-as-one-shots facade is non-trivial — it has to lazily capture the thread id from the
-    * first turn (so the trait's synchronous `sessionId: String` accessor stays honest), serialise turns under a mutex,
-    * and merge per-turn event streams.
-    *
-    * Underlying blocker: **`runStreamingSpec(systemPromptPath)` takes no initial user message, but both `codex exec`
-    * (positional prompt required) and `claude -p --input-format stream-json` (init emitted only after first JSON frame
-    * on stdin — runtime-verified) need one before they produce a session id.** forge-design-1.2 §7.1 grew the
-    * initial-message parameter; see `docs/design-rationale.md` C11 + `docs/forge-design-1.2.md` §7.1 for the shipped
-    * shape.
-    *
-    * Lands when the trait-shape code change lands (next slice-1 PR, now unblocked by v1.2).
+  /** v1.2 §7.1 stub — Task #6 builds the multi-process facade that maps the trait's "one streaming session" model onto
+    * Codex's one-process-per-turn `exec` reality (Slice 0 §2.2): the first turn spawns `codex exec --json
+    * <combined-prompt>` and captures the thread id from the Init event; subsequent `send` / `answerQuestion` calls open
+    * fresh `codex exec resume --json <thread-id>` subprocesses, draining their events into the same channel.
     */
-  def runStreamingSpec(systemPromptPath: os.Path): IO[StreamingSession] =
+  def runStreamingSpec(systemPromptPath: os.Path, initialUserMessage: String): IO[StreamingSession] =
     IO.raiseError(
       NotImplementedError(
-        "CodexConnector.runStreamingSpec — Codex `exec` requires an initial user message that the §7.1 trait " +
-          "(pre-v1.2) doesn't carry. Same blocker as ClaudeConnector; the v1.2 trait extension is now shipped, the " +
-          "trait-shape code change is the next slice-1 PR."
+        "CodexConnector.runStreamingSpec — implementation lands with Task #6 of the Slice 1 trait-shape PR."
       )
     )
 
-  /** Same blocker as [[runStreamingSpec]]. */
-  def resumeStreamingSpec(sessionId: String): IO[StreamingSession] =
+  /** v1.2 §7.1 stub — same as [[runStreamingSpec]]; lands with Task #6. */
+  def resumeStreamingSpec(sessionId: String, message: String): IO[StreamingSession] =
     IO.raiseError(
       NotImplementedError(
-        "CodexConnector.resumeStreamingSpec — same trait-level blocker as runStreamingSpec; see its docstring."
+        "CodexConnector.resumeStreamingSpec — implementation lands with Task #6 of the Slice 1 trait-shape PR."
       )
     )
 

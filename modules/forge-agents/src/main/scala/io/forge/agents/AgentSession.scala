@@ -24,24 +24,29 @@ trait AgentSession:
     */
   def kill(): IO[Unit]
 
-/** Spec phase + design revision sessions are interactive: the orchestrator writes user input mid-session via `send`.
+/** Spec phase + design revision sessions are interactive: the orchestrator writes user input mid-session via `send`
+  * (plain user message) or `answerQuestion` (reply to a deferred `AskUserQuestion`, §7.2 `tool_result` path).
   *
-  * NOTE — forge-design-1.2 §7.1 extends this trait with `answerQuestion(toolUseId, answer)` (and the companion
-  * `Connector.runStreamingSpec(systemPrompt, initialUserMessage)` / `resumeStreamingSpec(sessionId, message)`
-  * signatures). The code change to that shape is the next slice-1 PR; until it lands, this trait still carries only
-  * `send(input)` and `ClaudeConnector.runStreamingSpec` / `CodexConnector.runStreamingSpec` raise `NotImplementedError`
-  * rather than ship against the stale shape. Reasons (verified empirically against Claude CLI 2.1.150 and via the Codex
-  * `exec` model):
-  *
-  *   1. **Initial user message at spawn time.** Both Claude (`-p --input-format stream-json`) and Codex (`exec`)
-  *      require a user message before emitting init / thread_id; the parameterless `runStreamingSpec` here can't return
-  *      a session with a populated `sessionId`. 2. **`AskUserQuestion` → `tool_result` answer path.** Sending a
-  *      free-text answer through `send(input)` is interpreted by the CLI as a new user message, leaving the deferred
-  *      tool use dangling. The wire-shape `tool_result` carries the outstanding `tool_use_id` from the
-  *      `AskUserQuestion` event, so the answer needs its own trait entry (`answerQuestion(toolUseId, answer)` in v1.2).
+  * The two methods are kept distinct because the wire shapes are different on Claude: `send` writes a `user`-role JSON
+  * frame; `answerQuestion` writes a `tool_result` frame carrying the outstanding `tool_use_id` from the
+  * `AskUserQuestion` event. Routing a free-text answer through `send` would be interpreted by the CLI as a new user
+  * message rather than the awaited tool result, leaving the deferred tool use dangling. On Codex the distinction is a
+  * no-op (the §7.3 HaltWithQuestion path re-spawns the driver with the answer in the prompt body); the trait method
+  * exists so the orchestrator's Q&A code is mechanism-agnostic.
   */
 trait StreamingSession extends AgentSession:
-  /** Send a user message on stdin. Translates into an `AgentEvent.UserMessage` mirror event so the action log captures
-    * every prompt. Plain user-message path only — see the trait's class-level note about `AskUserQuestion` answers.
+  /** Send a plain user message on stdin. Translates into an `AgentEvent.UserMessage` mirror event so the action log
+    * captures every prompt.
     */
   def send(input: String): IO[Unit]
+
+  /** Reply to a deferred `AgentEvent.AskUserQuestion`. The `toolUseId` is the value carried on that event:
+    *
+    *   - **Native (Claude):** `Some(id)`. The adapter emits the corresponding `tool_result` JSON frame. `None` is an
+    *     adapter error here — it would mean the parser failed to capture the id, which `ClaudeConnector.answerQuestion`
+    *     surfaces rather than silently route as a new user message.
+    *   - **HaltWithQuestion (Codex):** typically `None`; the value is ignored. The adapter re-spawns the driver with
+    *     the answer in the prompt body (§7.3 step 3). The orchestrator passes through whatever was on the originating
+    *     event, so this method is safe to call with either.
+    */
+  def answerQuestion(toolUseId: Option[String], answer: String): IO[Unit]
