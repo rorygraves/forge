@@ -1,9 +1,13 @@
 package io.forge.agents
 
+import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import io.forge.core.{FeatureId, PieceId, QuestionMechanism, SchemaMechanism}
+import scala.concurrent.duration.*
 
 class CodexConnectorSuite extends munit.FunSuite:
+
+  override def munitTimeout: scala.concurrent.duration.Duration = 30.seconds
 
   private val model = "gpt-5-codex"
   private val emptyPrices = PriceTable.empty
@@ -64,12 +68,225 @@ class CodexConnectorSuite extends munit.FunSuite:
     Seq("--sandbox", "--output-schema", "--add-dir", "--ask-for-approval", "-C").foreach: flag =>
       assert(!argv.contains(flag), clue = s"$flag should not appear in resume argv: $argv")
 
-  test("runStreamingSpec / resumeStreamingSpec are stubbed pending Task #6 of the Slice 1 trait-shape PR"):
-    val c = newConnector
-    val r1 = c.runStreamingSpec(os.Path("/tmp/spec.md"), "hi").attempt.unsafeRunSync()
-    val r2 = c.resumeStreamingSpec("abc", "next").attempt.unsafeRunSync()
-    assert(r1.left.exists(_.getMessage.contains("Task #6")), clue = r1)
-    assert(r2.left.exists(_.getMessage.contains("Task #6")), clue = r2)
+  // --- streaming-spec multi-process facade tests ---
+
+  /** Build a fake `codex` shell script. Each invocation (one per turn) emits a Codex stream-json transcript:
+    *   - thread.started with the configured `threadId`
+    *   - turn.started
+    *   - item.completed{agent_message} whose text echoes the LAST positional arg (the user prompt as the connector
+    *     constructed it — combined with the system block for first turns, raw for resume turns)
+    *   - turn.completed with token usage
+    *
+    * The thread.started id is the same on every invocation so resume turns appear to preserve the original thread id
+    * (matching the real Codex CLI contract — Slice 0 §2.2).
+    */
+  private def fakeCodex(threadId: String): os.Path =
+    // Use $$ in the s"" interpolation to emit a literal $ in the script. Pull the last positional arg via a POSIX
+    // "shift through to the end" loop so we don't depend on bash-only idioms.
+    val script =
+      s"""#!/bin/sh
+         |last=""
+         |for a in "$$@"; do last="$$a"; done
+         |json_prompt=$$(printf '%s' "$$last" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g; s/$$/\\\\n/' | tr -d '\\n')
+         |echo '{"type":"thread.started","thread_id":"$threadId"}'
+         |echo '{"type":"turn.started"}'
+         |printf '%s\\n' "{\\"type\\":\\"item.completed\\",\\"item\\":{\\"id\\":\\"item_0\\",\\"type\\":\\"agent_message\\",\\"text\\":\\"echo: $$json_prompt\\"}}"
+         |echo '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":3,"reasoning_output_tokens":0}}'
+         |""".stripMargin
+    val f = os.temp(contents = script, prefix = "fake-codex-stream-", suffix = ".sh", deleteOnExit = true)
+    os.perms.set(f, "rwx------")
+    f
+
+  test("runStreamingSpec: first turn captures thread_id, Init forwarded, UserMessage mirror after Init"):
+    val tid = "thr-stream-1"
+    val fake = fakeCodex(tid)
+    val systemPrompt = os.temp(contents = "Act as designer.", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val connector = CodexConnector(
+      binary = fake.toString,
+      model = model,
+      priceTable = emptyPrices,
+      sessionSettings = defaultSettings
+    )
+    val (returnedSid, events) = connector
+      .runStreamingSpec(systemPrompt, "hello")
+      .flatMap: session =>
+        for
+          // close() blocks until any in-flight turn drains, then closes the events channel — only then can
+          // events.compile.toVector terminate. Codex's multi-turn facade deliberately keeps the channel open across
+          // turns (more turns may come), so the drain-then-close idiom from StreamingDriver doesn't apply.
+          _ <- session.close()
+          drained <- session.events.compile.toVector
+        yield (session.sessionId, drained)
+      .unsafeRunSync()
+    assertEquals(returnedSid, tid)
+    // First event is Init.
+    assertEquals(events.headOption, Some(AgentEvent.Init(tid)))
+    // UserMessage mirror lands after Init.
+    val initIdx = events.indexOf(AgentEvent.Init(tid))
+    val userIdx = events.indexOf(AgentEvent.UserMessage("hello"))
+    assert(initIdx >= 0 && userIdx > initIdx, clue = events)
+    // The assistant text contains the combined system+user prompt (the fake CLI echoes whatever positional arg it
+    // received). This proves §7.10(a) prepending happened on the initial spawn.
+    val assistantText = events.collectFirst { case AgentEvent.AssistantText(t, _) => t }.getOrElse("")
+    assert(assistantText.contains("Act as designer."), clue = assistantText)
+    assert(assistantText.contains("hello"), clue = assistantText)
+    // Stream ends with Result(success).
+    assert(events.last.isInstanceOf[AgentEvent.Result], clue = events)
+
+  test("send() on a streaming session re-spawns with `codex exec resume`; resume turn's Init is dropped"):
+    val tid = "thr-stream-2"
+    val fake = fakeCodex(tid)
+    val systemPrompt = os.temp(contents = "S", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val connector = CodexConnector(
+      binary = fake.toString,
+      model = model,
+      priceTable = emptyPrices,
+      sessionSettings = defaultSettings
+    )
+    val events = connector
+      .runStreamingSpec(systemPrompt, "first")
+      .flatMap: session =>
+        for
+          _ <- session.send("second") // blocks until first turn finishes; runs the second turn fully
+          _ <- session.close()
+          drained <- session.events.compile.toVector
+        yield drained
+      .unsafeRunSync()
+    // Exactly one Init even though two turns ran.
+    assertEquals(events.count(_.isInstanceOf[AgentEvent.Init]), 1, clue = events)
+    // Both UserMessage mirrors land — first after Init, second at start of resume turn.
+    val userMessages = events.collect { case AgentEvent.UserMessage(s) => s }
+    assertEquals(userMessages, Vector("first", "second"))
+    // Second turn's echo includes "second" prefix-suffixed by §7.10(a) prepending; first turn's echo includes "first".
+    val texts = events.collect { case AgentEvent.AssistantText(t, _) => t }
+    assert(texts.exists(_.contains("first")), clue = texts)
+    assert(texts.exists(_.contains("second")), clue = texts)
+    // Two Result events (one per turn).
+    assertEquals(events.count(_.isInstanceOf[AgentEvent.Result]), 2, clue = events)
+
+  test("answerQuestion(_, answer) routes through the resume path (toolUseId ignored)"):
+    val tid = "thr-stream-3"
+    val fake = fakeCodex(tid)
+    val systemPrompt = os.temp(contents = "S", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val connector = CodexConnector(
+      binary = fake.toString,
+      model = model,
+      priceTable = emptyPrices,
+      sessionSettings = defaultSettings
+    )
+    val events = connector
+      .runStreamingSpec(systemPrompt, "first")
+      .flatMap: session =>
+        for
+          // toolUseId is ignored for Codex's HaltWithQuestion path (no wire-level tool_use to reference).
+          _ <- session.answerQuestion(None, "the-answer")
+          _ <- session.close()
+          drained <- session.events.compile.toVector
+        yield drained
+      .unsafeRunSync()
+    // Mirror UserMessage for the answer appears with the user-visible text (no [answer] prefix in Codex; the answer
+    // IS the next turn's user message, indistinguishable from a `send`).
+    val userMessages = events.collect { case AgentEvent.UserMessage(s) => s }
+    assertEquals(userMessages, Vector("first", "the-answer"))
+    // The answer reached the resume subprocess.
+    assert(
+      events.exists { case AgentEvent.AssistantText(t, _) => t.contains("the-answer"); case _ => false },
+      clue = events
+    )
+
+  test("answerQuestion(Some(id), _) ignores the id; routes through resume the same way"):
+    // Defensive: Codex doesn't care whether the caller passes Some or None; the toolUseId is dropped on the floor.
+    val tid = "thr-stream-3b"
+    val fake = fakeCodex(tid)
+    val systemPrompt = os.temp(contents = "S", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val connector = CodexConnector(
+      binary = fake.toString,
+      model = model,
+      priceTable = emptyPrices,
+      sessionSettings = defaultSettings
+    )
+    val events = connector
+      .runStreamingSpec(systemPrompt, "first")
+      .flatMap: session =>
+        for
+          _ <- session.answerQuestion(Some("toolu_ignored"), "ignored-id-still-works")
+          _ <- session.close()
+          drained <- session.events.compile.toVector
+        yield drained
+      .unsafeRunSync()
+    assert(
+      events.exists { case AgentEvent.UserMessage(s) => s == "ignored-id-still-works"; case _ => false },
+      clue = events
+    )
+
+  test("kill() mid-turn terminates the active subprocess and finalises the events channel"):
+    // Fake that hangs on the first turn so we can kill it mid-flight.
+    val script =
+      """|#!/bin/sh
+         |echo '{"type":"thread.started","thread_id":"thr-kill"}'
+         |# Hang here until the parent SIGTERMs us.
+         |sleep 10""".stripMargin
+    val fake = os.temp(contents = script, prefix = "fake-codex-kill-", suffix = ".sh", deleteOnExit = true)
+    os.perms.set(fake, "rwx------")
+    val systemPrompt = os.temp(contents = "S", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val connector = CodexConnector(
+      binary = fake.toString,
+      model = model,
+      priceTable = emptyPrices,
+      sessionSettings = defaultSettings
+    )
+    val events = connector
+      .runStreamingSpec(systemPrompt, "hi")
+      .flatMap: session =>
+        // Init has arrived (the factory blocks on it). Give the subprocess a moment to be mid-sleep, then kill.
+        for
+          _ <- IO.sleep(150.millis)
+          _ <- session.kill()
+          drained <- session.events.compile.toVector
+        yield drained
+      .unsafeRunSync()
+    // Events stream terminates (the Channel was closed by kill). Init is in there since the fake produced it before
+    // sleeping; no Result, since the subprocess was killed mid-turn.
+    assertEquals(events.headOption, Some(AgentEvent.Init("thr-kill")), clue = events)
+    assert(!events.exists(_.isInstanceOf[AgentEvent.Result]), clue = events)
+
+  test("resumeStreamingSpec: spawns codex exec resume <sid> ..., verifies thread_id matches"):
+    val tid = "thr-resume-1"
+    val fake = fakeCodex(tid)
+    val connector = CodexConnector(
+      binary = fake.toString,
+      model = model,
+      priceTable = emptyPrices,
+      sessionSettings = defaultSettings
+    )
+    val (returnedSid, events) = connector
+      .resumeStreamingSpec(tid, "continue please")
+      .flatMap: session =>
+        for
+          _ <- session.close()
+          drained <- session.events.compile.toVector
+        yield (session.sessionId, drained)
+      .unsafeRunSync()
+    assertEquals(returnedSid, tid)
+    assertEquals(events.headOption, Some(AgentEvent.Init(tid)))
+    // Resume case has no system prompt path; assistant text echoes just the user message verbatim.
+    val texts = events.collect { case AgentEvent.AssistantText(t, _) => t }
+    assert(texts.exists(_.contains("continue please")), clue = texts)
+
+  test("resumeStreamingSpec: mismatched thread_id raises rather than silently lying about sessionId"):
+    val fake = fakeCodex("thr-actual")
+    val connector = CodexConnector(
+      binary = fake.toString,
+      model = model,
+      priceTable = emptyPrices,
+      sessionSettings = defaultSettings
+    )
+    val result = connector
+      .resumeStreamingSpec("thr-expected-different", "msg")
+      .attempt
+      .unsafeRunSync()
+    assert(result.left.exists(_.getMessage.contains("thr-actual")), clue = result)
+    assert(result.left.exists(_.getMessage.contains("thr-expected-different")), clue = result)
 
   test("reviewer methods raise ReviewerNotConfigured (non-retryable) when no ReviewerAssets are configured"):
     val c = newConnector

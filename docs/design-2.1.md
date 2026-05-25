@@ -78,24 +78,45 @@ is in.
   - answerQuestion(None, _) raises `MissingToolUseId` (parser-regression
     diagnostic)
   Spec: v1.2 §7.1 / §7.2. Done.
-- [ ] **A6.** Implement `CodexConnector.runStreamingSpec(systemPrompt,
+- [x] **A6.** Implement `CodexConnector.runStreamingSpec(systemPrompt,
   initialUserMessage)` / `resumeStreamingSpec(sessionId, message)` /
   `answerQuestion(toolUseId, answer)` as a multi-process facade over
-  `codex exec` (one process per turn — Slice 0 §2.2). Required
-  components:
-  - thread-id captured from the first turn's Init event so the
-    synchronous `sessionId: String` accessor stays honest
-  - per-turn subprocess serialised under a mutex
-  - per-turn event streams merged into the session-level Channel
-  - system-prompt prepending (§7.10(a)) applied to both initial spawn
-    and resume turns
-  - `answerQuestion(_, answer)` ignores toolUseId and re-spawns with the
-    answer as the next turn's user message (§7.3 step 3)
-  - `kill()` terminates any currently active subprocess and finalises
-    the session
-  Fake-CLI tests covering: first turn captures thread_id, second turn
-  uses `exec resume`, kill mid-turn, answerQuestion routes through the
-  resume path. Spec: v1.2 §7.1 / §7.3 / §7.10.
+  `codex exec` (one process per turn — Slice 0 §2.2). Implementation
+  landed as a new `CodexStreamingSession` class:
+  - thread-id captured from the first turn's `thread.started` →
+    `AgentEvent.Init` via a `Deferred`; `start` blocks on it before
+    returning so the synchronous `sessionId: String` accessor is honest
+  - per-turn subprocess serialised under `cats.effect.std.Mutex` (the
+    first turn runs in a fiber holding the mutex; `send` /
+    `answerQuestion` queue behind it)
+  - each turn's `stdout` is parsed by `CodexEventParser` and pushed to
+    a shared `Channel[IO, AgentEvent]`; resume turns' `thread.started`
+    events are dropped so consumers see exactly one `Init`. Per-turn
+    stderr is drained into a shared `Ref` for diagnostics
+  - system-prompt prepending (§7.10(a)) applied to initial spawn and
+    subsequent `send` / `answerQuestion` resume turns via the session's
+    stored `systemPromptPath`. `resumeStreamingSpec` deliberately runs
+    with `systemPromptPath = None` (the trait signature, shared with
+    Claude, doesn't carry the path); the orchestrator is responsible
+    for re-issuing context in the message body or trusting Codex's
+    session memory
+  - `answerQuestion(_, answer)` ignores `toolUseId` (the §7.3 halt
+    envelope has no wire-level tool use) and routes through the same
+    resume path as `send(answer)`
+  - `kill()` SIGTERMs any currently active subprocess via a
+    `currentTurnRef: Ref[Option[Subprocess]]` and closes the channel;
+    `close()` waits for in-flight turn to drain naturally then closes.
+    `closedRef` gate rejects further turns after either path
+  - mismatched `thread_id` on resume (CLI returns a different id than
+    the caller-supplied one) raises rather than silently lying via
+    `sessionId`
+  Replaced the Task-#6-sentinel test in `CodexConnectorSuite` with seven
+  new fake-CLI tests covering: first-turn thread_id capture and `Init →
+  UserMessage` ordering, multi-turn `send` round-trip with exactly one
+  `Init`, `answerQuestion(None, _)` and `answerQuestion(Some(id), _)`
+  both routing through the resume path, `kill()` mid-turn finalising
+  the channel, `resumeStreamingSpec` happy path, and resume
+  thread-id-mismatch raising. Spec: v1.2 §7.1 / §7.3 / §7.10. Done.
 - [ ] **A7.** PR-A landing checklist:
   - `sbt compile` clean under `-Xfatal-warnings`.
   - `sbt test` green across the build (forge-core, forge-agents,
@@ -202,6 +223,15 @@ after PR-E lands.
   fake-CLI round-trips covering init, resume, `answerQuestion(Some)`,
   and `answerQuestion(None)` paths. Next up: A6 (Codex multi-process
   facade).
+- 2026-05-25 — A6 landed: new `CodexStreamingSession` class implements
+  the multi-process facade over `codex exec [resume] --json`. First
+  turn captures thread_id via `Deferred`; per-turn subprocess
+  serialised under `cats.effect.std.Mutex`; resume turns' Init events
+  dropped from the session stream; `answerQuestion` routes through the
+  resume path; `kill()` terminates the active subprocess and finalises
+  the channel; resume thread-id mismatch raises. Seven new fake-CLI
+  tests in `CodexConnectorSuite` replace the Task-#6 sentinel. Next
+  up: A7 (PR-A landing checklist).
 
 ## 4. Cross-references
 

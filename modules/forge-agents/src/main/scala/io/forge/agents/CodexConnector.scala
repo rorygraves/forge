@@ -10,9 +10,10 @@ import scala.concurrent.duration.*
 /** §7.1 Codex driver/reviewer adapter.
   *
   * v1 covers the **headless** driver methods (`runHeadlessImplementation`, `runFixup`) end-to-end, plus full argv
-  * construction and telemetry, and the **Layer 5 reviewer one-shots** (`reviewDesign` / `reviewPr` / `refine`) via the
-  * `--output-schema` Native schema mechanism (§7.4). The streaming methods (`runStreamingSpec`, `resumeStreamingSpec`)
-  * match the v1.2 §7.1 trait shape but remain stubbed pending Task #6 of the Slice 1 trait-shape PR.
+  * construction and telemetry, the **streaming-spec driver methods** (`runStreamingSpec`, `resumeStreamingSpec`) via
+  * the [[CodexStreamingSession]] multi-process facade (one `codex exec [resume] --json` subprocess per turn, serialised
+  * under a mutex), and the **Layer 5 reviewer one-shots** (`reviewDesign` / `reviewPr` / `refine`) via the
+  * `--output-schema` Native schema mechanism (§7.4).
   *
   * Slice 0 (`docs/slice-0/slice-0-report.md` §2.2) pinned:
   *
@@ -53,25 +54,52 @@ final class CodexConnector(
 
   // --- driver methods ----
 
-  /** v1.2 §7.1 stub — Task #6 builds the multi-process facade that maps the trait's "one streaming session" model onto
-    * Codex's one-process-per-turn `exec` reality (Slice 0 §2.2): the first turn spawns `codex exec --json
-    * <combined-prompt>` and captures the thread id from the Init event; subsequent `send` / `answerQuestion` calls open
-    * fresh `codex exec resume --json <thread-id>` subprocesses, draining their events into the same channel.
+  /** v1.2 §7.1 — spawn a Codex streaming-spec session. The first turn runs `codex exec --json ... <combined-prompt>`
+    * (system block prepended per §7.10(a)); the captured `thread_id` becomes the session id. Subsequent `send` /
+    * `answerQuestion` calls open fresh `codex exec resume --json <thread-id> <combined-prompt>` subprocesses serialised
+    * under a mutex.
     */
   def runStreamingSpec(systemPromptPath: os.Path, initialUserMessage: String): IO[StreamingSession] =
-    IO.raiseError(
-      NotImplementedError(
-        "CodexConnector.runStreamingSpec — implementation lands with Task #6 of the Slice 1 trait-shape PR."
-      )
-    )
+    IO.delay(CodexPrompt.withSystemBlock(systemPromptPath, initialUserMessage))
+      .flatMap: combined =>
+        val argv = CodexConnector.execArgv(binary, model, sessionSettings, combined)
+        CodexStreamingSession
+          .start(
+            firstTurnArgv = argv,
+            initialUserMessage = initialUserMessage,
+            systemPromptPath = Some(systemPromptPath),
+            binary = binary,
+            cwd = cwd,
+            extraEnv = extraEnv,
+            parser = new CodexEventParser(priceTable, model),
+            initTimeout = initTimeout,
+            sessionIdHint = None
+          )
+          .widen
 
-  /** v1.2 §7.1 stub — same as [[runStreamingSpec]]; lands with Task #6. */
+  /** v1.2 §7.1 — resume a previously-closed Codex spec session. The first turn of the resumed session runs `codex exec
+    * resume --json <sessionId> <message>`. §7.10(a) system-prompt prepending is skipped here because the trait
+    * signature (shared with Claude, which restores the system prompt via `--resume`) doesn't carry the path; the
+    * orchestrator that resumes a Codex session is expected to either re-issue the original prompt in `message` or
+    * accept that the resumed turns run with the model's recollection of the original spawn. §6.1 invariant on the
+    * pinned CLI: the returned `sessionId` equals the input; the factory verifies and raises if the CLI returns a
+    * mismatched thread_id.
+    */
   def resumeStreamingSpec(sessionId: String, message: String): IO[StreamingSession] =
-    IO.raiseError(
-      NotImplementedError(
-        "CodexConnector.resumeStreamingSpec — implementation lands with Task #6 of the Slice 1 trait-shape PR."
+    val argv = CodexConnector.execResumeArgv(binary, sessionId, message)
+    CodexStreamingSession
+      .start(
+        firstTurnArgv = argv,
+        initialUserMessage = message,
+        systemPromptPath = None,
+        binary = binary,
+        cwd = cwd,
+        extraEnv = extraEnv,
+        parser = new CodexEventParser(priceTable, model),
+        initTimeout = initTimeout,
+        sessionIdHint = Some(sessionId)
       )
-    )
+      .widen
 
   def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] =
     spawnHeadless(prompt.systemPromptPath, prompt.body).widen
