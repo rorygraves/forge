@@ -36,7 +36,10 @@ object VerifyResult:
 trait StateCache:
 
   /** Read the on-disk cache. Returns `None` when the file is absent (a fresh feature, or post-`forge rebuild-state`
-    * deletion). Returns `Some(feature)` on a successful uPickle decode of the cache contents.
+    * deletion) **or when the cache is present but unreadable** (truncated, partial flush, uPickle decode failure). The
+    * §4 invariant says the cache is rebuildable from `manifest.json` + the action log, so an unreadable cache is never
+    * authoritative — callers that need authoritative state run [[verifyAgainstLog]], which distinguishes
+    * `cache_missing` from `cache_unreadable` in the appended `harness.cache_invalidated` reason.
     *
     * Does **not** validate against the manifest or the action log — that's [[verifyAgainstLog]]'s job. A `load` after a
     * crash may surface a stale cache; callers that need authoritative state run [[verifyAgainstLog]] (or call
@@ -44,9 +47,10 @@ trait StateCache:
     */
   def load(featureId: FeatureId): IO[Option[Feature]]
 
-  /** Write the `feature` atomically. Implementation contract: write to a temp file in the same directory as the target
-    * (so the rename is atomic on POSIX), `fsync` the temp, then `os.move` into place. The target's parent directory is
-    * created on demand.
+  /** Write the `feature` atomically and durably. Implementation contract: write to a temp file in the same directory as
+    * the target (so the rename is atomic on POSIX), `SYNC` the temp's contents, `Files.move` with `ATOMIC_MOVE` over
+    * the target, then fsync the parent directory so the rename's directory entry is durable across a crash. The
+    * target's parent directory is created on demand.
     */
   def save(featureId: FeatureId, feature: Feature): IO[Unit]
 
@@ -54,9 +58,10 @@ trait StateCache:
     *
     * On a clean match: the cache stays in place and the result is [[VerifyResult.Consistent]].
     *
-    * On a missing cache or a value mismatch: runs the full [[RebuildState.run]] pipeline (manifest seed → `foldEvents`
-    * → `reconcile` → `save`), appends a `harness.cache_invalidated` action to the log so the divergence is forensically
-    * visible, and returns [[VerifyResult.Rewritten]] carrying the freshly-saved `Feature`.
+    * On a missing cache, an unreadable cache, or a value mismatch: runs the full [[RebuildState.run]] pipeline
+    * (manifest seed → `foldEvents` → `reconcile` → `save`), appends a `harness.cache_invalidated` action to the log so
+    * the divergence is forensically visible (with `reason` one of `cache_missing` / `cache_unreadable` /
+    * `cache_diverged`), and returns [[VerifyResult.Rewritten]] carrying the freshly-saved `Feature`.
     *
     * Any [[RebuildError]] from the rebuild path propagates through this method's `Either` channel rather than being
     * swallowed; the §11.0 step-4 caller (Slice 4 CLI) lifts it into `NeedsHumanIntervention("state cache

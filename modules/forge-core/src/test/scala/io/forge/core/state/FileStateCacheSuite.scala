@@ -151,6 +151,59 @@ class FileStateCacheSuite extends munit.FunSuite:
         assertEquals(id, FeatureA)
       case other => fail(s"expected ManifestLoadFailed, got $other")
 
+  // --- E5 regression: malformed cache must not block rebuild (review finding 1) ---
+
+  tempFixture.test("load returns None when the cache file is present but malformed (truncated JSON)"): root =>
+    val paths = new ForgePaths(repoRoot = root)
+    val cache = new FileStateCache(paths)
+    // Seed a state file with truncated JSON (uPickle decode will throw).
+    val stateFile = paths.stateFile(FeatureA)
+    os.makeDir.all(stateFile / os.up)
+    os.write(stateFile, "{ \"id\": \"stripe-webhook\", \"manifest\": {")
+    assertEquals(cache.load(FeatureA).unsafeRunSync(), None)
+
+  tempFixture.test("verifyAgainstLog returns Rewritten with reason=cache_unreadable on malformed cache"): root =>
+    val paths = new ForgePaths(repoRoot = root)
+    val cache = new FileStateCache(paths)
+    val manifestStore = new FileManifestStore(paths)
+    val log = FileActionLog(paths).unsafeRunSync()
+    val manifest = FsmFixtures.manifest(Vector(piecePending(P1, 1)))
+    seedManifest(paths, manifest)
+    // Write a truncated cache directly to disk (don't go through cache.save — that would fail with CREATE_NEW since
+    // the file already exists from a prior step; instead, we just want a malformed file in place).
+    val stateFile = paths.stateFile(FeatureA)
+    os.makeDir.all(stateFile / os.up)
+    os.write(stateFile, "{ truncated cache contents")
+
+    val result = cache.verifyAgainstLog(FeatureA, manifestStore, log).unsafeRunSync()
+    result match
+      case Right(VerifyResult.Rewritten(rebuilt)) =>
+        assertEquals(rebuilt, Feature.initial(FeatureA, manifest))
+      case other => fail(s"expected Rewritten, got $other")
+    // The on-disk cache must now be the rebuilt Feature, not the original garbage.
+    assertEquals(cache.load(FeatureA).unsafeRunSync(), Some(Feature.initial(FeatureA, manifest)))
+    // The log gained a cache_unreadable entry carrying the decode-failure detail.
+    val replayed = log.replay(FeatureA).unsafeRunSync()
+    assertEquals(replayed.size, 1)
+    assertEquals(replayed.head.payload("reason").str, "cache_unreadable")
+    assert(
+      replayed.head.payload.obj.contains("detail"),
+      "cache_unreadable entry should carry the decode-failure detail for forensic context"
+    )
+
+  // --- E5 regression: durability — save flushes data + parent directory entry (review finding 2) ---
+
+  tempFixture.test("save survives a fresh FileStateCache instance reading the same path"): root =>
+    // We can't directly assert that fsync ran (it's a no-op observable property), but we can confirm the file is
+    // committed and readable by an independent process model (a brand-new FileStateCache instance reading the same
+    // path). This catches the trivial regression where save returns before contents are flushed to disk.
+    val paths = new ForgePaths(repoRoot = root)
+    val writer = new FileStateCache(paths)
+    val original = freshFeature(FsmState.DesignReady)
+    writer.save(FeatureA, original).unsafeRunSync()
+    val reader = new FileStateCache(paths)
+    assertEquals(reader.load(FeatureA).unsafeRunSync(), Some(original))
+
   // --- helpers ---
 
   private def seedManifest(paths: ForgePaths, manifest: io.forge.core.manifest.Manifest): Unit =

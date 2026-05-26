@@ -1585,6 +1585,67 @@ after PR-G lands.
   `forge-core`, 181/181 in `forge-agents` (no regression),
   `forge-it` 11/11 (1 reliability suite skipped per
   `FORGE_IT_RUN_RELIABILITY` opt-in).
+- 2026-05-26 — **PR-E review-round 1 fixes.** Three findings on
+  the durability + identity contracts of the file-backed
+  StateCache + ManifestStore. Exercises the AGENTS.md
+  "design-review coherence pass" feedback memory: each finding
+  was traced to the implied contract and patched alongside its
+  documentation rather than as a one-line code fix.
+  + **High — cache decode failure blocked rebuild.**
+    `FileStateCache.load` threw on a malformed cache (truncation,
+    partial flush, uPickle decode failure), so
+    `verifyAgainstLog` would never reach `RebuildState.run` —
+    contradicting the §4 invariant that "the local action log is
+    canonical" and the state cache is rebuildable. Fixed by
+    introducing `loadOrUnreadable: IO[Either[String,
+    Option[Feature]]]` with three states (`Right(Some)` /
+    `Right(None)` / `Left(detail)`); public `load` collapses to
+    `Option[Feature]` (treating unreadable as `None`), and
+    `verifyAgainstLog` keeps the three-way distinction so the
+    `harness.cache_invalidated` action's `reason` field
+    distinguishes `cache_missing` / `cache_unreadable` /
+    `cache_diverged`. The `cache_unreadable` entry also carries
+    a `detail: String` payload field with the decode-failure
+    class+message so post-hoc audits have forensic context.
+  + **Medium — save did not fsync the parent directory.** Temp
+    file was written with `SYNC` then `Files.move(ATOMIC_MOVE)`
+    — but on filesystems that flush data and metadata
+    independently (ext4 default, APFS), the rename's directory
+    entry can be lost across a crash without a directory-level
+    fsync. Fixed by adding `fsyncDirectory(parent)` after the
+    move (opens the parent dir as a `FileChannel.READ` and
+    calls `force(true)`). Best-effort: if directory fsync
+    fails on the platform (e.g. Windows), the save is not
+    rolled back — the file is in place; only durability across
+    a crash is weaker. Docstring on `StateCache.save` was
+    narrowed to spell out the exact contract.
+  + **Medium — `FileManifestStore.load` skipped identity +
+    schema-version checks.** `Manifest.validate` checks per-piece
+    invariants and §5.5 merged-prefix ordering but doesn't
+    verify `schemaVersion == CurrentSchemaVersion` or
+    `manifest.featureId == requestedId`. Under
+    `paths.manifest(id)` resolving to
+    `.forge/specs/<id>/manifest.json`, a hand-edit or
+    stale-file swap could leave a manifest with a different
+    `featureId` at that path, and `RebuildState.run` would
+    seed `Feature.initial(id, manifest)` with a foreign
+    manifest — silently corrupting the rebuild. Fixed by adding
+    both cross-checks to `FileManifestStore.load`; failures
+    surface as `ManifestLoadFailed` with descriptive
+    `IllegalStateException` causes.
+  + Tests landed (+5 unit tests; `forge-core` 316 → 321):
+    + `FileStateCacheSuite` (+3): `load` returns `None` on
+      malformed cache; `verifyAgainstLog` returns `Rewritten`
+      with `reason=cache_unreadable` + `detail` field on
+      malformed cache; cross-instance read survives a save (a
+      modest durability smoke test — direct fsync assertions
+      aren't observable from JVM, but a fresh `FileStateCache`
+      seeing the saved file confirms the contents path is at
+      least committed).
+    + `ManifestStoreSuite` (+2): `load` rejects mismatched
+      `featureId` and unsupported `schemaVersion`.
+  Build: `sbt scalafmtCheckAll` clean, `sbt test` 321/321 in
+  `forge-core`, 181/181 in `forge-agents` (no regression).
 
 ## 4. Carry-forward to v1.3
 

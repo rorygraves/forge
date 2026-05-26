@@ -70,3 +70,46 @@ class ManifestStoreSuite extends munit.FunSuite:
           s"expected validate failure message, got: ${cause.getMessage}"
         )
       case other => fail(s"expected ManifestLoadFailed, got $other")
+
+  // --- Regression: identity + schema-version checks (review finding 3) ---
+
+  tempFixture.test("load rejects a manifest whose featureId does not match the requested id"): root =>
+    val paths = new ForgePaths(repoRoot = root)
+    val store = new FileManifestStore(paths)
+    // Write a manifest under FeatureA's path but with FeatureB's featureId — a hand-edit / stale-file swap scenario.
+    val mismatched = FsmFixtures
+      .manifest(Vector(piecePending(P1, 1)))
+      .copy(featureId = FeatureId("other-feature"))
+    val target = paths.manifest(FeatureA)
+    os.makeDir.all(target / os.up)
+    os.write(target, Manifest.toJson(mismatched))
+    val result = store.load(FeatureA).unsafeRunSync()
+    result match
+      case Left(RebuildError.ManifestLoadFailed(id, cause)) =>
+        assertEquals(id, FeatureA)
+        assert(
+          cause.getMessage.contains("featureId"),
+          s"expected featureId-mismatch message, got: ${cause.getMessage}"
+        )
+      case other => fail(s"expected ManifestLoadFailed, got $other")
+
+  tempFixture.test("load rejects a manifest with an unsupported schemaVersion"): root =>
+    val paths = new ForgePaths(repoRoot = root)
+    val store = new FileManifestStore(paths)
+    // Write a manifest claiming a future schemaVersion. We can't construct one via copy on Manifest (the field is
+    // hard-typed), but we can mutate the JSON directly.
+    val current = FsmFixtures.manifest(Vector(piecePending(P1, 1)))
+    val target = paths.manifest(FeatureA)
+    os.makeDir.all(target / os.up)
+    val json = ujson.read(Manifest.toJson(current))
+    json("schemaVersion") = ujson.Num((Manifest.CurrentSchemaVersion + 1).toDouble)
+    os.write(target, ujson.write(json, indent = 2))
+    val result = store.load(FeatureA).unsafeRunSync()
+    result match
+      case Left(RebuildError.ManifestLoadFailed(id, cause)) =>
+        assertEquals(id, FeatureA)
+        assert(
+          cause.getMessage.contains("schemaVersion"),
+          s"expected schemaVersion-rejection message, got: ${cause.getMessage}"
+        )
+      case other => fail(s"expected ManifestLoadFailed, got $other")
