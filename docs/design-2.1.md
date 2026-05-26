@@ -11,7 +11,10 @@
 > land; the roadmap section gets ticked off only after a code review on
 > the section as a whole.
 >
-> **Status:** in progress.
+> **Status:** ✅ closed 2026-05-26. PR-A through PR-E landed; PR-D
+> deferred to the Slice-4 reviewer-asset PR per design-rationale C15.
+> This file remains in-tree as the audit trail for Slice 1; the next
+> active design lives in `design-2.2.md` once Slice 2 opens.
 
 ## 0. Exit criterion for Slice 1
 
@@ -23,9 +26,17 @@ is done when:
    trait against the new shape (`runStreamingSpec(systemPrompt,
    initialUserMessage)`, `resumeStreamingSpec(sessionId, message)`,
    `StreamingSession.answerQuestion(toolUseId, answer)`).
-2. The full §17 slice-1 forge-it test list passes against the pinned
-   CLI versions.
-3. A code review on the section confirms (1) and (2); the
+2. The §17 slice-1 forge-it test list passes against the pinned CLI
+   versions, **minus** the native schema regression suite (PR-D),
+   which is explicitly deferred out of Slice 1 per design-rationale
+   **C15** and §4 carry-forward C15 below — it lands as a gating
+   check on the reviewer-asset PR (Slice 4). Concretely: PR-B
+   (Claude streaming integration) + PR-C (Codex streaming
+   integration) + the existing reviewer fake-CLI end-to-end coverage
+   in `*ConnectorSuite` are the Slice-1 bar; PR-D real-CLI ≥19/20
+   regression is the Slice-4 bar.
+3. A code review on the section confirms (1) and (2) and that the
+   §4 carry-forward list is durably handed off (PR-E E6); the
    `[~] ClaudeConnector and CodexConnector` line in `roadmap.md` §2.1
    flips to `[x]`.
 
@@ -239,11 +250,16 @@ PR-C tests then landed:
   `CodexStreamingSpecSuite`, `CodexHaltWithQuestionReliabilitySuite`).
 - Spec: §17 slice-1 forge-it test list.
 
-### 1.4 PR D — reviewer regression suites (forge-it)
+### 1.4 PR D — reviewer regression suites (forge-it) — **deferred to reviewer-asset PR**
 
-> **Blocked on:** shipped reviewer schemas + reviewer system prompts.
-> Those land later in Slice 1 / early Slice 4 alongside
-> `ForgePaths`. Park this PR until they land.
+> **Status:** explicitly deferred out of Slice 1 by design-rationale
+> **C15** (2026-05-26, PR-E review). The reviewer code path is in
+> place + fake-CLI tested; the real-CLI ≥19/20 regression requires
+> shipped reviewer schemas + system prompts, which the roadmap (§2.6)
+> places alongside `ForgePaths` in Slice 4. PR-D lands as a gating
+> integration check on the reviewer-asset PR there. Slice 1 closure
+> (PR-E) does **not** wait for this; the carry-forward bullet in §4
+> below is the durable handle the reviewer-asset PR picks up.
 
 - [ ] **D1.** For each connector (Claude, Codex) × each schema
   (design-review, code-review, refine), run a ≥20-sample regression
@@ -253,34 +269,54 @@ PR-C tests then landed:
   adapter error) so the report distinguishes §7.5 from §7.6.
 - [ ] **D3.** Gated identically to other forge-it suites (PATH probe +
   per-binary escape hatch).
-- Spec: §7.4 / §17 slice-1 forge-it test list.
+- Spec: §7.4 / §17 slice-1 forge-it test list (deviation noted in
+  design-rationale **C15**).
 
-### 1.5 PR E — close-out: roadmap + docs sweep
+### 1.5 PR E — close-out: roadmap + docs sweep ✅ landed 2026-05-26
 
-- [ ] **E1.** Code review on PR-A through PR-D as a section. Reviewer
-  notes get captured here, not on the spec.
-- [ ] **E2.** Flip `roadmap.md` §2.1 `ClaudeConnector and CodexConnector`
-  bullet from `[~]` to `[x]`. Flip the HaltWithQuestion + integration
-  test bullets similarly. Remove the "What unblocks slice-1 closure"
-  numbered list (its entries are all done at this point) or replace it
-  with a one-line "✅ closed 2026-MM-DD" anchor.
-- [ ] **E3.** Update `AGENTS.md` "Current state" Slice 1 paragraph to
-  reflect closure.
-- [ ] **E4.** Update `CLAUDE.md` TL;DR "Current state" line.
-- [ ] **E5.** Move `docs/slice-1/slice-1-findings.md` next to
-  slice-0-report.md style — convert from "evolution record" to "Slice 1
-  outcomes" (or leave as-is if the v1.2 fold-in note is still
-  accurate). Decide based on what the post-mortem actually surfaced.
-- [ ] **E6.** Walk §4 "Carry-forward to v1.3" below. Every open item
-  there must be reflected somewhere durable (roadmap §3 v1.3 bucket,
-  a dedicated tracking issue, or an explicit deferred-decision note
-  in `design-rationale.md`) **before** E2 flips the §2.1 bullet to
-  `[x]`. The section-as-a-whole tick must not bury a known v1.2
-  spec/code discrepancy under it.
+- [x] **E1.** Code review on PR-A through PR-D as a section.
+  Three review-round findings folded in: (P1) `CodexStreamingSession`
+  in-mutex `closedRef` recheck so close()/kill() while a turn is
+  queued rejects the queued turn; (P2) `CodexStreamingSession` resume
+  turn now surfaces non-zero exit + missing-Result as raised errors
+  from `send` / `answerQuestion`, finalising the session;
+  (P2 scope) PR-D explicitly deferred out of Slice 1 via
+  design-rationale **C15**, with §0 exit criterion + §4 carry-forward
+  + roadmap §2.1 text all updated to agree. PR-D itself is not
+  reviewed here — deferred. Done.
+- [x] **E2.** `roadmap.md` §2.1 `ClaudeConnector and CodexConnector`,
+  `HaltWithQuestion`, and `Integration tests` bullets flipped to
+  `[x]`. "What unblocks slice-1 closure" numbered list replaced with
+  a one-line `✅ Slice 1 closed 2026-05-26` anchor pointing at this
+  file's §3 (status log) and §4 (carry-forward). Done.
+- [x] **E3.** `AGENTS.md` "Current state" Slice 1 paragraph rewritten
+  to reflect closure (carry-forward C14 + C15 named inline; "Slice 2
+  next" line added); active-design-section list updated to *(none
+  currently open)* until `design-2.2.md` opens. Done.
+- [x] **E4.** `CLAUDE.md` TL;DR "Active implementation plan" + "Current
+  state" rewritten: `design-2.1.md` flagged as the closed audit
+  trail; Slice-1 closure + carry-forward summarised; next slice
+  named. Done.
+- [x] **E5.** `docs/slice-1/slice-1-findings.md` kept as the evolution
+  record (option B in the original task description). Status line
+  updated to point at this file's §3 status log + name the C15
+  deferral. Conversion to a Slice-1-outcomes report was rejected as
+  duplicative — the status log here is already the audit trail.
+  Done.
+- [x] **E6.** §4 "Carry-forward to v1.3" walked: **C14** has a
+  durable home in [`design-rationale.md`](design-rationale.md) §C14
+  + `roadmap.md` §7.2. **C15** has a durable home in
+  [`design-rationale.md`](design-rationale.md) §C15 +
+  `roadmap.md` §7.2 + the §1.4 PR-D header above + the
+  carry-forward entry in §4 below. Both items are reachable from
+  three distinct places; section closure does not bury either.
+  Done.
 
 ## 2. Order of work
 
-`A1 → A2 → A3 → A4 → A5 ⊕ A6 → A7 → (B || C) → (D when unblocked) → E`
+`A1 → A2 → A3 → A4 → A5 ⊕ A6 → A7 → (B || C) → E` (PR-D explicitly
+deferred out of Slice 1 per design-rationale C15; lands on the
+reviewer-asset PR in Slice 4).
 
 Where `⊕` means A5 and A6 can be done in either order or in parallel
 once A4 lands; both modify different connector files and the trait
@@ -350,6 +386,44 @@ after PR-E lands.
   flipping the §2.1 roadmap bullet to `[x]`; (4) `CodexStreamingSession`
   resume turns now verify thread_id matches `sessionId` and raise on
   mismatch (with a new unit test). 174 unit tests pass.
+- 2026-05-26 — **PR-E review follow-ups landed (E1 in-flight).** Three
+  E1 reviewer findings addressed in `CodexStreamingSession`:
+  (P1) `runResumeTurn` now re-reads `closedRef` **inside** the turn
+  mutex, so a `send` / `answerQuestion` queued behind an in-flight
+  turn bails on `close()` / `kill()` rather than spawning a fresh
+  `codex exec resume`. (P2) `runOneTurn` now captures the subprocess
+  exit code and tracks Result-event emission; a resume turn that
+  exits non-zero or produces no Result raises from `send` /
+  `answerQuestion` (with stderr tail) and finalises the session —
+  closing the events channel and setting `closedRef` so subsequent
+  turns reject. First-turn failures finalise silently (no consumer
+  for a raise in the `.start`-forked fiber) but produce the same
+  closed-session outcome. Three new fake-CLI tests in
+  `CodexConnectorSuite` cover (a) `close()` racing a queued send,
+  (b) resume turn exit-1 raising, (c) resume turn missing Result
+  raising. (P2 scope) **PR-D is now explicitly deferred** to the
+  reviewer-asset PR (Slice 4) via design-rationale **C15** + §4
+  carry-forward C15 below. v1.2 §17's "native schema regression
+  suite" is documented as a v1.3 spec deviation; the reviewer-asset
+  PR picks it up. 177 unit tests pass; scalafmt clean.
+- 2026-05-26 — **PR-E complete. ✅ Slice 1 closed.** E1 review
+  findings folded in (above); E2 flipped the three `roadmap.md` §2.1
+  bullets (`ClaudeConnector and CodexConnector`, `HaltWithQuestion`,
+  `Integration tests`) from `[~]` to `[x]` and replaced the "What
+  unblocks slice-1 closure" numbered list with a one-line closed
+  anchor; E3 rewrote the `AGENTS.md` "Current state" Slice 1
+  paragraph + the active-design-section list; E4 rewrote the
+  `CLAUDE.md` TL;DR "Active implementation plan" + "Current state";
+  E5 retained `slice-1/slice-1-findings.md` as the pre-v1.2
+  evolution record with an updated status line; E6 walked the §4
+  carry-forward list and confirmed **C14** + **C15** both have
+  durable homes in `design-rationale.md` and `roadmap.md` §7.2 (new
+  subsection summarising v1.2-spec gaps deferred to v1.3). §0 exit
+  criterion + §1.4 PR-D header + §2 order-of-work all updated to
+  reflect the C15 deferral so the file is internally consistent.
+  README.md status line + status table also synced. This file is
+  the audit trail; `design-2.2.md` opens when Slice 2 (`forge-core`
+  / FSM) work starts.
 
 ## 4. Carry-forward to v1.3
 
@@ -371,6 +445,20 @@ ticks the section. PR-E item E6 walks this list.
   design-rationale C14 + emphasised in the connector docstring; the
   orchestrator's resume path (Slice 2 FSM) will need to be written
   aware of the gap until v1.3 closes it.
+- **C15 — PR-D (native schema regression suite) deferred out of
+  Slice 1** (design-rationale C15). v1.2 §17 names the ≥19/20 native
+  schema regression suite (`reviewDesign` / `reviewPr` / `refine` ×
+  Claude + Codex) as a Slice-1 integration test deliverable, but its
+  real-CLI runs require shipped reviewer schemas + system prompts
+  which roadmap §2.6 places in Slice 4 alongside `ForgePaths`. PR-E
+  closes Slice 1 without PR-D having landed; PR-D becomes a gating
+  integration check on the reviewer-asset PR. **Status:** documented
+  in design-rationale C15 + the §1.4 PR-D header above marks the
+  deferral; the reviewer-asset PR must run PR-D before its own
+  closure, and the v1.3 §17 reorganisation should absorb the move
+  (either restate as Slice-4 or leave §17 alone). Until reviewer
+  assets ship, the only reviewer integration coverage is the fake-CLI
+  end-to-end tests in `*ConnectorSuite`.
 
 ## 5. Cross-references
 

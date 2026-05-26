@@ -7,41 +7,41 @@ that first; everything below is Claude-Code-specific.
 
 - **Implementation contract:** [`docs/forge-design-1.2.md`](docs/forge-design-1.2.md). The 1.1 revision is kept in-tree as an evolution record but is superseded.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
-- **Active implementation plan:** [`docs/design-2.1.md`](docs/design-2.1.md) — Slice 1 / Agent connectors. Per-section breakdown into named sub-PRs (A, B, C…) with checkbox items. See `AGENTS.md` §"Per-section implementation plans" for the pattern. Read this *before* picking up Slice-1 work — it tells you what's done, what's next, and which sub-PR each task belongs to.
-- **Current state:** Slice 0 complete; Slice 1 (`forge-agents`) in
-  progress. **PR-A complete (trait-shape code change), PR-B + PR-C
-  complete (real-CLI integration tests):** Claude streaming-spec
-  round-trip, resume, `answerQuestion(Some(id), …)`, and `kill()`
-  mid-stream pass against Claude 2.1.150 in `ClaudeStreamingSpecSuite`
-  (~16s). Codex headless smoke, multi-turn `send()`, resume thread_id
-  preservation, `answerQuestion` via resume, and `kill()` mid-turn
-  pass against `codex-cli 0.133.0` across `CodexHeadlessSmokeSuite`,
-  `CodexStreamingSpecSuite` (~45s). C4 (HaltWithQuestion reliability
-  sample, 20 real-CLI runs) is opt-in via `FORGE_IT_RUN_RELIABILITY=1`.
-  Two upstream fixes folded into PR-C: `CodexConnector.execArgv`
-  swapped `--ask-for-approval` for `-c approval_policy=...` (codex
-  ≥0.131); Codex spawns now `closeStdin` immediately (JVM ProcessBuilder
-  leaves stdin open; codex hangs on the open pipe). PR-C tests default
-  to `gpt-5-codex` with `FORGE_IT_CODEX_MODEL` override for
-  account-tier-restricted setups. Next up: PR-D is the reviewer schema
-  regression suite (blocked on shipped schemas + system prompts);
-  PR-E does the roadmap close-out.
-- **Two architectural seams to preserve in v1 work:** `ForgePaths`
-  helper (no `.forge/...` literals outside it) and `Role` indirection
-  (no `match m: Mode` outside `Mode` and connector construction). See
-  `AGENTS.md` for the smell tests.
+- **Active implementation plan:** *(none currently open)*.
+  [`docs/design-2.1.md`](docs/design-2.1.md) is Slice 1's audit
+  trail — kept in-tree for history, no longer active. Slice 2
+  (`forge-core` — FSM, Feature, ActionLog, StateCache) opens with a
+  fresh `design-2.2.md`. See `AGENTS.md` §"Per-section implementation
+  plans" for the pattern (sub-PR breakdown with checkbox items).
+- **Current state:** Slice 1 ✅ closed 2026-05-26. Both connectors
+  (Claude + Codex) ship against v1.2 §7.1 with real-CLI integration
+  coverage in `forge-it`. **Carry-forward** to v1.3 / Slice 4:
+  **C14** (Codex `resumeStreamingSpec` system-prompt prepending —
+  see [`docs/design-rationale.md`](docs/design-rationale.md)) and
+  **C15** (PR-D ≥19/20 native schema regression suite deferred to
+  the reviewer-asset PR in Slice 4). Roadmap §7.2 carries the
+  roadmap-level pointers. Next slice: 2 (`forge-core`).
+- **Two architectural seams to preserve in v1 work:**
+  - `ForgePaths` helper — no `.forge/...` literals outside it.
+    Smell test: `grep -r '"\.forge/' modules/` outside `ForgePaths.scala`.
+  - `Role` indirection — no `match m: Mode` outside `Mode` itself and
+    connector construction.
 
 ## Build / test / format
 
 ```bash
 sbt compile
-sbt test                       # unit tests
-sbt scalafmtAll                # format
-sbt scalafmtCheckAll           # check
-sbt "project forge-it" test    # integration tests (require claude, codex, gh on PATH)
+sbt test                                              # unit tests
+sbt scalafmtAll                                       # format
+sbt scalafmtCheckAll                                  # check
+sbt "project forge-it" test                           # IT (require claude, codex, gh on PATH)
+sbt "testOnly *ClaudeStreamingSpecSuite"              # one unit suite
+sbt "project forge-it" "testOnly *CodexStreaming*"    # one IT suite
+FORGE_IT_RUN_RELIABILITY=1 sbt "project forge-it" test  # opt-in long-running suites
 ```
 
-`-Xfatal-warnings` is on; warnings are errors. Run a fresh `sbt
+Scala 3.5.2, sbt build. `-Xfatal-warnings`, `-Wunused:imports`, and
+`-Wvalue-discard` are on; warnings are errors. Run a fresh `sbt
 compile` before declaring a task done.
 
 ## Things Forge itself happens to care about

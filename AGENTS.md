@@ -20,40 +20,44 @@ fix this file.
 
 - **Slice 0 (CLI validation) — complete.** Findings folded into design
   v1.1 and carried forward into v1.2.
-- **Slice 1 (`forge-agents` — connectors) — in progress.** Landed:
-  `Role` indirection seam, `PriceTable` + shipped `prices.example.json`,
-  `CodexPrompt` (§7.10(a)), `CodexSessionSettings` (§7.10(c)),
-  `ClaudeEventParser` / `CodexEventParser` (stream-json → `AgentEvent`,
-  with `AskUserQuestion(toolUseId)` capturing the Native tool_use id
-  and emitting `None` on the §7.3 HaltWithQuestion path),
-  `Subprocess` (spawn / line-based stdio / SIGTERM→grace→SIGKILL),
-  `StreamingDriver` (Subprocess + parser → `StreamingSession` with
-  init-event synchronisation, stderr-drain buffer, `UserMessage`
+- **Slice 1 (`forge-agents` — connectors) — ✅ closed 2026-05-26.**
+  `forge-agents` ships both connectors against the v1.2 §7.1
+  trait: deterministic event parsers
+  (`AskUserQuestion(toolUseId: Option[String])` carries the
+  Native tool_use id and emits `None` on the §7.3 HaltWithQuestion
+  path), `Subprocess` + `StreamingDriver` plumbing
+  (init-event synchronisation, stderr-drain buffer, `UserMessage`
   mirror event, connector-supplied `encodeUserInput` /
   `initialUserInput` / `encodeAnswer` hooks), `ClaudeConnector`
-  (headless + streaming-spec driver methods end-to-end against fake
-  CLIs and a real-`claude` smoke test for the headless path; §7.2
-  `tool_result` wire encoder + `MissingToolUseId` adapter error for
-  parser-regression diagnostics; Layer-5 reviewer one-shots),
-  `CodexConnector` + new `CodexStreamingSession` (multi-process facade
-  over `codex exec [resume] --json`: one subprocess per turn
-  serialised under `cats.effect.std.Mutex`, single shared events
-  channel with resume-turn Init filtered, thread-id mismatch on
-  resume raises; headless + Layer-5 reviewer one-shots also covered),
-  shared `ReviewDecoders` + `ReviewerPrompts` + `ReviewerAssets` +
-  typed `ReviewerError` adapter errors. **PR-A (trait-shape), PR-B
-  (Claude streaming integration tests), and PR-C (Codex streaming
-  integration tests) in `design-2.1.md` complete.** PR-C also folded
-  in two upstream connector fixes the integration suite surfaced
-  against `codex-cli 0.133.0`: `--ask-for-approval` → `-c
-  approval_policy=...` (the flag was removed in codex ≥0.131); and
-  `closeStdin` right after spawn on every Codex subprocess (JVM
-  ProcessBuilder leaves stdin open; codex hangs on the pipe). Still
-  to come: orchestrator-side `HaltWithQuestion` re-spawn loop (lands
-  with Slice 2 FSM); real-CLI reviewer regression suites (PR-D,
-  blocked on shipped schemas + reviewer prompts); PR-E close-out;
-  full §17 forge-it integration test list.
-- Slices 2–5 scoped in design §17.
+  (headless + streaming-spec end-to-end with the §7.2 `tool_result`
+  wire encoder; `MissingToolUseId` adapter error for the
+  parser-regression diagnostic), `CodexConnector` + the
+  `CodexStreamingSession` multi-process facade (one `codex exec
+  [resume] --json` subprocess per turn under
+  `cats.effect.std.Mutex`, single shared events channel with
+  resume-turn Init filtered, thread-id mismatch raises, per-turn
+  failure surfaces non-zero exit / missing Result to the caller,
+  and the in-mutex `closedRef` recheck rejects sends queued behind a
+  concurrent `close()` / `kill()`), shared `ReviewDecoders` +
+  `ReviewerPrompts` + `ReviewerAssets` + typed `ReviewerError`
+  adapter errors. PR-A through PR-E in `design-2.1.md` are landed.
+  Real-CLI integration suites in `forge-it`: Claude headless smoke,
+  `ClaudeStreamingSpecSuite`, Codex headless smoke,
+  `CodexStreamingSpecSuite`, and `CodexHaltWithQuestionReliabilitySuite`
+  (opt-in via `FORGE_IT_RUN_RELIABILITY=1`). **Carry-forward to
+  v1.3 / Slice 4** (see [`docs/design-rationale.md`](docs/design-rationale.md)
+  and [`docs/roadmap.md`](docs/roadmap.md) §7.2): **C14** —
+  `CodexConnector.resumeStreamingSpec` can't honour §7.10(a)
+  system-prompt prepending under the shared trait signature
+  (orchestrator-side resume code, lands with Slice 2 FSM, must be
+  written aware of it); **C15** — PR-D (≥19/20 native schema
+  regression suite) deferred to the reviewer-asset PR in Slice 4 (it
+  needs shipped schemas + reviewer system prompts to run). The
+  orchestrator-side `HaltWithQuestion` re-spawn loop also lands with
+  Slice 2 FSM — that's an orchestrator concern, not a connector one.
+- **Slice 2 (`forge-core` — FSM, Feature, ActionLog, StateCache) —
+  next.** See design §17 / roadmap §2.2.
+- Slices 3–5 scoped in design §17.
 - Phase 4 (Forge-instance pivot: multi-repo, daemon, parallel,
   containerised) is post-v1 and needs its own design doc before any
   code lands. See [`docs/roadmap.md`](docs/roadmap.md).
@@ -98,8 +102,9 @@ layers — read top-down on a new task:
 
 ### Active design-`<section>`.md files
 
-- `docs/design-2.1.md` — Slice 1 (Phase 1 / Agent connectors). In
-  progress.
+- *(none currently open)* — Slice 1 closed 2026-05-26
+  (`docs/design-2.1.md` retained as the audit trail). Slice 2
+  (`forge-core`) will get a `design-2.2.md` when work starts.
 
 Don't pre-write design-`<section>`.md files for sections that aren't
 being actively worked. They drift; the roadmap is enough until the

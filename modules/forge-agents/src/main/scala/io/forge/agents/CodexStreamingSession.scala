@@ -82,15 +82,26 @@ final class CodexStreamingSession private (
       sessionChan.close.void
 
   private def runResumeTurn(userMessage: String): IO[Unit] =
-    closedRef.get.flatMap {
-      case true =>
-        IO.raiseError(
-          IllegalStateException(
-            s"CodexStreamingSession($sessionId): session is closed; further turns rejected"
-          )
+    val rejectionError =
+      IO.raiseError[Unit](
+        IllegalStateException(
+          s"CodexStreamingSession($sessionId): session is closed; further turns rejected"
         )
+      )
+    closedRef.get.flatMap {
+      case true => rejectionError
       case false =>
-        turnMutex.lock.surround(spawnAndDrainTurn(userMessage, isFirstTurn = false, initDef = None))
+        // Fast-path bail above is a UX nicety; the load-bearing check is INSIDE the mutex. A queued turn waiting on
+        // `turnMutex.lock` here could otherwise miss a `close()` / `kill()` that flips `closedRef` after the outer
+        // check but before the mutex is acquired — and then spend an unwanted model call (and write into an already
+        // closed channel under `kill()`). The contract in the class-level scaladoc is that `closedRef = true` halts
+        // future turns; re-read inside the mutex to honour it.
+        turnMutex.lock.surround(
+          closedRef.get.flatMap {
+            case true => rejectionError
+            case false => spawnAndDrainTurn(userMessage, isFirstTurn = false, initDef = None)
+          }
+        )
     }
 
   /** One-turn drain. Builds the combined system-prompt + user-message prompt, spawns `codex exec resume --json <sid>
@@ -135,6 +146,10 @@ final class CodexStreamingSession private (
       // which would otherwise drop the mismatched event silently.
       for
         turnErrRef <- IO.ref(Option.empty[Throwable])
+        // Did this turn emit a Result event? AgentSession.events says "Terminates with a Result event"; a turn that
+        // exits without producing one violates that contract for downstream consumers and is treated as a turn
+        // failure below (close session + raise, rather than letting send/answerQuestion silently report success).
+        gotResultRef <- IO.ref(false)
         drainStdout =
           sp.stdout
             .evalMap: line =>
@@ -169,6 +184,8 @@ final class CodexStreamingSession private (
                         // Resume turns also emit a thread.started with the same id; drop it to keep exactly one
                         // Init in the session stream.
                         IO.unit
+                    case res @ AgentEvent.Result(_, _) =>
+                      gotResultRef.set(true) *> sessionChan.send(res).void
                     case other => sessionChan.send(other).void
                   }
                 case Left(err) =>
@@ -193,18 +210,50 @@ final class CodexStreamingSession private (
           stderrFiber <- drainStderr.start
           // Block here until the subprocess exits naturally OR is killed externally. Either way the mutex stays
           // held until drain is fully complete — that's how a `send` queued behind a first-turn fiber lines up.
-          _ <- sp.waitFor
+          exitCode <- sp.waitFor
           _ <- stdoutFiber.join.attempt.void
           _ <- stderrFiber.join.attempt.void
           _ <- currentTurnRef.set(None)
-          // Surface a resume thread_id mismatch as a turn failure (and finalise the session, mirroring the
-          // first-turn cleanup in the factory's `start`). The user's send / answerQuestion IO then raises rather
-          // than silently lying about continuity via the `sessionId` accessor.
-          maybeErr <- turnErrRef.get
-          _ <- maybeErr match
+          // Build the final outcome. Three failure modes converge on the same finalisation (close session, then
+          // raise for resume turns / silently finalise for the first turn):
+          //   1. §6.1 thread_id mismatch on a resume turn (most specific — surfaces first).
+          //   2. Non-zero exit code — process-level failure.
+          //   3. Clean exit but no Result event — violates the AgentSession.events "terminates with Result" contract
+          //      and would otherwise leave send/answerQuestion reporting success with a truncated event stream.
+          // For resume turns the raise propagates back through `runResumeTurn` to the send/answerQuestion caller.
+          // For first turns the fiber is forked via `.start` with no consumer, so raising would just leak an
+          // unhandled-fiber stack trace to stderr (also: a SIGTERM-killed first turn via `kill()` is an expected
+          // shutdown, not a bug to surface). Instead we close the channel + set closedRef so the consumer's events
+          // stream truncates and any subsequent send/answerQuestion rejects.
+          maybeMismatch <- turnErrRef.get
+          haveResult <- gotResultRef.get
+          turnLabel = if isFirstTurn then "first turn" else "resume turn"
+          failure <- maybeMismatch match
+            case Some(err) => IO.pure(Some(err))
+            case None =>
+              if exitCode != 0 then
+                stderrBuf.get.map: buf =>
+                  val tail = buf.takeRight(20).mkString("\n")
+                  Some(
+                    RuntimeException(
+                      s"CodexStreamingSession($sessionId): $turnLabel exited $exitCode " +
+                        s"(stderr tail: $tail)"
+                    )
+                  )
+              else if !haveResult then
+                stderrBuf.get.map: buf =>
+                  val tail = buf.takeRight(20).mkString("\n")
+                  Some(
+                    RuntimeException(
+                      s"CodexStreamingSession($sessionId): $turnLabel exited cleanly but produced no Result " +
+                        s"event (stderr tail: $tail)"
+                    )
+                  )
+              else IO.pure(None)
+          _ <- failure match
             case None => IO.unit
-            case Some(err) =>
-              closedRef.set(true) *> sessionChan.close.attempt.void *> IO.raiseError(err)
+            case Some(err) if isFirstTurn => finaliseSession
+            case Some(err) => finaliseAndRaise(err)
         yield ()
         _ <- core.guarantee(
           // If the first turn finished without producing Init, complete initDef with Left so the factory doesn't
@@ -219,6 +268,16 @@ final class CodexStreamingSession private (
         )
       yield ()
     }
+
+  /** Tear down the session (set `closedRef`, close the events channel). Used by both `finaliseAndRaise` and the silent
+    * first-turn-failure path so the orchestrator never sees a half-torn-down session that still accepts sends.
+    */
+  private def finaliseSession: IO[Unit] =
+    closedRef.set(true) *> sessionChan.close.attempt.void
+
+  /** Finalise the session and raise `err` to the caller (resume turn → propagates back to send/answerQuestion). */
+  private def finaliseAndRaise(err: Throwable): IO[Unit] =
+    finaliseSession *> IO.raiseError(err)
 
   /** Snapshot of stderr lines drained across every turn so far. Useful for tests / diagnostics. */
   def stderrSnapshot: IO[Vector[String]] = stderrBuf.get

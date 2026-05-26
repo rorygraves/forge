@@ -7,12 +7,16 @@
 > These corrections have now landed in
 > [`forge-design-1.2.md`](../forge-design-1.2.md) (standalone, per §23).
 >
-> **Status:** ✅ superseded by v1.2 (2026-05-25). Kept in-tree as an
-> evolution record alongside the slice-0 report. The trait-shape code
-> change in `forge-agents` is the next slice-1 PR — until that lands, the
-> two connector docstrings still flag the implementation drift at the
-> source-code level. Do not treat this doc as authoritative for the
-> trait shape; read v1.2 §7.1 instead.
+> **Status:** ✅ superseded by v1.2 (2026-05-25); **Slice 1 closed
+> 2026-05-26** (see [`design-2.1.md`](../design-2.1.md) §3 status log).
+> Kept in-tree as an evolution record alongside the slice-0 report —
+> the F1–F3 findings below are the historical context for how the v1.2
+> §7.1 trait shape was arrived at. The trait-shape code (PR-A) and the
+> real-CLI integration coverage (PR-B Claude, PR-C Codex) landed in
+> `design-2.1.md`; PR-D (reviewer schema regression suite) is deferred
+> to the Slice-4 reviewer-asset PR per design-rationale C15. Do not
+> treat this doc as authoritative for the trait shape; read v1.2 §7.1
+> instead.
 
 ## 1. What's done in slice 1
 

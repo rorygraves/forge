@@ -333,6 +333,151 @@ class CodexConnectorSuite extends munit.FunSuite:
     assert(sendResult.left.exists(_.getMessage.contains("thr-second")), clue = sendResult)
     assert(sendResult.left.exists(_.getMessage.contains("continuity break")), clue = sendResult)
 
+  test("close() while a turn is queued behind the mutex: queued send rechecks closedRef and rejects"):
+    // First turn sleeps after emitting Init so we can deterministically queue a second turn behind it. After Init
+    // arrives, runStreamingSpec returns the session, but the first-turn fiber still owns `turnMutex` until the
+    // script exits. We .start session.send(...) in a fiber so it waits on the mutex, then call session.close()
+    // which sets closedRef = true and waits on the mutex too. Whichever waiter acquires the mutex next, the
+    // queued send's inner closedRef recheck (runResumeTurn) must see closedRef = true and raise. Regression guard:
+    // before the inner recheck was added, a queued send would proceed past the outer fast-path closedRef check,
+    // acquire the mutex, and spawn a fresh `codex exec resume` after the session had already been closed.
+    val tid = "thr-queued"
+    val script =
+      s"""#!/bin/sh
+         |last=""
+         |for a in "$$@"; do last="$$a"; done
+         |json_prompt=$$(printf '%s' "$$last" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g; s/$$/\\\\n/' | tr -d '\\n')
+         |echo '{"type":"thread.started","thread_id":"$tid"}'
+         |# Sleep AFTER thread.started so the factory's initDef.get returns and the test can queue a send behind
+         |# the still-running first turn. The mutex stays held until this script exits.
+         |sleep 0.5
+         |echo '{"type":"turn.started"}'
+         |printf '%s\\n' "{\\"type\\":\\"item.completed\\",\\"item\\":{\\"id\\":\\"item_0\\",\\"type\\":\\"agent_message\\",\\"text\\":\\"echo: $$json_prompt\\"}}"
+         |echo '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":3,"reasoning_output_tokens":0}}'
+         |""".stripMargin
+    val fake = os.temp(contents = script, prefix = "fake-codex-queued-", suffix = ".sh", deleteOnExit = true)
+    os.perms.set(fake, "rwx------")
+    val systemPrompt = os.temp(contents = "S", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val connector = CodexConnector(
+      binary = fake.toString,
+      model = model,
+      priceTable = emptyPrices,
+      sessionSettings = defaultSettings
+    )
+    val queuedResult = connector
+      .runStreamingSpec(systemPrompt, "first")
+      .flatMap: session =>
+        for
+          // Queue a second turn that must wait on `turnMutex` because the first turn still holds it.
+          sendFiber <- session.send("queued").attempt.start
+          // Give the send fiber a moment to actually start waiting on the mutex.
+          _ <- IO.sleep(50.millis)
+          // close() sets closedRef = true and waits on the mutex; the queued send must recheck before spawning.
+          _ <- session.close()
+          result <- sendFiber.joinWithNever
+        yield result
+      .unsafeRunSync()
+    assert(queuedResult.isLeft, clue = queuedResult)
+    assert(
+      queuedResult.left.exists(_.getMessage.contains("session is closed")),
+      clue = queuedResult
+    )
+
+  test("resume turn that exits non-zero raises from send() with stderr tail and finalises the session"):
+    // Two-phase fake. First invocation: normal transcript so runStreamingSpec succeeds. Second invocation (the
+    // resume turn driven by send()): emits thread.started then writes a diagnostic to stderr and exits 1. Pre-P2
+    // the send() returned success because runOneTurn discarded the exit code; post-P2 it raises so the
+    // orchestrator can route to a turn-failure rather than continuing against a torn-down stream. Subsequent
+    // sends must also reject — the session is finalised.
+    val counterFile = os.temp(prefix = "codex-counter-fail-", suffix = ".txt", deleteOnExit = true)
+    os.write.over(counterFile, "0")
+    val tid = "thr-fail-1"
+    val script =
+      s"""#!/bin/sh
+         |n=$$(cat ${counterFile.toString})
+         |if [ "$$n" = "0" ]; then
+         |  echo 1 > ${counterFile.toString}
+         |  echo '{"type":"thread.started","thread_id":"$tid"}'
+         |  echo '{"type":"turn.started"}'
+         |  printf '%s\\n' "{\\"type\\":\\"item.completed\\",\\"item\\":{\\"id\\":\\"item_0\\",\\"type\\":\\"agent_message\\",\\"text\\":\\"first turn ok\\"}}"
+         |  echo '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":3,"reasoning_output_tokens":0}}'
+         |  exit 0
+         |else
+         |  echo '{"type":"thread.started","thread_id":"$tid"}'
+         |  echo "codex internal error" >&2
+         |  exit 1
+         |fi
+         |""".stripMargin
+    val fake = os.temp(contents = script, prefix = "fake-codex-fail-", suffix = ".sh", deleteOnExit = true)
+    os.perms.set(fake, "rwx------")
+    val systemPrompt = os.temp(contents = "S", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val connector = CodexConnector(
+      binary = fake.toString,
+      model = model,
+      priceTable = emptyPrices,
+      sessionSettings = defaultSettings
+    )
+    val outcome = connector
+      .runStreamingSpec(systemPrompt, "first")
+      .flatMap: session =>
+        for
+          firstSend <- session.send("triggers failure").attempt
+          // Session must be finalised after a turn failure — a follow-up send must reject without spawning.
+          followUp <- session.send("after failure").attempt
+        yield (firstSend, followUp)
+      .unsafeRunSync()
+    val (firstSend, followUp) = outcome
+    assert(firstSend.isLeft, clue = firstSend)
+    assert(firstSend.left.exists(_.getMessage.contains("exited 1")), clue = firstSend)
+    assert(firstSend.left.exists(_.getMessage.contains("resume turn")), clue = firstSend)
+    assert(
+      firstSend.left.exists(_.getMessage.contains("codex internal error")),
+      clue = firstSend
+    )
+    assert(followUp.isLeft, clue = followUp)
+    assert(followUp.left.exists(_.getMessage.contains("session is closed")), clue = followUp)
+
+  test("resume turn that exits cleanly but emits no Result event raises from send()"):
+    // Resume turn produces thread.started + turn.started but NO turn.completed → CodexEventParser emits no Result.
+    // The AgentSession.events contract is "terminates with a Result event"; a clean-exit turn that doesn't emit
+    // one is still a contract violation. Pre-P2 the missing Result was silently absorbed; post-P2 send() raises.
+    val counterFile = os.temp(prefix = "codex-counter-noresult-", suffix = ".txt", deleteOnExit = true)
+    os.write.over(counterFile, "0")
+    val tid = "thr-fail-2"
+    val script =
+      s"""#!/bin/sh
+         |n=$$(cat ${counterFile.toString})
+         |if [ "$$n" = "0" ]; then
+         |  echo 1 > ${counterFile.toString}
+         |  echo '{"type":"thread.started","thread_id":"$tid"}'
+         |  echo '{"type":"turn.started"}'
+         |  printf '%s\\n' "{\\"type\\":\\"item.completed\\",\\"item\\":{\\"id\\":\\"item_0\\",\\"type\\":\\"agent_message\\",\\"text\\":\\"first turn ok\\"}}"
+         |  echo '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":3,"reasoning_output_tokens":0}}'
+         |  exit 0
+         |else
+         |  echo '{"type":"thread.started","thread_id":"$tid"}'
+         |  echo '{"type":"turn.started"}'
+         |  # No turn.completed → no Result event → P2 surfaces the missing-Result contract violation.
+         |  exit 0
+         |fi
+         |""".stripMargin
+    val fake = os.temp(contents = script, prefix = "fake-codex-noresult-", suffix = ".sh", deleteOnExit = true)
+    os.perms.set(fake, "rwx------")
+    val systemPrompt = os.temp(contents = "S", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val connector = CodexConnector(
+      binary = fake.toString,
+      model = model,
+      priceTable = emptyPrices,
+      sessionSettings = defaultSettings
+    )
+    val sendResult = connector
+      .runStreamingSpec(systemPrompt, "first")
+      .flatMap(session => session.send("no result coming").attempt)
+      .unsafeRunSync()
+    assert(sendResult.isLeft, clue = sendResult)
+    assert(sendResult.left.exists(_.getMessage.contains("no Result event")), clue = sendResult)
+    assert(sendResult.left.exists(_.getMessage.contains("resume turn")), clue = sendResult)
+
   test("reviewer methods raise ReviewerNotConfigured (non-retryable) when no ReviewerAssets are configured"):
     val c = newConnector
     val fid = FeatureId("feat-1")

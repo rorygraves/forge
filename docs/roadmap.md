@@ -6,12 +6,13 @@
 > §17 of the design); later phases capture direction and have not yet been
 > turned into specs.
 >
-> **Status:** draft v0.4 — 2026-05-25. Refreshed after PR-A of Slice 1
-> landed (the v1.2 §7.1 trait-shape code change — see
-> [`design-2.1.md`](design-2.1.md)). Both connectors now implement the
-> streaming-spec driver methods end-to-end against fake CLIs; PR-B / PR-C
-> add the real-CLI integration tests. Full refresh due when Slice 1
-> closes out.
+> **Status:** draft v0.5 — 2026-05-26. **Slice 1 closed** (PR-A
+> through PR-E in [`design-2.1.md`](design-2.1.md)). Both connectors
+> implement the v1.2 §7.1 streaming-spec driver methods end-to-end,
+> with real-CLI integration tests in `forge-it`. PR-D (reviewer
+> schema regression suite) deferred to the reviewer-asset PR in
+> Slice 4 per design-rationale **C15**. Next active slice: 2 (FSM,
+> Feature, ActionLog, StateCache).
 
 ## 0. How to read this
 
@@ -61,89 +62,47 @@ risks are integration-shaped.
   §7.10(a)).
 - [x] Codex sticky-settings rule (`CodexSessionSettings` value type +
   `isCompatibleForResume`, §7.10(c)).
-- [~] `ClaudeConnector` and `CodexConnector`, both
-  `schemaMechanism = Native`. Foundations landed: deterministic
-  event parsers, `Subprocess` + `StreamingDriver` plumbing
-  (`send` JSON-encoder hook + `UserMessage` mirror event +
-  `initialUserInput` + `encodeAnswer` hooks per v1.2 §7.1), Claude
-  headless driver methods (real-CLI smoke test passes), Codex
-  headless driver methods, **Layer 5 reviewer one-shots
-  (`reviewDesign` / `reviewPr` / `refine`) for both connectors**
-  with shared `ReviewDecoders` + `ReviewerPrompts`, typed adapter
-  errors (retryable `ReviewerProcessFailure` for §7.6
-  process-level failures vs non-retryable `ReviewerNotConfigured`
-  / `StructuredOutputMissing` / `StructuredOutputMalformed` for
-  §7.5 adapter / config errors so `reviewProcessRetries` never
-  burns its budget on a content or setup mistake), and fake-CLI
-  end-to-end tests proving the full plumbing. **Trait-shape code
-  PR (PR-A in `design-2.1.md`) landed:** `AgentEvent.AskUserQuestion`
-  carries `toolUseId: Option[String]` (Native parser captures the
-  block-level id, HaltWithQuestion emits `None`);
-  `StreamingSession.answerQuestion(toolUseId, answer)` plumbed
-  through `StreamingDriver` with a connector-supplied `encodeAnswer`
-  hook; `ClaudeConnector.runStreamingSpec` / `resumeStreamingSpec`
-  wired through `StreamingDriver` with the §7.2 `tool_result` frame
-  encoder (`encodeToolResultJson`) and a new `MissingToolUseId`
-  adapter error for the parser-regression path;
-  `CodexConnector.runStreamingSpec` / `resumeStreamingSpec` /
-  `answerQuestion` implemented as a new `CodexStreamingSession`
-  multi-process facade (one `codex exec [resume] --json` subprocess
-  per turn, serialised under `cats.effect.std.Mutex`, single shared
-  events Channel with resume-turn Init filtered, thread-id mismatch
-  on resume raises). Both connectors covered by fake-CLI round-trip
-  tests in their `*ConnectorSuite`. **Still ⏳:** real-CLI streaming
-  integration tests (PR-B Claude, PR-C Codex in `design-2.1.md`) and
-  the reviewer schema regression suite (PR-D, blocked on shipped
-  schemas + reviewer prompts).
-- [~] `HaltWithQuestion` parsing + re-spawn loop for Codex. Envelope
-  decoder landed (`HaltWithQuestion.detect` / `tryParse`); the
-  orchestrator-side re-spawn loop lands with slice 2 (FSM).
-- [~] Integration tests on real CLIs — Claude headless hello-world
-  smoke passes in `forge-it`. Remaining: §17 slice-1 full list
-  (resume round-trip with `oldSessionId == newSessionId`, kill
-  mid-stream, HaltWithQuestion reliability ≥19/20, reviewer ≥19/20
-  schema regression suites). Most of these depend on the reviewer
-  one-shots + the trait-extension PR landing first.
+- [x] `ClaudeConnector` and `CodexConnector`, both
+  `schemaMechanism = Native`. Slice 1 covered: event parsers,
+  `Subprocess` + `StreamingDriver` plumbing (`send` JSON-encoder hook,
+  `UserMessage` mirror event, `initialUserInput`, `encodeAnswer` hooks
+  per v1.2 §7.1), Claude + Codex headless driver methods, Layer 5
+  reviewer one-shots (`reviewDesign` / `reviewPr` / `refine`) with
+  shared `ReviewDecoders` + `ReviewerPrompts` and typed retryable vs
+  non-retryable adapter errors, `AgentEvent.AskUserQuestion` carrying
+  `toolUseId: Option[String]`,
+  `StreamingSession.answerQuestion(toolUseId, answer)` plumbed through
+  `StreamingDriver` with a connector-supplied `encodeAnswer` hook,
+  `ClaudeConnector.runStreamingSpec` / `resumeStreamingSpec` against
+  the §7.2 `tool_result` frame, `CodexConnector` streaming via the
+  multi-process `CodexStreamingSession` facade (one `codex exec
+  [resume] --json` subprocess per turn under
+  `cats.effect.std.Mutex`, single shared events Channel with
+  resume-turn Init filtered, thread-id mismatch raises, per-turn
+  failure surfaces non-zero exit / missing Result to the caller).
+  Closed 2026-05-26 by [`design-2.1.md`](design-2.1.md) PR-A → PR-E.
+- [x] `HaltWithQuestion` parsing + re-spawn loop for Codex. Envelope
+  decoder (`HaltWithQuestion.detect` / `tryParse`) lands in this
+  slice; the orchestrator-side re-spawn loop lands with slice 2
+  (FSM) — that's an orchestrator concern, not a connector one.
+- [x] Integration tests on real CLIs. Claude headless hello-world
+  smoke, `ClaudeStreamingSpecSuite` (resume preserves session id,
+  kill mid-stream, `answerQuestion` end-to-end against a contrived
+  `AskUserQuestion`), Codex headless smoke, `CodexStreamingSpecSuite`,
+  and `CodexHaltWithQuestionReliabilitySuite` (opt-in via
+  `FORGE_IT_RUN_RELIABILITY=1`) land in `forge-it`. The reviewer
+  ≥19/20 native schema regression suite (PR-D) is deferred to the
+  reviewer-asset PR per design-rationale **C15**; fake-CLI
+  end-to-end reviewer coverage in `*ConnectorSuite` is the Slice-1
+  bar.
 
-**What unblocks slice-1 closure** (in dependency order):
-
-1. **`forge-design-1.2.md`** — ✅ landed. Folds in the three §7.1
-   trait-shape findings: an initial user message on
-   `runStreamingSpec` / `resumeStreamingSpec` (both pinned CLIs
-   need one before emitting init / thread_id); an explicit
-   `answerQuestion(toolUseId, answer)` for the §7.2 `tool_result`
-   path; and a `toolUseId` field on `AgentEvent.AskUserQuestion`
-   so the orchestrator can route the answer back. The interim
-   delta doc at
-   [`docs/slice-1/slice-1-findings.md`](slice-1/slice-1-findings.md)
-   is superseded by 1.2 and kept in-tree as an evolution record.
-2. **Layer 5 reviewer one-shots** — ✅ landed. `reviewDesign`,
-   `reviewPr`, `refine` implemented on both connectors with the
-   spawn-wait-parse-exit lifecycle, shared schema decoders + body
-   templates, typed adapter errors so the orchestrator's eventual
-   `RetryOnProcessFailure(reviewProcessRetries)` wrapper can
-   distinguish retryable process failures from §7.5 adapter
-   errors. Real-CLI integration tests (≥19/20 regression suites
-   per schema, per reviewer) still ⏳ — gated on shipped schemas
-   + reviewer system prompts, which land later in Slice 1 / early
-   Slice 4 alongside `ForgePaths`.
-3. **Re-enable streaming spec connectors** — ✅ landed as PR-A in
-   [`design-2.1.md`](design-2.1.md). Both connectors now implement
-   `runStreamingSpec(systemPrompt, initialUserMessage)`,
-   `resumeStreamingSpec(sessionId, message)`, and
-   `StreamingSession.answerQuestion(toolUseId, answer)` against the
-   v1.2 §7.1 trait. `AgentEvent.AskUserQuestion` carries `toolUseId:
-   Option[String]`; `ClaudeConnector` requires `Some(id)` for the
-   Native `tool_result` reply path (raising `MissingToolUseId` on
-   `None`); `CodexConnector` runs as a multi-process facade
-   (`CodexStreamingSession`) ignoring `toolUseId` per §7.3. Covered
-   by fake-CLI round-trips in both `*ConnectorSuite`s.
-4. **Full §17 forge-it test list** — ⏳ next up, as PR-B / PR-C in
-   [`design-2.1.md`](design-2.1.md). Real-CLI streaming round-trips
-   (resume preserving session id, kill mid-stream, `answerQuestion`
-   exercised end-to-end) for both connectors. PR-D (reviewer schema
-   regression suite) still blocked on shipped reviewer schemas +
-   system prompts.
+✅ **Slice 1 closed 2026-05-26.** Detailed history of how it got
+there (PR-A through PR-E) lives in
+[`design-2.1.md`](design-2.1.md) §3 (status log) and §4
+(carry-forward to v1.3). Carry-forward bullets — **C14** (Codex
+`resumeStreamingSpec` system-prompt prepending) and **C15** (PR-D
+deferred to Slice 4 reviewer-asset PR) — have durable homes in
+[`design-rationale.md`](design-rationale.md) and §7.2 below.
 
 ### 2.2 Slice 2 — FSM, Feature, ActionLog, StateCache (≈ week 2)
 
@@ -463,6 +422,26 @@ deferred to Phase 3+.
    a helper from Slice 2 onward (see §2.6 and design §17 Slice 2) so
    Phase 4 can re-root them at an instance directory without touching
    every callsite.
+
+### 7.2 Known v1.2 spec/code gaps deferred to v1.3 (or next-revision spec)
+
+Surface here so they don't get lost between sub-PRs. Each one has an
+explicit deferred-decision entry in
+[`design-rationale.md`](design-rationale.md); the durable home for
+"what v1.3 must close" lives there.
+
+- **C14 — `CodexConnector.resumeStreamingSpec` cannot honour §7.10(a)
+  system-prompt prepending.** Shared trait signature carries no
+  `systemPromptPath`. v1.3 must either widen the trait (drags Claude
+  through a parameter it doesn't need) or drop the §7.10(a) "applies
+  to resume" claim. Surfaced by Slice 1 PR-C; the orchestrator's
+  resume code path (Slice 2 FSM) must be written aware of it.
+- **C15 — Native schema regression suite (PR-D) deferred from Slice 1
+  to the reviewer-asset PR (Slice 4).** v1.2 §17 names the ≥19/20
+  regression suite as Slice-1 integration coverage; real-CLI
+  measurement requires shipped reviewer schemas + system prompts
+  which land alongside `ForgePaths` in Slice 4. PR-D becomes a gating
+  check on that PR; v1.3 §17 reorganisation should absorb the move.
 
 ---
 

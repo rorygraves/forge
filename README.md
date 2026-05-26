@@ -6,10 +6,10 @@ through design → implement → PR → merge with cross-model review and
 human-in-the-loop.
 
 **Author:** Rory  •  **License:** MIT  •  **Status:** Slice 0 (CLI
-capability validation) complete; Slice 1 (agent connectors) in progress —
-`Role` indirection + Codex adapter helpers (price table, prompt prepend,
-sticky settings) landed; Claude/Codex connector skeletons, the
-`HaltWithQuestion` loop, and integration tests still to come.
+capability validation) and Slice 1 (agent connectors) complete.
+`forge-agents` ships both Claude and Codex connectors against the
+v1.2 §7.1 trait, with real-CLI integration coverage in `forge-it`.
+Next: Slice 2 (`forge-core` — FSM, Feature, ActionLog, StateCache).
 
 ## What Forge is for
 
@@ -80,7 +80,8 @@ Slice 0 validated capabilities against these versions; Forge will not
 silently support older ones:
 
 - Claude Code CLI ≥ `2.1.150`
-- Codex CLI ≥ `codex-cli 0.130.0`
+- Codex CLI ≥ `codex-cli 0.130.0` (Slice 1 integration suite runs
+  against `codex-cli 0.133.0`)
 - GitHub CLI ≥ `2.83.1`
 
 ## Status
@@ -88,8 +89,9 @@ silently support older ones:
 | Phase | Outcome | State |
 |---|---|---|
 | Slice 0 — CLI validation | Three v1.1 corrections folded in | ✅ complete |
-| Slice 1 — Agent connectors | `forge-agents` standalone with integration tests | 🚧 in progress (Role + Codex helpers + reviewer one-shots landed; v1.2 trait-shape spec landed; streaming spawn/resume re-enable + full §17 forge-it suite remain) |
-| Slices 2–4 | FSM → git → headless loop | scoped |
+| Slice 1 — Agent connectors | `forge-agents` standalone with real-CLI integration tests | ✅ closed 2026-05-26 (PR-D ≥19/20 native schema regression suite deferred to Slice 4 / reviewer-asset PR per design-rationale C15) |
+| Slice 2 — `forge-core` | FSM, Feature, ActionLog, StateCache | 🚧 next |
+| Slices 3–4 | git → headless loop | scoped |
 | Slice 5 — TUI | termflow + Elm | scoped |
 | Phase 4 — Forge-instance pivot | Multi-repo, daemon, parallel, containerised | post-1.0, needs own design doc |
 
