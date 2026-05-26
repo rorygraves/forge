@@ -662,17 +662,17 @@ The pure heart of Slice 2. No I/O. Big test surface.
   trait to v1.2 §4 invariant ("local runtime log is canonical") and
   §19 (event shapes).
 
-### 1.5 PR E — StateCache (file I/O)
+### 1.5 PR E — StateCache (file I/O) — ✅ landed 2026-05-26
 
-- [ ] **E1.** `StateCache` trait in `io.forge.core.state`:
+- [x] **E1.** `StateCache` trait in `io.forge.core.state`:
   - `load(featureId): IO[Option[Feature]]`
   - `save(featureId, feature): IO[Unit]` (atomic: temp file →
     fsync → `os.move` over the target; per v1.2 §4 and §11.5
     "Write via temp file + os.move").
-- [ ] **E2.** File impl `FileStateCache(paths: ForgePaths)`. Reads
+- [x] **E2.** File impl `FileStateCache(paths: ForgePaths)`. Reads
   `.forge/state/<feature>.json`; writes via `paths.stateFile(...)`.
   ReadWriter via `Json.given`.
-- [ ] **E3.** `StateCache.verifyAgainstLog(featureId,
+- [x] **E3.** `StateCache.verifyAgainstLog(featureId,
   manifestStore: ManifestStore, log: ActionLog):
   IO[Either[RebuildError, VerifyResult]]` where `VerifyResult` is
   `Consistent(Feature) | Rewritten(Feature)`. Per v1.2 §11.0 step
@@ -689,7 +689,7 @@ The pure heart of Slice 2. No I/O. Big test surface.
   `harness.cache_invalidated` action on rewrite. `verifyAgainstLog`
   therefore takes `manifestStore` as a parameter (mirroring the
   `RebuildState.run` signature in E4).
-- [ ] **E4.** `RebuildState.run(featureId, paths, manifestStore,
+- [x] **E4.** `RebuildState.run(featureId, paths, manifestStore,
   log, cache): IO[Either[RebuildError, Feature]]` — the
   `forge-core` entry point that the Slice-4 `forge rebuild-state`
   CLI delegates to.
@@ -867,7 +867,7 @@ The pure heart of Slice 2. No I/O. Big test surface.
     `forge-specs`'s richer `SpecStore` (writes, DocSync, audit
     rendering) lands in Slice 4 and *uses* `ManifestStore` under
     the hood.
-- [ ] **E5.** `FileStateCacheSuite` — write/read round-trip, atomic
+- [x] **E5.** `FileStateCacheSuite` — write/read round-trip, atomic
   write (verify the temp file doesn't exist after `save`),
   divergence detection (rewrite a `Feature` with stale state cache
   and confirm `verifyAgainstLog` returns `Rewritten`).
@@ -1499,6 +1499,91 @@ after PR-G lands.
   Build: `sbt scalafmtCheckAll` clean, `sbt test` 291/291 in
   `forge-core`, 181/181 in `forge-agents` (no regression),
   `forge-it` 10/10 (1 reliability suite skipped per
+  `FORGE_IT_RUN_RELIABILITY` opt-in).
+- 2026-05-26 — **PR-E landed.** StateCache file I/O + RebuildState
+  pipeline per §1.5. New artefacts under `io.forge.core.state` and
+  `io.forge.core.manifest`:
+  + `StateCache` trait — `load(featureId): IO[Option[Feature]]`,
+    `save(featureId, feature): IO[Unit]` (atomic temp+rename),
+    `verifyAgainstLog(featureId, manifestStore, log):
+    IO[Either[RebuildError, VerifyResult]]` returning
+    `Consistent(Feature) | Rewritten(Feature)` per §11.0 step 4.
+  + `FileStateCache(paths)` — file-backed impl. `save` writes a
+    sibling temp file (UUID-suffixed, same parent so the rename
+    stays inside one filesystem) with `CREATE_NEW | WRITE | SYNC`,
+    then `Files.move(ATOMIC_MOVE, REPLACE_EXISTING)` over the
+    target. Best-effort temp cleanup on the IO-exception path so a
+    crashed write doesn't poison the next run. `verifyAgainstLog`
+    runs the full `RebuildState.run` pipeline and compares the
+    rebuilt `Feature` to the cached value; on match → `Consistent`,
+    on mismatch (or absent cache) → `Rewritten` plus a
+    `harness.cache_invalidated { reason: "cache_diverged" |
+    "cache_missing" }` action appended to the log.
+  + `RebuildError` (sealed) in `io.forge.core.state` —
+    `ManifestLoadFailed(featureId, cause: Throwable)`,
+    `ReplayInconsistent(cause: ReplayError)` lifting the
+    log-layer error, `InconsistentRecovery(reason)` for
+    structural recovery failures. Each layer keeps its own error
+    vocabulary; `ReplayError` is local to `io.forge.core.log` and
+    is wrapped, not re-exported.
+  + `ManifestStore` trait + `FileManifestStore(paths)` impl in
+    `io.forge.core.manifest` — `load(id): IO[Either[
+    RebuildError.ManifestLoadFailed, Manifest]]`. Reads
+    `paths.manifest(id)`, parses via `Manifest.fromJson`, runs
+    `Manifest.validate`, surfaces any failure (missing file,
+    malformed JSON, validate errors) as `ManifestLoadFailed` with
+    the underlying `Throwable` as cause.
+  + `RebuildState.run(featureId, paths, manifestStore, log, cache)`
+    — 6-step pipeline per design-2.2 §1.5 E4: manifest load →
+    `Feature.initial` seed → log fold → pure `reconcile` →
+    conditional `log.appendAll(draftsToAppend)` (skipped when
+    empty so case (a) doesn't touch the log) → atomic
+    `cache.save`. Every fail point lifts into the `Either`
+    channel; `IO` carries only genuine I/O exceptions.
+  + `RebuildState.reconcile(foldResult, manifest): Either[
+    RebuildError, ReconcileResult]` — **pure**. Classifies each
+    merged piece into the four §11.5 sub-cases ((a) fully
+    recovered, (b) partial-batch repair, (c) §11.5 crash window,
+    (d) structurally impossible) and assembles
+    `ReconcileResult(feature, draftsToAppend)`. Case (b)
+    synthesises the missing `audit.piece_merged` + paired
+    `harness.crash_recovered { reason:
+    "partial_batch_missing_audit" }` draft; case (c) applies
+    `Fsm.transition(feature, syntheticMerged)` with `observedAt =
+    mergedAt` (per the B4 note — closest historical fact
+    available) leveraging the B4 idempotency rule that lets the
+    transition fire without re-mutating an already-merged
+    manifest, plus a paired `harness.crash_recovered { reason:
+    "crash_window_synthetic_merged" }`. Cases (c) bad fold-state,
+    (d) audit-only orphan, and multi-piece divergence all
+    surface as `Left(InconsistentRecovery(...))`. Transition
+    anchoring uses **both** piece id and PR number per
+    design-2.2 §1.5 E4 — piece-id-only would accept a stale or
+    hand-edited transition through a different PR.
+  + Tests landed:
+    + `ManifestStoreSuite` (4) — happy path, missing file,
+      malformed JSON, validate failure (duplicate piece ids).
+    + `FileStateCacheSuite` (9) — load/save round-trip, missing
+      cache returns `None`, overwrite, atomic write (no
+      leftover temp files alongside the target after `save`),
+      on-disk uPickle round-trip; verifyAgainstLog Consistent
+      path, Rewritten path with `cache_diverged`, Rewritten
+      path with `cache_missing`, and `Left(ManifestLoadFailed)`
+      pass-through.
+    + `RebuildStateSuite` (12) — reconcile cases (a)/(b)/(c)/(d),
+      case (b) at both Refining and at a forward state
+      (PieceImplementing(next)), case (c) bad fold-state →
+      InconsistentRecovery, case (d) audit orphan, multi-piece
+      (c) divergence refusal, mixed (a)+(b) two-piece compose;
+      plus run end-to-end clean / missing-manifest /
+      case-(c)-crash-window / case-(c)-bad-fold-state paths
+      exercising the full pipeline against `FileActionLog` +
+      `FileManifestStore` + `FileStateCache` on a real temp
+      directory.
+    +25 unit tests; `forge-core` grew 291 → 316.
+  Build: `sbt scalafmtCheckAll` clean, `sbt test` 316/316 in
+  `forge-core`, 181/181 in `forge-agents` (no regression),
+  `forge-it` 11/11 (1 reliability suite skipped per
   `FORGE_IT_RUN_RELIABILITY` opt-in).
 
 ## 4. Carry-forward to v1.3
