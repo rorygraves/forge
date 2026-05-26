@@ -1,0 +1,22 @@
+{
+  "number": 109,
+  "state": "OPEN",
+  "mergedAt": null,
+  "mergeCommit": null,
+  "mergeable": "MERGEABLE",
+  "mergeStateStatus": "CLEAN",
+  "reviewDecision": null,
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "name": "build",
+      "status": "MYSTERY_NEW_STATE",
+      "conclusion": null
+    }
+  ],
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    { "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+  ]
+}

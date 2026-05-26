@@ -1,0 +1,15 @@
+{
+  "number": 104,
+  "state": "CLOSED",
+  "mergedAt": null,
+  "mergeCommit": null,
+  "mergeable": "UNKNOWN",
+  "mergeStateStatus": "UNKNOWN",
+  "reviewDecision": null,
+  "statusCheckRollup": [],
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    { "oid": "4444444444444444444444444444444444444444" }
+  ]
+}

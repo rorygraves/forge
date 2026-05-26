@@ -1,0 +1,14 @@
+{
+  "number": 108,
+  "mergedAt": null,
+  "mergeCommit": null,
+  "mergeable": "MERGEABLE",
+  "mergeStateStatus": "CLEAN",
+  "reviewDecision": null,
+  "statusCheckRollup": [],
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    { "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+  ]
+}

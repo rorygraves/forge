@@ -1,0 +1,40 @@
+{
+  "number": 107,
+  "state": "OPEN",
+  "mergedAt": null,
+  "mergeCommit": null,
+  "mergeable": "MERGEABLE",
+  "mergeStateStatus": "CLEAN",
+  "reviewDecision": null,
+  "statusCheckRollup": [],
+  "comments": [
+    {
+      "databaseId": 99,
+      "body": "old comment, baseline expected to filter",
+      "createdAt": "2026-05-26T09:00:00Z",
+      "author": { "login": "alice" }
+    },
+    {
+      "databaseId": 100,
+      "body": "boundary comment — baseline filter must use Long, not String, ordering",
+      "createdAt": "2026-05-26T09:30:00Z",
+      "author": { "login": "alice" }
+    },
+    {
+      "databaseId": 101,
+      "body": "new comment — visible past baseline 100",
+      "createdAt": "2026-05-26T10:00:00Z",
+      "author": { "login": "bob" }
+    },
+    {
+      "databaseId": 110,
+      "body": "forge-bot historical comment — should be filtered",
+      "createdAt": "2026-05-26T10:30:00Z",
+      "author": { "login": "forge-bot" }
+    }
+  ],
+  "reviews": [],
+  "commits": [
+    { "oid": "9999999999999999999999999999999999999999" }
+  ]
+}

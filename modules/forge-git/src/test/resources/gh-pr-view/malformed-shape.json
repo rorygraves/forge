@@ -1,0 +1,15 @@
+{
+  "number": 110,
+  "state": "OPEN",
+  "mergedAt": null,
+  "mergeCommit": null,
+  "mergeable": "MERGEABLE",
+  "mergeStateStatus": "CLEAN",
+  "reviewDecision": null,
+  "statusCheckRollup": { "expected": "array got object" },
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    { "oid": "cccccccccccccccccccccccccccccccccccccccc" }
+  ]
+}

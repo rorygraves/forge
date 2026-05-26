@@ -1,0 +1,34 @@
+{
+  "number": 101,
+  "state": "OPEN",
+  "mergedAt": null,
+  "mergeCommit": null,
+  "mergeable": "MERGEABLE",
+  "mergeStateStatus": "BLOCKED",
+  "reviewDecision": "REVIEW_REQUIRED",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "name": "build",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "__typename": "CheckRun",
+      "name": "tests",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "__typename": "CheckRun",
+      "name": "docs",
+      "status": "COMPLETED",
+      "conclusion": "NEUTRAL"
+    }
+  ],
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    { "oid": "1111111111111111111111111111111111111111" }
+  ]
+}

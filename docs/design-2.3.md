@@ -314,13 +314,13 @@ gets settled in PR-A.
     - This file's PR-A header flipped to "✅ landed" and a §3 status-log
       entry added.
 
-### 1.2 PR B — `PrSnapshotDecoder` + `PollBaseline` — ⏳ pending
+### 1.2 PR B — `PrSnapshotDecoder` + `PollBaseline` — ✅ landed
 
 PR-B is the *decode-only* PR. Pure functions from `ujson.Value` →
 `Either[DecodeError, DecodedSnapshot]`. The bulk of roadmap §2.3's
 "fake-gh unit coverage" goal lands here.
 
-- [ ] **B1.** `PollBaseline` case class in
+- [x] **B1.** `PollBaseline` case class in
   `io.forge.git.watcher`:
   ```scala
   final case class PollBaseline(
@@ -341,7 +341,7 @@ PR-B is the *decode-only* PR. Pure functions from `ujson.Value` →
   compare). The wire JSON exposes `databaseId` as a JSON number;
   the decoder reads it via `json("databaseId").num.toLong`. Stored
   on disk as `Long` via uPickle's default codec.
-- [ ] **B2.** `PrSnapshotDecoder.decode(json: ujson.Value, baseline:
+- [x] **B2.** `PrSnapshotDecoder.decode(json: ujson.Value, baseline:
   PollBaseline, botLogin: String): Either[DecodeError,
   DecodedSnapshot]` — the canonical decoder entrypoint.
   `DecodedSnapshot(snapshot: PrSnapshot, headSha: Sha)` is a small
@@ -362,7 +362,7 @@ PR-B is the *decode-only* PR. Pure functions from `ujson.Value` →
       expected).
   Decoded output is a `forge-core` `PrSnapshot`. The decoder does
   **not** mutate baseline state — that's the watcher's job (PR-D).
-- [ ] **B3.** Field-by-field decode rules (each rule paired with a
+- [x] **B3.** Field-by-field decode rules (each rule paired with a
   test under B5):
     - `state` → `PrState.fromString` (already in
       `PrSnapshot.scala`).
@@ -403,7 +403,7 @@ PR-B is the *decode-only* PR. Pure functions from `ujson.Value` →
       `BranchManager.baseFreshness` reads it without mutating the
       `forge-core` `PrSnapshot` ADT. Empty `commits` array →
       `DecodeError.MissingField("commits[-1].oid")`.
-- [ ] **B4.** **Comment baseline filter is a pure function**
+- [x] **B4.** **Comment baseline filter is a pure function**
   (`Comments.unseen(rawComments, baseline)`) tested independently
   from `decode`. Three properties:
     - Numeric (`Long`) id ordering — explicitly assert
@@ -413,7 +413,7 @@ PR-B is the *decode-only* PR. Pure functions from `ujson.Value` →
       can't reintroduce the lexicographic ordering bug.
     - Empty baseline → every comment is unseen.
     - Baseline equal to last comment → empty unseen set.
-- [ ] **B5.** Decoder test suite under
+- [x] **B5.** Decoder test suite under
   `modules/forge-git/src/test/scala/io/forge/git/watcher/`. Fixture
   JSON files under
   `modules/forge-git/src/test/resources/gh-pr-view/`:
@@ -1171,6 +1171,21 @@ after PR-H lands.
   `ForgePathsSuite` `os.walk` sweep still green over the new sources
   (no `.forge` literals introduced). PR-B (`PrSnapshotDecoder` +
   `PollBaseline`) is the next entry point.
+- 2026-05-26 — PR-B landed. `io.forge.git.watcher` package now ships
+  `PollBaseline` (Long-typed baseline cursor per **RL2**),
+  `DecodedSnapshot(snapshot, headSha)`, the `DecodeError` ADT
+  (`MissingField` / `UnknownEnumValue` / `MalformedShape`),
+  `Comments.unseen` (pure numeric-Long-ordering filter), and
+  `PrSnapshotDecoder.decode` covering every §6 field with explicit
+  CI6 handling (`mergeStateStatus` dropped on the floor). Test scope:
+  `forge-git` 32 → 70 — `CommentsSuite` (9 tests pinning the
+  Long-vs-String ordering invariant at digit-count and `Long.MaxValue`
+  boundaries) and `PrSnapshotDecoderSuite` (29 tests against 10 fixture
+  JSONs under `src/test/resources/gh-pr-view/` plus inline-JSON
+  negative cases). `forge-core` 358 / `forge-agents` 181 / `forge-it`
+  11 baselines unchanged; `scalafmtCheckAll` clean.
+  PR-C (`BranchManager` + `BranchProtectionCache`) is the next entry
+  point.
 
 ## 4. Carry-forward to v1.3
 

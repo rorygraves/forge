@@ -1,0 +1,28 @@
+{
+  "number": 100,
+  "state": "OPEN",
+  "mergedAt": null,
+  "mergeCommit": null,
+  "mergeable": "UNKNOWN",
+  "mergeStateStatus": "UNKNOWN",
+  "reviewDecision": null,
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "name": "build",
+      "status": "IN_PROGRESS",
+      "conclusion": null
+    },
+    {
+      "__typename": "CheckRun",
+      "name": "lint",
+      "status": "QUEUED",
+      "conclusion": null
+    }
+  ],
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    { "oid": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" }
+  ]
+}

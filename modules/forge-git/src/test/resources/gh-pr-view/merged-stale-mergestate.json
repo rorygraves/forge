@@ -1,0 +1,15 @@
+{
+  "number": 106,
+  "state": "MERGED",
+  "mergedAt": "2026-05-26T13:00:00Z",
+  "mergeCommit": { "oid": "7777777777777777777777777777777777777777" },
+  "mergeable": "MERGEABLE",
+  "mergeStateStatus": "CLEAN",
+  "reviewDecision": "APPROVED",
+  "statusCheckRollup": [],
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    { "oid": "8888888888888888888888888888888888888888" }
+  ]
+}

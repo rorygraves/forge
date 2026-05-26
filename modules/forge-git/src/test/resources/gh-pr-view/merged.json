@@ -1,0 +1,22 @@
+{
+  "number": 105,
+  "state": "MERGED",
+  "mergedAt": "2026-05-26T12:00:00Z",
+  "mergeCommit": { "oid": "5555555555555555555555555555555555555555" },
+  "mergeable": "UNKNOWN",
+  "mergeStateStatus": "UNKNOWN",
+  "reviewDecision": "APPROVED",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "name": "build",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    }
+  ],
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    { "oid": "6666666666666666666666666666666666666666" }
+  ]
+}

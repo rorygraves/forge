@@ -1,0 +1,30 @@
+{
+  "number": 102,
+  "state": "OPEN",
+  "mergedAt": null,
+  "mergeCommit": null,
+  "mergeable": "MERGEABLE",
+  "mergeStateStatus": "BLOCKED",
+  "reviewDecision": "CHANGES_REQUESTED",
+  "statusCheckRollup": [],
+  "comments": [
+    {
+      "databaseId": 200,
+      "body": "Please address the failing case in `Foo.scala`.",
+      "createdAt": "2026-05-26T10:00:00Z",
+      "author": { "login": "alice" }
+    }
+  ],
+  "reviews": [
+    {
+      "databaseId": 50,
+      "body": "Blocking on the failure in Foo.scala.",
+      "submittedAt": "2026-05-26T10:01:00Z",
+      "state": "CHANGES_REQUESTED",
+      "author": { "login": "alice" }
+    }
+  ],
+  "commits": [
+    { "oid": "2222222222222222222222222222222222222222" }
+  ]
+}
