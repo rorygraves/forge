@@ -437,6 +437,54 @@ class CodexConnectorSuite extends munit.FunSuite:
     assert(followUp.isLeft, clue = followUp)
     assert(followUp.left.exists(_.getMessage.contains("session is closed")), clue = followUp)
 
+  test(
+    "first turn that fails AFTER Init surfaces the actual cause on the next send(), not the generic 'session is closed'"
+  ):
+    // Regression guard for the silent-first-turn-failure bug: when the first turn produces thread.started (so the
+    // factory's initDef.get completes and runStreamingSpec returns a live session) but then exits non-zero (or 0
+    // without a Result), the session is finalised silently. Pre-fix, the next send() raised
+    // "session is closed; further turns rejected" — useless for debugging because the actual failure detail (stderr
+    // tail, exit code, §6.1 reason) is lost. Post-fix, firstTurnFailureRef carries the real cause across the gap and
+    // the next send() raises with it.
+    val tid = "thr-first-fail"
+    val script =
+      s"""#!/bin/sh
+         |echo '{"type":"thread.started","thread_id":"$tid"}'
+         |echo "fatal: model unavailable" >&2
+         |exit 7
+         |""".stripMargin
+    val fake = os.temp(contents = script, prefix = "fake-codex-firstfail-", suffix = ".sh", deleteOnExit = true)
+    os.perms.set(fake, "rwx------")
+    val systemPrompt = os.temp(contents = "S", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val connector = CodexConnector(
+      binary = fake.toString,
+      model = model,
+      priceTable = emptyPrices,
+      sessionSettings = defaultSettings
+    )
+    val outcome = connector
+      .runStreamingSpec(systemPrompt, "hello")
+      .flatMap: session =>
+        for
+          // Give the first-turn fiber a moment to drain the (already-exited) subprocess and record the failure.
+          _ <- IO.sleep(150.millis)
+          firstSend <- session.send("anything").attempt
+          followUp <- session.send("after").attempt
+        yield (firstSend, followUp)
+      .unsafeRunSync()
+    val (firstSend, followUp) = outcome
+    assert(firstSend.isLeft, clue = firstSend)
+    assert(firstSend.left.exists(_.getMessage.contains("exited 7")), clue = firstSend)
+    assert(firstSend.left.exists(_.getMessage.contains("first turn")), clue = firstSend)
+    assert(firstSend.left.exists(_.getMessage.contains("fatal: model unavailable")), clue = firstSend)
+    // Negative: the misleading "session is closed" message must NOT be what surfaces — that would mean the
+    // firstTurnFailureRef check was bypassed.
+    assert(!firstSend.left.exists(_.getMessage.contains("session is closed")), clue = firstSend)
+    // Follow-up: firstTurnFailureRef is sticky (the recorded error is still there), so subsequent sends raise the
+    // same actual cause, not the generic close message.
+    assert(followUp.isLeft, clue = followUp)
+    assert(followUp.left.exists(_.getMessage.contains("exited 7")), clue = followUp)
+
   test("resume turn that exits cleanly but emits no Result event raises from send()"):
     // Resume turn produces thread.started + turn.started but NO turn.completed → CodexEventParser emits no Result.
     // The AgentSession.events contract is "terminates with a Result event"; a clean-exit turn that doesn't emit

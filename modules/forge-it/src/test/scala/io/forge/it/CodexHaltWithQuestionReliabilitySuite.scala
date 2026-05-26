@@ -43,7 +43,7 @@ class CodexHaltWithQuestionReliabilitySuite extends munit.FunSuite:
 
   // FORGE_IT_CODEX_MODEL lets users on a different account tier override the default — see CodexHeadlessSmokeSuite.
   private val model: String =
-    sys.env.getOrElse("FORGE_IT_CODEX_MODEL", "gpt-5-codex")
+    sys.env.getOrElse("FORGE_IT_CODEX_MODEL", "gpt-5.3-codex")
 
   private def loadPriceTable: PriceTable =
     val stream = getClass.getResourceAsStream("/prices.example.json")

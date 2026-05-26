@@ -31,12 +31,15 @@ class CodexHeadlessSmokeSuite extends munit.FunSuite:
   private val skipFlag = sys.env.get("FORGE_IT_SKIP_CODEX").contains("1")
   private val canRun = codexOnPath.isDefined && !skipFlag
 
-  // Default model is the design-2.1 pin; FORGE_IT_CODEX_MODEL lets users on a different account tier override
-  // (e.g. ChatGPT accounts get a 400 invalid_request_error on gpt-5-codex and must use a model their tier exposes —
-  // gpt-5.3-codex on the maintainer's account). The override must still be an entry in `prices.example.json` or the
-  // CostUpdate assertion below fails when usdFor returns None → 0.
+  // Default model targets the maintainer's account tier (ChatGPT subscription); FORGE_IT_CODEX_MODEL lets users on a
+  // different tier override (e.g. OpenAI API tier accounts must set FORGE_IT_CODEX_MODEL=gpt-5-codex). The Slice 1
+  // design-2.1 pin was `gpt-5-codex` — switched to `gpt-5.3-codex` after codex 0.133's ChatGPT-tier rejection of
+  // `gpt-5-codex` surfaced as silent IT failures whose true cause was being swallowed by CodexEventParser dropping
+  // `turn.failed` (now fixed) and CodexStreamingSession silently closing on first-turn failure (now fixed). The
+  // override must still be an entry in `prices.example.json` or the CostUpdate assertion below fails when usdFor
+  // returns None → 0.
   private val model: String =
-    sys.env.getOrElse("FORGE_IT_CODEX_MODEL", "gpt-5-codex")
+    sys.env.getOrElse("FORGE_IT_CODEX_MODEL", "gpt-5.3-codex")
 
   private def loadPriceTable: PriceTable =
     val stream = getClass.getResourceAsStream("/prices.example.json")

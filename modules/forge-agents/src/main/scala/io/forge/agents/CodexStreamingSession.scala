@@ -39,6 +39,7 @@ final class CodexStreamingSession private (
     turnMutex: Mutex[IO],
     currentTurnRef: Ref[IO, Option[Subprocess]],
     closedRef: Ref[IO, Boolean],
+    firstTurnFailureRef: Ref[IO, Option[Throwable]],
     systemPromptPath: Option[os.Path],
     binary: String,
     cwd: Option[os.Path],
@@ -88,21 +89,35 @@ final class CodexStreamingSession private (
           s"CodexStreamingSession($sessionId): session is closed; further turns rejected"
         )
       )
-    closedRef.get.flatMap {
-      case true => rejectionError
-      case false =>
-        // Fast-path bail above is a UX nicety; the load-bearing check is INSIDE the mutex. A queued turn waiting on
-        // `turnMutex.lock` here could otherwise miss a `close()` / `kill()` that flips `closedRef` after the outer
-        // check but before the mutex is acquired — and then spend an unwanted model call (and write into an already
-        // closed channel under `kill()`). The contract in the class-level scaladoc is that `closedRef = true` halts
-        // future turns; re-read inside the mutex to honour it.
-        turnMutex.lock.surround(
-          closedRef.get.flatMap {
-            case true => rejectionError
-            case false => spawnAndDrainTurn(userMessage, isFirstTurn = false, initDef = None)
-          }
-        )
-    }
+    // Check the first-turn-failure ref before the generic "session is closed" rejection. When the first turn fails
+    // after Init has arrived (Init satisfies the factory's blocking gate, but the drain then surfaces a non-zero
+    // exit / missing Result / §6.1 mismatch), the session is finalised silently — closedRef = true — so the next
+    // send/answerQuestion would otherwise raise the misleading "session is closed" message. Surfacing the actual
+    // first-turn cause here is the only place the caller can see it: the start factory has already returned a live
+    // session by then, so it can't raise on its own.
+    val firstTurnFailureCheck =
+      firstTurnFailureRef.get.flatMap {
+        case Some(err) => IO.raiseError[Unit](err)
+        case None => IO.unit
+      }
+    firstTurnFailureCheck *>
+      closedRef.get.flatMap {
+        case true => rejectionError
+        case false =>
+          // Fast-path bail above is a UX nicety; the load-bearing check is INSIDE the mutex. A queued turn waiting on
+          // `turnMutex.lock` here could otherwise miss a `close()` / `kill()` that flips `closedRef` after the outer
+          // check but before the mutex is acquired — and then spend an unwanted model call (and write into an already
+          // closed channel under `kill()`). The contract in the class-level scaladoc is that `closedRef = true` halts
+          // future turns; re-read inside the mutex to honour it. The first-turn-failure check is re-applied too: a
+          // first turn that fails while we wait on the mutex must surface here.
+          turnMutex.lock.surround(
+            firstTurnFailureCheck *>
+              closedRef.get.flatMap {
+                case true => rejectionError
+                case false => spawnAndDrainTurn(userMessage, isFirstTurn = false, initDef = None)
+              }
+          )
+      }
 
   /** One-turn drain. Builds the combined system-prompt + user-message prompt, spawns `codex exec resume --json <sid>
     * <prompt>`, drains stdout into the session channel (Init events dropped on resume turns), drains stderr into the
@@ -252,7 +267,11 @@ final class CodexStreamingSession private (
               else IO.pure(None)
           _ <- failure match
             case None => IO.unit
-            case Some(err) if isFirstTurn => finaliseSession
+            case Some(err) if isFirstTurn =>
+              // First turn after Init arrived: factory already returned a live session, so we can't raise back to
+              // the runStreamingSpec caller. Record the cause; the next send/answerQuestion picks it up via
+              // firstTurnFailureRef and raises with the real error instead of the misleading "session is closed".
+              firstTurnFailureRef.set(Some(err)) *> finaliseSession
             case Some(err) => finaliseAndRaise(err)
         yield ()
         _ <- core.guarantee(
@@ -313,6 +332,7 @@ object CodexStreamingSession:
       turnMutex <- Mutex[IO]
       currentTurnRef <- IO.ref(Option.empty[Subprocess])
       closedRef <- IO.ref(false)
+      firstTurnFailureRef <- IO.ref(Option.empty[Throwable])
       initDef <- Deferred[IO, Either[Throwable, String]]
       // Take the mutex permit upfront so any concurrent send/answerQuestion called immediately after start returns
       // queues until the first turn drains. The first-turn fiber must release the permit when the turn ends.
@@ -324,6 +344,7 @@ object CodexStreamingSession:
         turnMutex = turnMutex,
         currentTurnRef = currentTurnRef,
         closedRef = closedRef,
+        firstTurnFailureRef = firstTurnFailureRef,
         systemPromptPath = systemPromptPath,
         binary = binary,
         cwd = cwd,
@@ -397,6 +418,7 @@ object CodexStreamingSession:
               turnMutex = turnMutex,
               currentTurnRef = currentTurnRef,
               closedRef = closedRef,
+              firstTurnFailureRef = firstTurnFailureRef,
               systemPromptPath = systemPromptPath,
               binary = binary,
               cwd = cwd,

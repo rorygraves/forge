@@ -172,13 +172,25 @@ needs a spec correction to match. The §4 carry-forward records this.
     (17 tests). Total unit tests across the build: 266.
   - `sbt scalafmtCheckAll` clean. ✅
   - `sbt "project forge-it" test` clean (no `forge-it` source
-    touched here, so this is a smoke check). ⚠️ 3 pre-existing
-    flakes in `CodexHeadlessSmokeSuite` / `CodexStreamingSpecSuite`
-    (`session is closed; further turns rejected` from
-    `CodexStreamingSession.runResumeTurn`); reproduced on clean
-    `main` HEAD via `git stash` round-trip — not a PR-A regression.
-    Codex IT flake to track outside Slice 2 (note for a future
-    `forge-agents` follow-up).
+    touched here, so this is a smoke check). ✅ — the 3 codex IT
+    failures originally seen here (`session is closed; further turns
+    rejected` from `CodexStreamingSession.runResumeTurn`, plus the
+    Codex headless smoke test missing `AssistantText`) were
+    investigated as a focused side-quest after PR-A landed. Root
+    cause was a model-rejection 400 (`gpt-5-codex` not supported on
+    ChatGPT-tier accounts) being swallowed by two real bugs:
+    (1) `CodexEventParser` silently dropped `turn.failed`/`error`
+    wire events, so the failing turn produced only `Init` (no
+    `Result`); (2) `CodexStreamingSession` silently finalised the
+    session on a first-turn failure, so the next `send()` raised the
+    misleading "session is closed" message that hid the cause. Fixed
+    in a follow-up to PR-A: parser now emits an `AssistantText`
+    diagnostic + `Result(success=false)` for `turn.failed`; session
+    captures first-turn failures in a `firstTurnFailureRef` and
+    surfaces the actual cause on the next `send()`. Default
+    `FORGE_IT_CODEX_MODEL` switched to `gpt-5.3-codex` so local IT
+    runs on the maintainer's account tier pass without the
+    documented env-var workaround.
   - `grep -RE '"\.forge/' modules/ --exclude-dir=target` returns
     matches only inside `ForgePaths.scala` and any explicit
     test-only fixture files. ✅ — only match outside the helper is
@@ -1066,6 +1078,38 @@ after PR-G lands.
   Pre-existing 3-test codex IT flake (`session is closed`)
   reproduces on clean main; not a PR-A regression, tracked for a
   future `forge-agents` follow-up rather than blocking PR-A.
+- 2026-05-26 — **codex IT flake resolved (side-quest, post-PR-A).**
+  Investigated the 3 codex IT failures flagged in PR-A's landing
+  checklist; they masked two real bugs in `forge-agents`. (1)
+  `CodexEventParser` was silently dropping `turn.failed` and `error`
+  wire events, so when codex emitted a model-rejection 400 the event
+  stream contained only `Init` (no `Result`) — violating the
+  "terminates with Result" contract and turning a real model failure
+  into a generic "no Result" symptom. Fix: parser now emits an
+  `AssistantText("[codex turn.failed] <message>", 0)` carrying the
+  wire-level error followed by `Result(success=false, 0)`. (2)
+  `CodexStreamingSession` finalised the session silently when the
+  first turn failed after `Init` had arrived (the factory had already
+  returned a live session, so the silent-close path lost the error
+  on the floor). The next `send()` rejected with the misleading
+  "session is closed; further turns rejected" message. Fix: added
+  `firstTurnFailureRef: Ref[IO, Option[Throwable]]`; first-turn
+  failures record the cause there, and the next send/answerQuestion
+  raises with the real error. With these fixes the test default
+  `FORGE_IT_CODEX_MODEL` could move from `gpt-5-codex` (broken on
+  ChatGPT-tier accounts, which is the maintainer's tier) to
+  `gpt-5.3-codex` (the documented working workaround) without
+  hiding any other failures. Tests landing this change:
+  + 2 new unit tests in `CodexEventParserSuite` covering
+    `turn.failed` (with and without `error.message`) and `error`-line
+    skip.
+  + 1 new fake-CLI integration test in `CodexConnectorSuite`
+    (`first turn that fails AFTER Init surfaces the actual cause on
+    the next send()`) covering the silent-close regression.
+  + Full forge-it codex suite (`CodexHeadlessSmokeSuite`,
+    `CodexStreamingSpecSuite` C2/C3/C5/C6) passes against the real
+    `codex 0.133` CLI on the maintainer's account; `forge-agents`
+    unit suite grew 180 → 181.
 
 ## 4. Carry-forward to v1.3
 

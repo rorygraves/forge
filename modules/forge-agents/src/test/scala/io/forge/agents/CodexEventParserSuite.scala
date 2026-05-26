@@ -100,6 +100,40 @@ class CodexEventParserSuite extends munit.FunSuite:
         assertEquals(c.inputTokens, 100L)
       case other => fail(s"expected CostUpdate, got $other")
 
+  test("turn.failed produces an AssistantText carrying the error message and Result(success=false)"):
+    // Real-CLI shape observed against codex 0.133 when the model is rejected by the account tier:
+    //   {"type":"error","message":"..."}
+    //   {"type":"turn.failed","error":{"message":"..."}}
+    // The parser produces a terminal Result(success=false) so the "stream terminates with Result" contract holds; the
+    // AssistantText is the diagnostic carrier (no TurnFailed variant on AgentEvent — keeps the surface narrow).
+    val line =
+      """{"type":"turn.failed","error":{"message":"The 'gpt-5-codex' model is not supported when using Codex with a ChatGPT account."}}"""
+    val events = parse(parser, line)
+    assertEquals(events.size, 2, clue = events)
+    events(0) match
+      case AgentEvent.AssistantText(text, _) =>
+        assert(text.startsWith("[codex turn.failed] "), clue = text)
+        assert(text.contains("not supported when using Codex with a ChatGPT account"), clue = text)
+      case other => fail(s"expected AssistantText carrying the error, got $other")
+    assertEquals(events(1), AgentEvent.Result(success = false, durationMs = 0L))
+
+  test("turn.failed with no error.message falls back to a generic diagnostic"):
+    val line = """{"type":"turn.failed"}"""
+    val events = parse(parser, line)
+    assertEquals(events.size, 2)
+    events(0) match
+      case AgentEvent.AssistantText(text, _) =>
+        assert(text.contains("no error.message in wire frame"), clue = text)
+      case other => fail(s"expected fallback AssistantText, got $other")
+    assertEquals(events(1), AgentEvent.Result(success = false, durationMs = 0L))
+
+  test("error event is skipped (the terminal turn.failed carries the same diagnostic)"):
+    // Codex emits a standalone `error` line before `turn.failed`. Surfacing both would double-emit the message in the
+    // action log.
+    val line =
+      """{"type":"error","message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\"}}"}"""
+    assertEquals(parse(parser, line), Vector.empty)
+
   test("turn.completed with no usage falls back to zero tokens / zero usd"):
     val line = """{"type":"turn.completed"}"""
     parse(parser, line)(0) match

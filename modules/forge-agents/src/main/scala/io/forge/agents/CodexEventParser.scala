@@ -15,6 +15,12 @@ import ujson.Value
   *   - `{type:"item.completed", item:{type:"<other>", ...}}` → skipped in v1 (Slice 0 didn't pin tool-event shapes)
   *   - `{type:"turn.completed", usage:{...}}` → [[AgentEvent.CostUpdate]] (USD via [[PriceTable]]) then
   *     [[AgentEvent.Result]] with `durationMs = 0` — wall-clock is the connector's job, not the parser's
+  *   - `{type:"turn.failed", error:{message}}` → [[AgentEvent.AssistantText]] carrying the error description, then
+  *     [[AgentEvent.Result]] with `success = false`. Without this, model-rejection failures (e.g. 400
+  *     invalid_request_error for an account-tier-incompatible model) leave the event stream with only `Init` — no
+  *     `Result` — which violates the "terminates with Result" contract and surfaces downstream as a silent close.
+  *   - `{type:"error", ...}` → skipped. Codex emits a standalone `error` line just before `turn.failed` carrying the
+  *     same payload; we handle the terminal `turn.failed` only so the diagnostic isn't double-emitted.
   *
   * Unlike `ClaudeEventParser`, the Codex parser carries state: the model name (used as the `Cost.model` key) and the
   * [[PriceTable]] needed to convert `turn.completed.usage` tokens into USD. Slice 0 §2.2 documents why: Codex emits
@@ -39,6 +45,8 @@ final class CodexEventParser(priceTable: PriceTable, model: String):
           case Some("turn.started") => Right(Vector.empty)
           case Some("item.completed") => parseItemCompleted(v)
           case Some("turn.completed") => parseTurnCompleted(v)
+          case Some("turn.failed") => parseTurnFailed(v)
+          case Some("error") => Right(Vector.empty)
           case Some(_) => Right(Vector.empty)
   end parse
 
@@ -87,6 +95,29 @@ final class CodexEventParser(priceTable: PriceTable, model: String):
     )
     // Codex `turn.completed` carries no success/duration fields; the connector layer decorates wall-clock if it cares.
     Right(Vector(cost, AgentEvent.Result(success = true, durationMs = 0L)))
+
+  /** §7.1 — translate `turn.failed` into an observable failure terminal: a synthetic [[AgentEvent.AssistantText]]
+    * carrying the wire-level error message followed by [[AgentEvent.Result]] with `success = false`.
+    *
+    * Re-using AssistantText (rather than introducing a TurnFailed variant) keeps the AgentEvent surface narrow; the
+    * `[codex turn.failed] …` prefix marks the synthetic origin so action-log replays can distinguish it from genuine
+    * model output. The `Result(success=false)` is the load-bearing element: it satisfies the "stream terminates with
+    * Result" contract that [[CodexStreamingSession]] / [[StreamingDriver]] rely on to decide a turn has ended.
+    */
+  private def parseTurnFailed(v: Value): Either[String, Vector[AgentEvent]] =
+    val message = v.obj
+      .get("error")
+      .flatMap(_.objOpt)
+      .flatMap(_.get("message"))
+      .flatMap(_.strOpt)
+      .orElse(v.obj.get("message").flatMap(_.strOpt))
+      .getOrElse("Codex turn failed (no error.message in wire frame)")
+    Right(
+      Vector(
+        AgentEvent.AssistantText(s"[codex turn.failed] $message", outputTokens = 0),
+        AgentEvent.Result(success = false, durationMs = 0L)
+      )
+    )
 
 object CodexEventParser:
   /** Convenience constructor for tests / call sites that don't have a price table loaded. */
