@@ -33,10 +33,13 @@ val osLib               = "com.lihaoyi"     %% "os-lib"                 % V.osLi
 val upickle             = "com.lihaoyi"     %% "upickle"                % V.upickle
 val jsonSchemaValidator = "com.networknt"    % "json-schema-validator"  % V.jsonSchemaValidator
 val munit               = "org.scalameta"   %% "munit"                  % V.munit             % Test
+// munit-scalacheck releases its own version line (no 1.0.4 cut). 1.0.0 is the latest tagged
+// compat with munit 1.0.x; pinning explicitly so the dep doesn't drift with munit bumps.
+val munitScalacheck     = "org.scalameta"   %% "munit-scalacheck"       % "1.0.0"             % Test
 val munitCatsEffect     = "org.typelevel"   %% "munit-cats-effect"      % V.munitCatsEffect   % Test
 
 lazy val commonSettings = Seq(
-  libraryDependencies ++= Seq(munit, munitCatsEffect),
+  libraryDependencies ++= Seq(munit, munitScalacheck, munitCatsEffect),
   Test / testFrameworks += new TestFramework("munit.Framework")
 )
 

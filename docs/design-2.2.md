@@ -872,79 +872,79 @@ The pure heart of Slice 2. No I/O. Big test surface.
   divergence detection (rewrite a `Feature` with stale state cache
   and confirm `verifyAgainstLog` returns `Rewritten`).
 
-### 1.6 PR F — Property tests (§17 slice-2 invariant list)
+### 1.6 PR F — Property tests (§17 slice-2 invariant list) — ✅ landed 2026-05-26
 
 Property tests use `munit-scalacheck` (add `org.scalameta::munit-scalacheck`
 to `forge-core/test`). One suite per invariant; each suite begins with
 a one-line cross-reference to the v1.2 § that motivates it.
 
-- [ ] **F0.** Add `munit-scalacheck` dependency in `build.sbt`,
+- [x] **F0.** Add `munit-scalacheck` dependency in `build.sbt`,
   shared `commonSettings` test scope. Pin to a version compatible
   with munit 1.0.4. Add a tiny generator library
   (`forge-core/test/.../gen/`) for `FeatureId`, `PieceId`, `Manifest`,
   `Feature`, `FsmState`, `FsmEvent`. The generators bias toward
   legal manifests (merged-prefix invariant respected); illegal
   inputs are tested separately in named negative-path suites.
-- [ ] **F1. Log → state replay round-trip.** For an arbitrary legal
+- [x] **F1. Log → state replay round-trip.** For an arbitrary legal
   sequence of `FsmEvent`s applied via `Fsm.transition`, the
   resulting `Vector[Action]` replayed via `Feature.foldEvents`
   reproduces the final `Feature`, including the §6.1 session-id
   projections. Maps to §17 slice 2 invariant 1.
-- [ ] **F2. `NeedsHumanIntervention` legality.** For every reachable
+- [x] **F2. `NeedsHumanIntervention` legality.** For every reachable
   `NeedsHumanIntervention` produced by `Fsm.transition`, the
   carried `ResumeHint` is one of the six legal §6 variants AND a
   follow-up `UserCommand(resume(hint))` event produces a legal
   next state (not `NeedsHumanIntervention` again with the same
   reason). Maps to invariants 2 + 3.
-- [ ] **F3. Design-before-implement.** No path from `Drafting`
+- [x] **F3. Design-before-implement.** No path from `Drafting`
   reaches any `PieceImplementing(_)` state without first passing
   `DesignReady`. Maps to invariant 4.
-- [ ] **F4. Merged piece never re-selected.** After any sequence
+- [x] **F4. Merged piece never re-selected.** After any sequence
   ending in `manifest.pieces[i].status = "merged"`, the next
   `RefineOutcome(NoChange)` event causes the FSM to pick a piece
   whose id is **not** `i`. Maps to invariant 5.
-- [ ] **F5. `currentPieceSessionId` lifecycle.** Populated exactly
+- [x] **F5. `currentPieceSessionId` lifecycle.** Populated exactly
   at `PieceImplementing` / `PieceFixingUp` spawn; retained through
   `PieceAwaitingCi`, `PieceAwaitingReview`, `PieceCiFailed`,
   `PieceReviewFailed`, `PieceFixingUp`, `PieceAwaitingMerge`,
   `Refining`; cleared at advance. Maps to invariant 6.
-- [ ] **F6. `designSessionId` lifecycle.** Populated at first
+- [x] **F6. `designSessionId` lifecycle.** Populated at first
   `InteractiveSpec` spawn / design-revision resume; retained
   through every design-phase state; cleared on entering
   `DesignReady`. `<actor>.resume` updates with `newSessionId ==
   oldSessionId` are idempotent. Maps to invariant 7.
-- [ ] **F7. `requireSessionId` returns `Left`.** Never throws on
+- [x] **F7. `requireSessionId` returns `Left`.** Never throws on
   `None`; the returned `NeedsHumanIntervention` carries
   `ReopenDesign(currentDesignPr)` for design-phase missing-id and
   no other reason in v1 (per §11.0 step 5 "no other resume calls in
   v1; this rule covers all current cases"). Maps to invariant 8.
-- [ ] **F8. Human feedback returns to revision/fixup.** From any
+- [x] **F8. Human feedback returns to revision/fixup.** From any
   pre-merge state, an event signalling human `CHANGES_REQUESTED`
   / new human comment yields a transition to `DesignPrFeedback`
   (design phase) or `PieceFixingUp` (implementation phase), never
   to a forward state. Maps to invariant 9.
-- [ ] **F9. CI-readiness ordering.** `PieceAwaitingCi → PieceAwaitingReview`
+- [x] **F9. CI-readiness ordering.** `PieceAwaitingCi → PieceAwaitingReview`
   cannot fire before a `CheckDiscoveryComplete` event (or
   equivalent — the precise event name lands in PR-B B4) under
   `CiPolicy.BranchProtectionThenObserved`. Under `CiPolicy.None`,
   the transition is permitted immediately. Maps to invariant 10.
-- [ ] **F10. Already-merged piece IDs immutable.**
+- [x] **F10. Already-merged piece IDs immutable.**
   `ManifestPatch.RemovePiece(mergedId)` returns
   `Left(op[i] RemovePiece: cannot remove merged piece ...)`. Already
   partly covered in `ManifestPatchSuite`; F10 lifts the existing
   unit case to a property by generating arbitrary patches over a
   manifest with a non-empty merged prefix. Maps to invariant 11.
-- [ ] **F11. Reorder invariant under arbitrary patches.** §5.5
+- [x] **F11. Reorder invariant under arbitrary patches.** §5.5
   merged-prefix invariant holds for any sequence of
   `ManifestPatch` validated by `applyTo`. Existing
   `ManifestPatchSuite` has the targeted cases; F11 wraps in a
   ScalaCheck property over generated patch sequences. Maps to
   invariant 12.
-- [ ] **F12. `status != "pending" → baseSha non-null`.** Property
+- [x] **F12. `status != "pending" → baseSha non-null`.** Property
   check that no FSM-driven manifest mutation leaves a piece with
   `status` in `{in_progress, merged}` and `baseSha = None`. Maps
   to invariant 13.
-- [ ] **F13. Atomic merge mutation persists across crash.** The
+- [x] **F13. Atomic merge mutation persists across crash.** The
   invariant is "manifest mutation must commit before the FSM
   transition to `Refining`" (§11.5 step 1). Two sides — the
   *ordering* (writer-side, the orchestrator's atomic-write
@@ -1646,6 +1646,92 @@ after PR-G lands.
       `featureId` and unsupported `schemaVersion`.
   Build: `sbt scalafmtCheckAll` clean, `sbt test` 321/321 in
   `forge-core`, 181/181 in `forge-agents` (no regression).
+- 2026-05-26 — **PR-F landed.** Property tests for the §17 slice-2
+  invariant list per §1.6. Added `munit-scalacheck 1.0.0` as a
+  test-scope dep in `build.sbt` `commonSettings` (F0). New artefacts
+  under `forge-core/test/.../gen/`:
+  + `Generators` — ScalaCheck generators biased toward legal
+    inputs: `FeatureId`, `PieceId`, `Sha`, `PrNumber`, `Instant`;
+    legal `Manifest` (1–6 pieces, optional non-empty merged
+    prefix); `Feature.initial`; `FsmState` (singleton + every
+    parameterised variant); `ManifestPatchOp` mix
+    (`AddPiece`/`RemovePiece`/`EditPiece`/`ReorderPieces`);
+    `ManifestPatch` (1–3 ops).
+  + `FsmTrajectory` — deterministic happy-path event sequence
+    that walks a `Feature` from `Drafting` through `FeatureDone`
+    via `Fsm.transition`. Generators sample the input `Feature`
+    (manifest shape and merged-prefix length); the event
+    sequence stays legal by construction. The trajectory
+    returns `(finalFeature, allDrafts, states, events, steps)`
+    so each property suite can assert on the dimension it
+    cares about (replay round-trip, lifecycle position, manifest
+    invariants).
+  + Property suites under `forge-core/test/.../property/`, one
+    per §17 slice-2 invariant. Each `ScalaCheckSuite` (or
+    `FunSuite` for F13's fixture-driven shape) opens with a
+    one-line cross-reference to the spec invariant it
+    implements:
+    + `F1ReplayRoundTripSuite` (2) — invariant 1.
+      `Fsm.transition` drafts → `Feature.foldEvents` → same
+      projected feature. Seeds the fold from the *final*
+      manifest (the §11.4/§11.5-step-1 atomic writer commits
+      manifest before emitting the fsm.transition draft, so
+      real replay reads the post-mutation manifest from disk
+      via `ManifestStore.load`).
+    + `F2NhiLegalitySuite` (2) — invariants 2 + 3. Every
+      reachable NHI carries a legal §6 `ResumeHint`; a follow-
+      up `Resume(hint)` exits NHI to a non-NHI state.
+    + `F3DesignBeforeImplementSuite` (1) — invariant 4. Every
+      `PieceImplementing(_)` is preceded by `DesignReady` in
+      the trace.
+    + `F4MergedNeverReSelectedSuite` (2) — invariant 5. No
+      `PieceImplementing(p)` / `PieceAwaitingMerge(p, _)` /
+      `Refining(p, _, _)` in the trace targets a piece that
+      was already merged in the seed manifest.
+    + `F5CurrentPieceSessionIdLifecycleSuite` (3) — invariant
+      6. Projection populated through every retain-set piece
+      state after spawn; cleared on advance / NHI; cleared at
+      `Refining → next PieceImplementing`.
+    + `F6DesignSessionIdLifecycleSuite` (3) — invariant 7.
+      Projection populated through every design-phase state
+      after spec spawn; cleared on entering `DesignReady`;
+      same-id `SessionResumed` is idempotent.
+    + `F7RequireSessionIdSuite` (3) — invariant 8.
+      `requireSessionId(None, ...)` returns Left(NHI);
+      `Some(id)` returns Right(id); never throws on any input.
+    + `F8HumanFeedbackSuite` (3) — invariant 9. From
+      `DesignAwaitingMerge`, a human-feedback snapshot
+      transitions to `DesignPrFeedback`. From
+      `PieceAwaitingReview` / `PieceAwaitingMerge`, a human
+      override transitions to `PieceReviewFailed` (never to a
+      forward state like `PieceAwaitingMerge` or `Refining`).
+    + `F9CiReadinessOrderingSuite` (3) — invariant 10.
+      Empty-`requiredChecks` snapshot keeps `PieceAwaitingCi`;
+      successful-CI snapshot transitions to
+      `PieceAwaitingReview`; `CheckDiscoveryComplete` is a
+      no-op informational event.
+    + `F10MergedImmutableSuite` (3) — invariant 11.
+      `RemovePiece` / `EditPiece` against merged ids always
+      reject; generated patches never shrink the merged-piece
+      set.
+    + `F11ReorderInvariantSuite` (2) — invariant 12. Accepted
+      patches preserve the merged prefix exactly; every
+      accepted-patch result re-validates clean.
+    + `F12BaseShaInvariantSuite` (3) — invariant 13. No
+      FSM-driven manifest mutation leaves a piece with
+      `status != pending` and `baseSha = None`; every merged
+      piece has the full §5.1 field set; final manifest
+      validates.
+    + `F13AtomicMergeCrashSuite` (6) — invariant 14. Five
+      end-to-end fixtures (F13a/b₁/b₂/c/d/e) driving
+      `RebuildState.run` against a real temp directory
+      across the four §11.5 reconcile sub-cases plus multi-
+      piece divergence.
+  +36 unit tests; `forge-core` grew 321 → 357.
+  Build: `sbt clean compile` clean, `sbt scalafmtCheckAll` clean,
+  `sbt test` 357/357 in `forge-core`, 181/181 in `forge-agents`
+  (no regression), `forge-it` 10/10 (1 reliability suite skipped
+  per `FORGE_IT_RUN_RELIABILITY` opt-in).
 
 ## 4. Carry-forward to v1.3
 
