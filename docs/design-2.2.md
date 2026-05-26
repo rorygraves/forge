@@ -462,9 +462,9 @@ The pure heart of Slice 2. No I/O. Big test surface.
   carry-forward §4 entry for C14 stays open — C5 only places the
   FSM-side marker.
 
-### 1.4 PR D — ActionLog (file I/O)
+### 1.4 PR D — ActionLog (file I/O) — ✅ landed 2026-05-26
 
-- [ ] **D0.** Add `cats-effect` to `forge-core`'s `libraryDependencies`
+- [x] **D0.** Add `cats-effect` to `forge-core`'s `libraryDependencies`
   in `build.sbt`. Current `forge-core` declares only `upickle` and
   `os-lib`; PR-D/E introduce `IO[_]`-returning trait methods for
   `ActionLog` / `StateCache` (matching the `forge-agents` style), so
@@ -474,7 +474,7 @@ The pure heart of Slice 2. No I/O. Big test surface.
   persistence belong together) and is rejected. PR-D's checklist also
   bumps `fs2-core` if any trait method ends up returning a `Stream`;
   expectation today is no.
-- [ ] **D1.** `ActionLog` trait in `io.forge.core.log`:
+- [x] **D1.** `ActionLog` trait in `io.forge.core.log`:
   - `append(draft: ActionDraft): IO[Action]` — stamps `seq`
     (allocated under the in-process `nextSeq` counter) and `at`
     (`IO.realTime` → `Instant`), writes the NDJSON line
@@ -526,7 +526,7 @@ The pure heart of Slice 2. No I/O. Big test surface.
     `append` / `appendAll` paths delegate to it after `seq`/`at`
     stamping. The helper is not part of the public `ActionLog`
     trait.
-- [ ] **D2.** File impl `FileActionLog(paths: ForgePaths)`. Writes
+- [x] **D2.** File impl `FileActionLog(paths: ForgePaths)`. Writes
   NDJSON exactly per v1.2 §19 wire shape: `seq`, `ts`, `feature`,
   `piece`, `actor`, `role`, `kind`, `payload`. One line per action.
   Append-only — no rewrites, no rotation (v1 §19 explicitly).
@@ -536,7 +536,7 @@ The pure heart of Slice 2. No I/O. Big test surface.
   any per-line atomicity claim at this layer. If `SYNC` proves to
   be a perf cliff during Slice 4 testing, lower to a per-batch
   `force()` and flag in §4 carry-forward.
-- [ ] **D3.** `Action.payload` codec — `ujson.Value` round-trips
+- [x] **D3.** `Action.payload` codec — `ujson.Value` round-trips
   through uPickle natively; the suite asserts that every `kind`
   from §19 (`fsm.transition`, `<actor>.spawn` / `.resume` /
   `.user_message` / `.assistant_text` / `.tool_use` /
@@ -545,7 +545,7 @@ The pure heart of Slice 2. No I/O. Big test surface.
   `review.*`, `user.command`, `harness.*`, `cost.update`)
   round-trips. The `kind` strings are a closed enum but stored as
   raw `String` — easier evolution than a sealed enum.
-- [ ] **D4.** `Feature.foldEvents(initial: Feature, actions:
+- [x] **D4.** `Feature.foldEvents(initial: Feature, actions:
   Vector[Action]): Either[ReplayError, FoldResult]` where:
   ```
   final case class FoldResult(
@@ -607,7 +607,7 @@ The pure heart of Slice 2. No I/O. Big test surface.
   entries — that's `RebuildState.reconcile`'s job in PR-E E4 and
   is the only place in Slice 2 that writes recovery actions back
   to the log.
-- [ ] **D5.** `FileActionLogSuite` — append+replay round-trip,
+- [x] **D5.** `FileActionLogSuite` — append+replay round-trip,
   monotonic seq across appends, replay tolerant to a
   partially-flushed last line.
 
@@ -658,7 +658,7 @@ The pure heart of Slice 2. No I/O. Big test surface.
   `appendAll` of new drafts produces a valid file from
   beginning to end with seq monotonically continuing past the
   recovery entry's seq.
-- [ ] **D6.** Cross-reference docstring on `ActionLog` linking the
+- [x] **D6.** Cross-reference docstring on `ActionLog` linking the
   trait to v1.2 §4 invariant ("local runtime log is canonical") and
   §19 (event shapes).
 
@@ -1345,6 +1345,161 @@ after PR-G lands.
   `forge-core`, 181/181 in `forge-agents` (no regression),
   `forge-it` 10/10 (1 reliability suite skipped per
   `FORGE_IT_RUN_RELIABILITY` opt-in).
+- 2026-05-26 — **PR-D landed.** ActionLog file I/O per §1.4. Added
+  `cats-effect` to `forge-core`'s `libraryDependencies` (D0). New
+  `forge-core` artefacts under `io.forge.core.log`:
+  + `ActionLog` trait — `append(featureId, draft): IO[Action]`,
+    `appendAll(featureId, drafts): IO[Vector[Action]]`,
+    `replay(featureId): IO[Vector[Action]]`,
+    `nextSeq(featureId): IO[Long]`. The §13 single-writer process
+    lock plus an in-process `Mutex[IO]` per feature serialises
+    writes; `nextSeqRef: Ref[IO, Option[Long]]` is warmed lazily
+    from disk on the first operation via `replay`.
+  + `FileActionLog` — file-backed impl over
+    `paths.featureLog(featureId)`. NDJSON line per `Action`, one OS
+    write per `append` / per batch in `appendAll` via
+    `Files.write(... CREATE, APPEND, SYNC)`. `replay` reads the
+    entire file, parses lines, and on a partially-flushed trailing
+    fragment physically truncates the file to the last `\n`
+    boundary, writes a `harness.error log_truncated` recovery entry
+    via the private no-replay path, and returns survivors +
+    recovery. The private `unsafeAppendStamped(featureId, actions)`
+    helper takes pre-stamped `Action`s and is the only path to
+    disk (used by both the public `append`/`appendAll` paths and
+    `replay`'s recovery path — recursion-free).
+  + `Replay.foldEvents(initial, actions): Either[ReplayError,
+    FoldResult]` + `Feature.foldEvents(...)` delegating wrapper on
+    `fsm.Feature`'s companion (so callers get the design-2.2 §1.4
+    D4 signature exactly). Projections: `feature.state` via
+    `fsm.transition` payloads (verified against the running state
+    — `TransitionFromMismatch` on disagree),
+    `feature.designSessionId` / `feature.currentPieceSessionId`
+    via `<actor>.spawn` / `.resume` (with `ResumeWithoutSpawn`
+    when a resume references an unspawned session id),
+    `feature.cost` via `cost.update` totals,
+    `observedPieceMerges` via `audit.piece_merged` (with
+    `AuditPrNumberMismatch` when the log's `prNumber` disagrees
+    with the manifest's record).
+    + `FoldResult(feature, observedTransitions,
+      observedPieceMerges)` and `ObservedTransition(from, to,
+      piece, at)` carry the history `RebuildState.reconcile`
+      (PR-E E4) needs.
+    + `ReplayError` is a **sealed trait local to
+      `io.forge.core.log`** (does NOT extend `RebuildError`);
+      PR-E lifts via `RebuildError.ReplayInconsistent(cause:
+      ReplayError)` so each layer keeps its own error
+      vocabulary. Cases: `NonMonotonicSeq`,
+      `ResumeWithoutSpawn`, `TransitionFromMismatch`,
+      `AuditPrNumberMismatch`, `MalformedPayload`.
+    + `harness.error { kind: "log_truncated" }` is a **no-op
+      projection** — does not affect state, session-id
+      projections, cost totals, observed transitions, or
+      observed piece merges. Forensic marker only.
+  + **Payload encoding change to `fsm.transition`** (S2-7
+    carry-forward, see §4 below): the `from`/`to` fields now
+    carry the **full** `FsmState` JSON (via uPickle's enum
+    encoding) rather than just the class-name tag. Singleton
+    cases (`Drafting`, `InteractiveSpec`, `DesignReady`,
+    `FeatureDone`) still serialise as bare strings (matching
+    the §19 wire example `"from": "PieceImplementing"`);
+    parameterised cases serialise as `{"$type":
+    "PieceAwaitingMerge", "p": "p1", "prNumber": 4291}`. This
+    lets `Feature.foldEvents` reconstruct the running
+    `FsmState` with all parameters — which
+    `RebuildState.reconcile` (PR-E E4) needs to anchor its
+    case-(c) match on `t.from == PieceAwaitingMerge(p.id,
+    p.prNumber.get)` rather than on tag-only equality. The
+    existing PR-C test
+    (`Fsm_11_1_SpecPhaseSuite.payload("from").str ==
+    "Drafting"`) still passes because singleton encoding is
+    unchanged.
+  + Tests landed:
+    + `ActionPayloadCodecSuite` (29) — every §19 `kind`
+      payload round-trips through uPickle, including nested
+      objects / null leaves / empty objects.
+    + `FeatureFoldEventsSuite` (15) — every projection +
+      every `ReplayError` case + the `log_truncated` no-op +
+      monotonic-seq enforcement + parameterised-state
+      preservation.
+    + `FileActionLogSuite` (9) — append+replay round-trip,
+      seq monotonicity across appends, empty-`appendAll`
+      no-op, missing-file boot, partial-line truncate +
+      recovery entry + on-disk shape check + post-recovery
+      append continues seq, no-newline-at-all degenerate
+      case, replay idempotency.
+    +53 unit tests; `forge-core` grew 227 → 280.
+  Build: `sbt scalafmtCheckAll` clean, `sbt test` 280/280 in
+  `forge-core`, 181/181 in `forge-agents` (no regression),
+  `forge-it` 10/10 (1 reliability suite skipped per
+  `FORGE_IT_RUN_RELIABILITY` opt-in).
+- 2026-05-26 — **PR-D review-round 1 fixes.** Two findings on
+  `Replay.foldEvents` from the round-1 code review — both
+  Slice-2-coherence issues that would have left PR-E's state-cache
+  verification rebuilding stale projections from valid logs.
+  Exercises the AGENTS.md "design-review coherence pass" feedback
+  memory: round-1 surfaced a single-line bug ("only `state` is
+  copied") and tracing the implied contract revealed that **every
+  non-state `Feature` mutation** in `Fsm.transition` needs a
+  mirror in replay.
+  + **High — `applyFsmTransition` dropped every non-state
+    projection.** Prior behaviour: `Replay.applyFsmTransition`
+    wrote only `feature.copy(state = to)`, so
+    `DesignAwaitingMerge → DesignReady` did not clear
+    `designSessionId`; `Refining → next` / `Piece* → NHI` did
+    not clear `currentPieceSessionId`; `DesignPrFeedback → DesignAwaitingMerge`
+    did not bump `designPrFeedbackRound`; and every `NHI → X`
+    Resume left `branchProtectionCacheEpoch` unchanged. Fixed by
+    introducing `applyTransitionProjections(feature, from, to)`
+    that mirrors every non-state mutation `Fsm.transition`
+    performs:
+      - `to == DesignReady` → clear `designSessionId`, reset
+        `designPrFeedbackRound = 0` (matches Fsm.scala line
+        295 in the §11.3 merged-snapshot handler).
+      - `to ∈ NHI` or `from ∈ Refining` → clear
+        `currentPieceSessionId` (matches the §6.1 "cleared on
+        advance"/"cleared on NHI" invariants: `toNeedsHumanIntervention`
+        helper, `Refining` handlers, `advanceAfterRefine`,
+        `prNumberMismatch`, `handleMerged` mismatch path).
+      - `from = DesignPrFeedback(_, round) AND to ∈ DesignAwaitingMerge`
+        → set `designPrFeedbackRound = round` (matches
+        Fsm.scala line 345; carry-forward S2-6).
+      - `from ∈ NHI` → bump
+        `branchProtectionCacheEpoch += 1` (matches
+        `handleResume`'s unconditional bump per §8.1). Per-hint
+        Resume deltas:
+          - `to ∈ DesignReviewing` (Resume(ReopenDesign)) → reset
+            `designPrFeedbackRound = 0`.
+          - `to ∈ PieceCiFailed` (Resume(RunAnotherFixup)) → clear
+            `currentPieceSessionId`.
+          - `to ∈ PieceImplementing`
+            (Resume(ResolveLocalImplementationChanges)) → clear
+            `currentPieceSessionId`.
+  + **Medium — global `Set[String]` of known session ids accepted
+    cross-actor resume.** Prior behaviour: `applySessionSpawn`
+    tracked introduced session ids in `Set[String]`; a later
+    `codex.resume` with `oldSessionId = "sess-1"` was accepted
+    if any `<actor>.spawn` had introduced `"sess-1"` (e.g., a
+    prior `claude.spawn`). The §19 "no prior `<actor>.spawn`"
+    rule is per-actor. Fixed by switching to
+    `Map[String, Set[String]]` keyed by
+    `action.actor.getOrElse(kindActor(kind))`. The fold's known
+    sessions are per-actor; cross-actor references surface as
+    `ResumeWithoutSpawn(actor, sessionId)`.
+  + 11 new tests in `FeatureFoldEventsSuite` walking every
+    rule (per-actor session validation, DesignAwaitingMerge →
+    DesignReady clears designSessionId + resets
+    designPrFeedbackRound, DesignPrFeedback → DesignAwaitingMerge
+    bumps round, Refining → next clears currentPieceSessionId,
+    Refining → FeatureDone clears, Piece* → NHI clears, NHI → X
+    bumps epoch, NHI → DesignReviewing resets feedback round,
+    NHI → PieceCiFailed / PieceImplementing clear
+    currentPieceSessionId, plus a full multi-cycle
+    DesignAwaitingMerge ↔ DesignPrFeedback → DesignReady walk).
+    `forge-core` grew 280 → 291.
+  Build: `sbt scalafmtCheckAll` clean, `sbt test` 291/291 in
+  `forge-core`, 181/181 in `forge-agents` (no regression),
+  `forge-it` 10/10 (1 reliability suite skipped per
+  `FORGE_IT_RUN_RELIABILITY` opt-in).
 
 ## 4. Carry-forward to v1.3
 
@@ -1426,6 +1581,27 @@ ticks the section.
   cleanly. **Status:** PR-G G5 carries forward; v1.3 §6 needs the
   field added to the `Feature` case class (and optionally a §11.3
   sentence naming the counter source).
+- **S2-7 — `fsm.transition` payload encodes full `FsmState`, not
+  the class-name tag** (PR-D, supersedes the §19 wire-example
+  illustration). v1.2 §19's example payload shows `"from":
+  "PieceImplementing", "to": "PieceAwaitingCi"` — bare strings.
+  PR-D's `Replay.foldEvents` (D4) and `RebuildState.reconcile`
+  (PR-E E4) need the parameterised state values (piece id,
+  prNumber, round, attempt, startedAt) to anchor structural
+  matches like `t.from == PieceAwaitingMerge(p.id,
+  p.prNumber.get)`; the bare-tag form can't carry those.
+  PR-D switches `Fsm.fsmTransitionDraft` to emit full
+  `FsmState` JSON via uPickle's enum encoding — singleton
+  cases (`Drafting`, `InteractiveSpec`, `DesignReady`,
+  `FeatureDone`) still serialise as bare strings (so the §19
+  example is the singleton-case form of the new encoding),
+  parameterised cases serialise as `{"$type": "...", ...}`.
+  Backward-compat with the §19 wire example holds for all
+  singleton cases; parameterised cases were never exercised in
+  the example, so no on-disk shape is broken by the change.
+  **Status:** PR-G G5 carries forward; v1.3 §19 needs to lift
+  the example to a parameterised case so the encoding is
+  documented, not just illustrated.
 - *(more added as PR-A–F land if review surfaces them)*
 
 ## 5. Cross-references

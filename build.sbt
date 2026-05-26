@@ -43,7 +43,7 @@ lazy val commonSettings = Seq(
 lazy val `forge-core` = (project in file("modules/forge-core"))
   .settings(commonSettings)
   .settings(
-    libraryDependencies ++= Seq(upickle, osLib)
+    libraryDependencies ++= Seq(catsEffect, upickle, osLib)
   )
 
 lazy val `forge-agents` = (project in file("modules/forge-agents"))

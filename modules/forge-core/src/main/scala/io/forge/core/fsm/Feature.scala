@@ -59,3 +59,14 @@ object Feature:
       branchProtectionCacheEpoch = 0L,
       designPrFeedbackRound = 0
     )
+
+  /** PR-D D4 — pure replay of a feature's action log onto an initial `Feature`. Delegates to `io.forge.core.log.Replay`
+    * (kept in the `log` package because it owns `ReplayError` / `FoldResult` / `ObservedTransition`); this companion
+    * method exists so callers can write `Feature.foldEvents(initial, actions)` matching the design-2.2 §1.4 D4
+    * signature exactly.
+    */
+  def foldEvents(
+      initial: Feature,
+      actions: Vector[io.forge.core.log.Action]
+  ): Either[io.forge.core.log.ReplayError, io.forge.core.log.FoldResult] =
+    io.forge.core.log.Replay.foldEvents(initial, actions)

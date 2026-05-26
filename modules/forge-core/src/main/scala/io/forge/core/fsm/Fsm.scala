@@ -1003,7 +1003,16 @@ object Fsm:
       piece: Option[PieceId] = None,
       extras: Vector[(String, ujson.Value)] = Vector.empty
   ): ActionDraft =
-    val payload = ujson.Obj("from" -> ujson.Str(stateTag(from)), "to" -> ujson.Str(stateTag(to)))
+    // Encode `from`/`to` as full `FsmState` JSON via the derived ReadWriter. uPickle's Scala-3-enum encoding renders
+    // singleton cases as bare strings (`"Drafting"`) and parameterized cases as `{"$type": "...", ...}`, so the §19
+    // wire example (`"from": "PieceImplementing"`) is the singleton-case form of this encoding. Full encoding lets
+    // `Feature.foldEvents` (PR-D D4) reconstruct the running `FsmState` with all parameters (piece id, prNumber, round,
+    // attempt, startedAt) — which `RebuildState.reconcile` (PR-E E4) needs to anchor its case-(c) match on `t.from ==
+    // PieceAwaitingMerge(p.id, p.prNumber.get)` rather than on tag-only equality.
+    val payload = ujson.Obj(
+      "from" -> upickle.default.writeJs[FsmState](from),
+      "to" -> upickle.default.writeJs[FsmState](to)
+    )
     extras.foreach { case (k, v) => payload(k) = v }
     ActionDraft(feature.id, piece, actor, role, "fsm.transition", payload)
 
