@@ -1411,6 +1411,21 @@ ticks the section.
   with Slice 4's headless feature loop. **Status:** PR-G G5 walks
   this forward; the Slice-4 `design-2.4.md` carry-forward list
   picks it up as a gating test on the relevant sub-PR.
+- **S2-6 — `Feature.designPrFeedbackRound: Int` projection not in
+  v1.2 §6** (PR-C review round 1). v1.2 §11.3 says
+  `DesignPrFeedback(prNumber, round + 1)` but the §6 `Feature`
+  case-class as written doesn't carry the counter the "+1" reads
+  from, and `DesignAwaitingMerge(prNumber)` has no `round` field
+  to thread it through. Without the projection the FSM resets to
+  `round = 1` on every cycle, reusing audit filenames
+  (`design-pr-feedback-r1-answers.md`) and snapshot tags. PR-C
+  adds `designPrFeedbackRound: Int = 0` to `Feature` — bumped on
+  settle back to `DesignAwaitingMerge`, used as the "+1" base on
+  next entry, reset on `DesignReady` / `Resume(ReopenDesign)`.
+  The field carries a default so existing serialized JSON decodes
+  cleanly. **Status:** PR-G G5 carries forward; v1.3 §6 needs the
+  field added to the `Feature` case class (and optionally a §11.3
+  sentence naming the counter source).
 - *(more added as PR-A–F land if review surfaces them)*
 
 ## 5. Cross-references
