@@ -77,13 +77,15 @@ fix this file.
   [`docs/design-rationale.md`](docs/design-rationale.md) and
   [`docs/roadmap.md`](docs/roadmap.md) §7.2): **S2-1** through
   **S2-10**, plus the Slice-1 carry-forwards **C14** and **C15**.
-- **Slice 3 — next.** `forge-git` ships `BranchManager` + `PRWatcher`;
-  `forge-app` ships `ProcessLock` + `SessionMonitor` (the rest of
-  `forge-app` — `main`, wiring, CLI — lands in Slice 4). All four
-  components are Slice-3 deliverables per design §17; the module
-  split reflects that `ProcessLock` and `SessionMonitor` don't depend
-  on `gh`/git but do need to be exercisable before Slice 4 wires up
-  the orchestrator. See roadmap §2.3.
+- **Slice 3 — 🟢 active (opened 2026-05-26).** `forge-git` ships
+  `BranchManager` + `PRWatcher`; `forge-app` ships `ProcessLock` +
+  `SessionMonitor` (the rest of `forge-app` — `main`, wiring, CLI —
+  lands in Slice 4). All four components are Slice-3 deliverables
+  per design §17; the module split reflects that `ProcessLock` and
+  `SessionMonitor` don't depend on `gh`/git but do need to be
+  exercisable before Slice 4 wires up the orchestrator. The
+  per-task implementation plan + sub-PR breakdown (PR-A → PR-H) lives
+  in [`docs/design-2.3.md`](docs/design-2.3.md). See roadmap §2.3.
 - Slices 4–5 scoped in design §17.
 - Phase 4 (Forge-instance pivot: multi-repo, daemon, parallel,
   containerised) is post-v1 and needs its own design doc before any
@@ -129,11 +131,14 @@ layers — read top-down on a new task:
 
 ### Active design-`<section>`.md files
 
-*(none currently open)*
+- [`docs/design-2.3.md`](docs/design-2.3.md) — Slice 3 (`BranchManager`,
+  `PRWatcher` in `forge-git`; `ProcessLock`, `SessionMonitor` in
+  `forge-app`). Opened 2026-05-26; entry point is PR-A
+  (`forge-git` skeleton + `GhClient` / `GitClient` foundations).
 
 Recently-closed audit trails: [`docs/design-2.1.md`](docs/design-2.1.md)
 (Slice 1, closed 2026-05-26), [`docs/design-2.2.md`](docs/design-2.2.md)
-(Slice 2, closed 2026-05-26). `design-2.3.md` opens when Slice 3 starts.
+(Slice 2, closed 2026-05-26).
 
 Don't pre-write design-`<section>`.md files for sections that aren't
 being actively worked. They drift; the roadmap is enough until the

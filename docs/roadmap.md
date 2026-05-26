@@ -158,7 +158,11 @@ to `"p"` only) — have durable homes in
 
 ### 2.3 Slice 3 — BranchManager, PRWatcher, ProcessLock, SessionMonitor
 
-Per §17 slice 3. Two modules ship together:
+🟢 **Slice 3 open — 2026-05-26.** Per-task implementation plan +
+sub-PR breakdown (PR-A → PR-H) lives in
+[`design-2.3.md`](design-2.3.md); entry point is PR-A (`forge-git`
+module skeleton + `GhClient` / `GitClient` foundations). Per §17
+slice 3, two modules ship together:
 
 - **`forge-git`** — `BranchManager` (branch creation returning
   `(branchName, baseSha)`, push, PR creation, preflight, snapshot
@@ -173,7 +177,7 @@ Per §17 slice 3. Two modules ship together:
 
 Both `BranchManager` and `PRWatcher` are `gh`-JSON-decoding,
 rate-limit-shaped, and branch-protection-shaped — failure modes that
-an E2E test exercises poorly. `design-2.3.md` needs to plan
+an E2E test exercises poorly. `design-2.3.md` plans
 **fake-`gh` unit coverage** for the decoder edge cases (merge-state
 semantics per §9 / CI6, stale comments/reviews, branch-protection
 cache invalidation, rate-limit back-off per RL1/RL2, mergeable
