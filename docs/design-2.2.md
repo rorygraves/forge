@@ -365,16 +365,22 @@ behaviour, no I/O.
   type family (`FsmStateSuite`, `FsmEventSuite`, `FeatureSuite`,
   `ActionSuite`). No transition tests yet (those are PR-C).
 
-### 1.3 PR C — FSM transition function + `requireSessionId`
+### 1.3 PR C — FSM transition function + `requireSessionId` — ✅ landed 2026-05-26
 
 The pure heart of Slice 2. No I/O. Big test surface.
 
-- [ ] **C1.** `requireSessionId[A](sessionId, reason, hint):
+- [x] **C1.** `requireSessionId[A](sessionId, reason, hint):
   Either[FsmTransition, String]` per v1.2 §6.2, in
   `io.forge.core.fsm`. Plus `FsmTransition` wrapper or direct
   `Either[NeedsHumanIntervention, String]` — settled inside PR-C
   from the call-site shape needed by the transition function.
-- [ ] **C2.** `Fsm.transition: (Feature, FsmEvent) =>
+  *Outcome:* `FsmTransition(state: FsmState)` wrapper landed in
+  `Fsm.scala`; `Fsm.requireSessionId(sessionId, reason, hint):
+  Either[FsmTransition, String]` is the public helper. The `[A]`
+  type parameter from the §6.2 sketch was dropped (the helper
+  always returns `String`). `Left(FsmTransition(NHI(reason,
+  hint)))` is the only failure shape; never throws.
+- [x] **C2.** `Fsm.transition: (Feature, FsmEvent) =>
   (Feature, Vector[ActionDraft])` — pure. Operates on the whole
   `Feature` (not just `FsmState`) because §11 transitions both read
   manifest state (next-pending selection in §11.7, baseSha
@@ -389,7 +395,25 @@ The pure heart of Slice 2. No I/O. Big test surface.
   `Feature.manifest` (temp + `os.move`) before the state-cache
   write, matching §11.5 step 1 wording. Each case mirrors a §11
   lifecycle rule with a one-line spec cross-reference.
-- [ ] **C3.** Per-state unit suites, one per §11.x section:
+  *Outcome:* signature landed as `Fsm.transition(feature: Feature,
+  event: FsmEvent, config: FsmConfig = FsmConfig.default):
+  (Feature, Vector[ActionDraft])`. The added `FsmConfig`
+  third-arg (`maxDesignReviewRounds`, `maxFixupRounds`, both
+  defaulting to 3 per v1.2 §11.2 step 12 / §11.5) is the one
+  PR-C engineering call beyond the design-2.2 sketch — the §11
+  transition rules need the caps and putting them on `Feature`
+  would be load-bearing-config-on-domain. Implementation is
+  layered: (1) cross-cutting events (`Abandon` / `Resume` /
+  `BudgetBreached` / `TurnBudgetBreached` / `HarnessError` /
+  `RequiredSessionIdMissing`) short-circuit state-specific logic;
+  (2) state-specific transitions per §11.x; (3) silent no-op on
+  unmatched event/state combos. The design-PR-open transition
+  (§11.2 step 13) uses `DesignPrSnapshotUpdated(snapshot)` from
+  `DesignReviewing(round)` as the trigger to enter
+  `DesignAwaitingMerge(snapshot.number)` rather than adding a new
+  `DesignPrOpened(prNumber)` event variant — keeps the PR-B
+  `FsmEvent` ADT untouched.
+- [x] **C3.** Per-state unit suites, one per §11.x section:
   - `Fsm_11_1_SpecPhaseSuite` — `Drafting → InteractiveSpec`,
     settle → `DesignReviewing(1)`, settle-timeout/turn-budget →
     `NeedsHumanIntervention`.
@@ -416,14 +440,14 @@ The pure heart of Slice 2. No I/O. Big test surface.
   - `Fsm_11_6_FixupSuite` — `runFixup` spawn → settle → back to CI.
   - `Fsm_11_7_RefineAdvanceSuite` — `no_change` / `update_plan` /
     `reopen_design` / refinery failure.
-- [ ] **C4.** Cross-cutting suites:
+- [x] **C4.** Cross-cutting suites:
   - `RequireSessionIdSuite` — `None` always returns
     `Left(NeedsHumanIntervention(...))`, never throws; matches
     invariant 8 of §17 slice 2.
   - `ResumeHintCoverageSuite` — every `NeedsHumanIntervention` case
     constructible from the FSM carries the spec-mandated
     `ResumeHint`. Table-driven from §11.0 step 5 + §11.x.
-- [ ] **C5.** **C14 awareness comment.** Where the FSM produces a
+- [x] **C5.** **C14 awareness comment.** Where the FSM produces a
   `SessionResumed` precursor for the design-revision path (§11.2
   step 12) and the design-PR-feedback path (§11.3 step 2), a
   source-level comment cross-references design-rationale **C14**:
@@ -432,6 +456,11 @@ The pure heart of Slice 2. No I/O. Big test surface.
   drops `systemPromptPath`. The FSM **does not** branch on
   `Mode` — that's the orchestrator's job. The comment exists so the
   Slice-4 orchestrator wiring can't quietly skip the re-framing.
+  *Outcome:* C14-awareness comments placed at the
+  `DesignReviewing` RequestChanges branch and the
+  `DesignPrFeedback` `SessionResumed` branch in `Fsm.scala`. The
+  carry-forward §4 entry for C14 stays open — C5 only places the
+  FSM-side marker.
 
 ### 1.4 PR D — ActionLog (file I/O)
 
@@ -1162,6 +1191,126 @@ after PR-G lands.
     by `DesignReviewVerdict.BlockingQuestions`).
   Build: `sbt clean compile` clean, `sbt scalafmtCheckAll` clean,
   unit tests: `forge-core` 130/130, `forge-agents` 181/181.
+- 2026-05-26 — **PR-C landed.** Pure FSM heart of Slice 2 per §1.3.
+  Added `io.forge.core.fsm.Fsm` (`requireSessionId`,
+  `FsmTransition`, `FsmConfig`, `Fsm.transition`) covering every
+  §11.x lifecycle rule:
+  + `Fsm.requireSessionId(sessionId, reason, hint):
+    Either[FsmTransition, String]` per §6.2 — pure helper, never
+    throws on `None`. `FsmTransition(state: FsmState)` is the
+    wrapper that carries the `NeedsHumanIntervention` target.
+    Dropped the vestigial `[A]` type param from the §6.2 sketch.
+  + `FsmConfig(maxDesignReviewRounds = 3, maxFixupRounds = 3)` —
+    the one PR-C engineering call beyond the design-2.2 sketch:
+    the §11 transition rules genuinely depend on these caps, and
+    putting them on `Feature` would be load-bearing-config-on-
+    domain. Plumbed as `Fsm.transition`'s third arg with a default.
+  + `Fsm.transition(feature, event, config)` — three-layer
+    implementation: (1) cross-cutting events
+    (`UserCommandReceived(Abandon)` / `(Resume)`,
+    `BudgetBreached`, `TurnBudgetBreached`, `HarnessError`,
+    `RequiredSessionIdMissing`) short-circuit state-specific
+    logic; (2) state-specific transitions per §11.x; (3) silent
+    no-op on unmatched combos. Manifest mutations happen inline
+    with the transition (e.g. §11.4 step 1 `status=InProgress`
+    and §11.5 step 1 `status=Merged` with the full audit fields).
+    The `Merged` handler implements PR-B B4's idempotency rule:
+    re-applying `Merged` with matching fields is a no-op mutation
+    but still transitions to `Refining` and emits drafts; with
+    disagreeing fields it transitions to `NHI(AbortOrAbandon)`
+    and emits a `harness.error merged_field_mismatch` draft. The
+    design-PR-open transition (§11.2 step 13) uses
+    `DesignPrSnapshotUpdated(snapshot)` as its trigger (rather
+    than a new `DesignPrOpened` event) to keep the PR-B
+    `FsmEvent` ADT untouched.
+  + C5 C14-awareness comments at the `DesignReviewing`
+    RequestChanges branch and the `DesignPrFeedback`
+    SessionResumed branch. The FSM does not branch on `Mode`;
+    Slice-4 orchestrator wiring re-issues role framing in the
+    revisionMessage / feedbackMessage for Codex.
+  + 10 new test suites under `forge-core/test/.../fsm/` — one per
+    §11.x section plus the two cross-cutting suites called for in
+    C3/C4: `Fsm_11_1_SpecPhaseSuite` (6 tests),
+    `Fsm_11_2_DesignReviewSuite` (8), `Fsm_11_3_DesignPrGateSuite`
+    (8), `Fsm_11_4_ImplementationPhaseSuite` (6),
+    `Fsm_11_5_CiReviewPollingSuite` (10),
+    `Fsm_11_5_MergedIdempotencySuite` (4 — covers (a)/(b)/(c)
+    idempotency cases verbatim from C3), `Fsm_11_6_FixupSuite`
+    (5), `Fsm_11_7_RefineAdvanceSuite` (6),
+    `RequireSessionIdSuite` (4 — invariant 8), and
+    `ResumeHintCoverageSuite` (15 — table-driven from §11.0 step
+    5 + §11.x). Plus a shared `FsmFixtures.scala` for feature /
+    piece / PR-snapshot builders. +76 unit tests across the new
+    suites; `forge-core` grew 130 → 206.
+  Build: `sbt scalafmtCheckAll` clean, `sbt test` 206/206 in
+  `forge-core`, 181/181 in `forge-agents` (no regression),
+  `forge-it` 10/10 (1 reliability suite skipped per
+  `FORGE_IT_RUN_RELIABILITY` opt-in).
+- 2026-05-26 — **PR-C review-round 1 fixes.** Three findings from
+  the PR-C code review tightened — exercises the AGENTS.md
+  "design-review coherence pass" feedback memory (treat each
+  finding as a contract signal, not a one-line patch). All in
+  `Fsm.scala` with companion tests in `FsmReviewFixesSuite`:
+  + **High — `Resume(RunAnotherFixup)` violated §11.6 "fresh
+    driver session" and §6.1 session-id projection.** Prior
+    behaviour: NHI → `PieceFixingUp(p, pr, attempts)` directly,
+    carrying forward the stale prior `currentPieceSessionId` and
+    leaving no FSM path for the orchestrator's subsequent fresh
+    `runFixup → SessionSpawned` to update the projection (because
+    `PieceFixingUp` ignored late `SessionSpawned`). Fixed by
+    (1) parking `Resume(RunAnotherFixup)` at
+    `PieceCiFailed(p, pr, manifest[p].attempts)` and clearing
+    `currentPieceSessionId`, so the existing
+    `PieceCiFailed.SessionSpawned` handler drives `PieceFixingUp`
+    with the new session id; (2) adding a defensive
+    `PieceFixingUp.SessionSpawned(_, _, sid, Some(p))` handler
+    that refreshes `currentPieceSessionId` on a late spawn.
+    Refactored `handleResume` to thread per-hint policy via a
+    local `ResumeOutcome` so the per-hint contract for
+    session-id clearing and round-counter reset is obvious at
+    the call site rather than buried in the tuple shape.
+  + **Medium — design PR feedback rounds restarted at 1.** Prior
+    behaviour: DesignAwaitingMerge → DesignPrFeedback always
+    used `round = 1`, so successive cycles reused audit
+    filenames (`design-pr-feedback-r1-answers.md`) and snapshot
+    tags (`<prefix>/_snapshots/<feat>/design-r1`). The §11.3
+    spec says `DesignPrFeedback(prNumber, round + 1)` which
+    requires a monotonic counter across the
+    `DesignAwaitingMerge ↔ DesignPrFeedback` cycle. Fixed by
+    adding `Feature.designPrFeedbackRound: Int = 0`: bumped
+    only on settle back to `DesignAwaitingMerge`, used as the
+    starting round on the next entry to `DesignPrFeedback`,
+    and reset to 0 on entering `DesignReady` (merge) or on
+    `Resume(ReopenDesign)` (design phase re-opens). The Feature
+    field carries a default so existing serialized JSON decodes
+    without the field at `0`.
+  + **Medium — polling/merge handlers didn't validate PR-number
+    match.** Prior behaviour: `DesignPrSnapshotUpdated`,
+    `PrSnapshotUpdated`, and `Merged` only matched on piece id;
+    a snapshot/merge event for an unrelated PR number could
+    silently drive the wrong transition (e.g., a stale
+    `Closed`/`Merged` snapshot from a prior reopened-design PR
+    marking the current design ready, or a `Merged` event
+    overwriting `manifest[p].{prNumber, mergeCommit, mergedAt}`
+    with an unrelated PR's data). Fixed by adding explicit
+    `snapshot.number == state.prNumber` guards on every snapshot
+    handler in `DesignAwaitingMerge` / `PieceAwaitingCi` /
+    `PieceAwaitingReview` / `PieceAwaitingMerge` (silent no-op
+    on mismatch — snapshots are polling-driven and stale events
+    are expected); and for `Merged` specifically — the
+    high-stakes irreversible mutation — routing mismatch to
+    `NHI(AbortOrAbandon)` + `harness.error
+    pr_number_mismatch` draft. New private helper
+    `prNumberMismatch(feature, from, kind, expected, observed,
+    piece)` factors the NHI + error-draft shape.
+  + 13 new tests in `FsmReviewFixesSuite` covering each fix
+    end-to-end, plus one updated test in `ResumeHintCoverageSuite`
+    that previously asserted the High bug. `forge-core` grew
+    206 → 219.
+  Build: `sbt scalafmtCheckAll` clean, `sbt test` 219/219 in
+  `forge-core`, 181/181 in `forge-agents` (no regression),
+  `forge-it` 10/10 (1 reliability suite skipped per
+  `FORGE_IT_RUN_RELIABILITY` opt-in).
 
 ## 4. Carry-forward to v1.3
 

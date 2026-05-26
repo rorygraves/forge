@@ -24,6 +24,13 @@ import upickle.default.ReadWriter
   *
   * `branchProtectionCacheEpoch` is bumped on every `forge resume` (§8.1) so cached branch-protection results from a
   * prior orchestrator process are invalidated.
+  *
+  * `designPrFeedbackRound` is the monotonic counter behind v1.2 §11.3's `DesignPrFeedback(prNumber, round + 1)` — it
+  * remembers the last completed `DesignPrFeedback` round number while the FSM is back in `DesignAwaitingMerge`, so the
+  * next human-comment / `CHANGES_REQUESTED` event enters `DesignPrFeedback(prNumber, lastRound + 1)` rather than
+  * restarting at `round = 1` (which would reuse audit filenames like `design-pr-feedback-r1-answers.md` and snapshot
+  * tags). PR-C originally restarted at 1; this projection fixes the §11.3 cross-cycle wording. Reset on
+  * `Resume(ReopenDesign)` since that re-opens design from scratch.
   */
 final case class Feature(
     id: FeatureId,
@@ -32,7 +39,8 @@ final case class Feature(
     cost: CostTotals,
     designSessionId: Option[String],
     currentPieceSessionId: Option[String],
-    branchProtectionCacheEpoch: Long
+    branchProtectionCacheEpoch: Long,
+    designPrFeedbackRound: Int = 0
 ) derives ReadWriter
 
 object Feature:
@@ -48,5 +56,6 @@ object Feature:
       cost = CostTotals.zero,
       designSessionId = None,
       currentPieceSessionId = None,
-      branchProtectionCacheEpoch = 0L
+      branchProtectionCacheEpoch = 0L,
+      designPrFeedbackRound = 0
     )
