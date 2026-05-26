@@ -254,6 +254,17 @@
 
 ---
 
+## Slice 2 spec deviations
+
+### S2-1. Manifest data types live in `forge-core`, not `forge-specs` (slice-2 PR-A relocation)
+**Decision (slice-2 PR-A):** `Manifest`, `ManifestPatch` / `ManifestPatchOp`, `Piece`, and `PieceStatus` (plus their suites and the `manifest-fixture.json` test resource) move from `modules/forge-specs/src/main/scala/io/forge/specs/` to `modules/forge-core/src/main/scala/io/forge/core/manifest/`. The package becomes `io.forge.core.manifest`. `forge-specs` keeps the rendering and persistence wrappers (`SpecStore`, `DocSync`, `ChangeCollector`) that land in Slice 4.
+**Why this is a deviation:** v1.2 §3.2 names "Manifest" inside `forge-specs`. Slice 2 introduces `Feature` (which holds a `Manifest`) and `FsmState.PlanningUpdate(reason, patch: ManifestPatch)` — both in `forge-core`. Since `forge-specs` already depends on `forge-core`, leaving the manifest types in `forge-specs` would create a cycle (`forge-core.Feature` references `Manifest` in `forge-specs` which references `forge-core`). The relocation breaks the cycle in the direction the spec already implied — `Feature` lives in `forge-core` per §3.2, and the data it carries has to live there too.
+**Rejected:** (a) **Inverted dependency** (`forge-core` depends on `forge-specs`) — pollutes the lowest-layer module with persistence/rendering concerns it doesn't need, and reverses the spec's stated module ordering. (b) **Duplicate the manifest types in `forge-core` and keep wrappers in `forge-specs`** — two definitions of the same domain shape drifting in parallel is exactly the bug-magnet the original placement was trying to avoid. (c) **Move `Feature` into `forge-specs`** — `Feature` is the FSM's state aggregate; the FSM transition function and tests live in `forge-core` per §17 Slice 2, and dragging both into `forge-specs` would make every Slice-2 module reach across the boundary.
+**Action required for v1:** v1.3 spec correction needs to re-attribute the manifest data types to `forge-core` in §3.2 and narrow `forge-specs` to the rendering/persistence wrappers it actually owns. The `AGENTS.md` module-layout table is updated by PR-G G3 to reflect the new placement.
+**In the spec today:** v1.2 §3.2 (states `forge-specs` ownership), §6 (`Feature`, `FsmState`, `ManifestPatch` are referenced from `forge-core` types). Surfaced inside PR-A so reviewers seeing the move have an immediate "why".
+
+---
+
 ## CI policy
 
 ### CI1. CI policy has two variants only, not five

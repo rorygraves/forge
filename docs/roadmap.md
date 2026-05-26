@@ -110,6 +110,13 @@ deferred to Slice 4 reviewer-asset PR) — have durable homes in
 (session-id projection lifecycles, reorder, atomic merge mutation,
 `requireSessionId` returning `Left`, replay reproduction).
 
+🟢 **Slice 2 open — 2026-05-26.** Active implementation plan in
+[`design-2.2.md`](design-2.2.md): seven sub-PRs A → G, strictly linear.
+PR-A (Manifest relocation into `forge-core` + `ForgePaths` skeleton) is
+the entry point; sub-PR status and dated landings live in
+`design-2.2.md` §3, with deferred decisions captured in §4 and walked
+forward by PR-G G5 before this section flips to `[x]`.
+
 ### 2.3 Slice 3 — BranchManager, PRWatcher, ProcessLock, SessionMonitor (≈ week 3)
 
 Per §17 slice 3. End-to-end test against a sacrificial GitHub repo: branch,

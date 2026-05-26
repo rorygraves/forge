@@ -1,7 +1,7 @@
-package io.forge.specs
+package io.forge.core.manifest
 
 import io.forge.core.*
-import io.forge.specs.ManifestPatchOp.*
+import io.forge.core.manifest.ManifestPatchOp.*
 import java.time.Instant
 
 class ManifestPatchSuite extends munit.FunSuite:

@@ -1,4 +1,4 @@
-package io.forge.specs
+package io.forge.core.manifest
 
 import upickle.default.{readwriter, ReadWriter}
 

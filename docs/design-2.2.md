@@ -78,7 +78,7 @@ Seven numbered sub-PRs. The dependency graph is strictly linear
 (`A → B → C → D → E → F → G`) — see §2 for why `D` and `E` can't be
 parallelised.
 
-### 1.1 PR A — Manifest relocation + `ForgePaths` skeleton
+### 1.1 PR A — Manifest relocation + `ForgePaths` skeleton — ✅ landed 2026-05-26
 
 `forge-core` needs both `Feature` (which holds a `Manifest`) and
 `FsmState.PlanningUpdate(reason, patch: ManifestPatch)`. Today,
@@ -91,13 +91,13 @@ is to relocate the manifest data types into `forge-core` and leave
 and in Slice 4. v1.2 §3.2 names "Manifest" inside `forge-specs`; v1.3
 needs a spec correction to match. The §4 carry-forward records this.
 
-- [ ] **A1.** Move `Manifest.scala` / `ManifestPatch.scala` /
+- [x] **A1.** Move `Manifest.scala` / `ManifestPatch.scala` /
   `Piece.scala` / `PieceStatus.scala` (and their suites) from
   `modules/forge-specs/src/main/scala/io/forge/specs/` to
   `modules/forge-core/src/main/scala/io/forge/core/manifest/`. Package
   becomes `io.forge.core.manifest`; downstream imports updated.
   Spec: v1.2 §3.2 (deviation tracked in §4 carry-forward S2-1 below).
-- [ ] **A2.** File **S2-1** as a `design-rationale.md` entry as part
+- [x] **A2.** File **S2-1** as a `design-rationale.md` entry as part
   of PR-A (not at PR-G close-out): "Manifest data types live in
   `forge-core`, not `forge-specs` (Slice-2 PR-A relocation)". The
   rationale + rejected alternatives below (§4 S2-1) become the body;
@@ -108,7 +108,11 @@ needs a spec correction to match. The §4 carry-forward records this.
   them under `io.forge.specs.*` (grep first). If grep is clean, skip
   the aliases and update the imports directly — no compatibility
   shim, per AGENTS.md "Things to not do".
-- [ ] **A3.** Add `ForgePaths(repoRoot: os.Path)` in
+  *Outcome:* grep was clean (no caller outside `forge-specs` imported
+  `io.forge.specs.*`), so no aliases were needed; S2-1 filed at the
+  tail of `design-rationale.md` under a new "Slice 2 spec deviations"
+  section that mirrors the slice-1 C-series tail.
+- [x] **A3.** Add `ForgePaths(repoRoot: os.Path)` in
   `io.forge.core.paths`. Exposed methods (all returning `os.Path`,
   never a raw `String`):
   - `featureSpecDir(FeatureId)` → `.forge/specs/<feature>/`
@@ -123,35 +127,64 @@ needs a spec correction to match. The §4 carry-forward records this.
   - `pricesUser`, `pricesRepo` (per §18 — `~/.forge/prices.json` /
     `.forge/prices.json`)
   Spec: v1.2 §4 path table + §17 slice 2 paths-helper seam.
-- [ ] **A4.** `ForgePathsSuite` — golden-path test that every method
+- [x] **A4.** `ForgePathsSuite` — golden-path test that every method
   returns a path strictly under `repoRoot / ".forge"` (or under `~`
   for the `pricesUser` case). Smell-test enforcement: a CI-style
   scalafmt-adjacent script (or a `sbt` task) that fails the build if
-  `grep -RE '"\.forge/' modules/` finds matches outside
-  `ForgePaths.scala`. The exact mechanism (script vs. sbt task vs. a
-  unit test using `os.walk`) is settled inside PR-A; AGENTS.md
-  §"Architectural seams to preserve" currently calls it a smell test,
-  PR-A graduates it to enforcement.
-- [ ] **A5.** Wire `design-2.2.md` into the parent docs:
+  any `".forge` string segment appears outside `ForgePaths.scala`.
+  The exact mechanism (script vs. sbt task vs. a unit test using
+  `os.walk`) is settled inside PR-A; AGENTS.md §"Architectural
+  seams to preserve" currently calls it a smell test, PR-A
+  graduates it to enforcement. The check matches `".forge` (open
+  quote + `.forge`) without requiring a trailing `/`, so it
+  catches both the legacy `".forge/log"` form and the idiomatic
+  os-lib quoted-segment form `repoRoot / ".forge" / "state"` —
+  the shape Slice-2+ call sites are likeliest to use.
+  *Mechanism chosen:* unit test using `os.walk` inside
+  `ForgePathsSuite`. Walks `modules/`, filters to `*.scala`, skips
+  `target/`, skips anything under `src/test/` (test fixtures
+  allowed — e.g. `ManifestPatchSuite`'s `specPath` literal), skips
+  `ForgePaths.scala` itself. Failure message names file:line per
+  offender. Lives with the helper rather than as a separate sbt
+  task so the gate runs under any `forge-core/test` invocation
+  without extra build config.
+- [x] **A5.** Wire `design-2.2.md` into the parent docs:
   - `AGENTS.md` §"Active design-`<section>`.md files" — replace
     *(none currently open)* with the design-2.2.md pointer.
+    *Outcome:* already wired on slice-1 close (file opened
+    2026-05-26 with the AGENTS pointer in place); PR-A verified
+    no edit needed.
   - `CLAUDE.md` TL;DR "Active implementation plan" — replace
     *(none currently open)* with the design-2.2.md pointer.
+    *Outcome:* already wired on slice-1 close; PR-A verified.
   - `roadmap.md` §2.2 — link the active design doc inline (mirroring
     the §2.1 "Detailed history of how it got there" pattern, but
     open-section flavoured).
-- [ ] **A6.** PR-A landing checklist:
-  - `sbt clean compile` clean under `-Xfatal-warnings`.
+    *Outcome:* added 🟢 "Slice 2 open — 2026-05-26" status block
+    under §2.2 pointing at `design-2.2.md` with PR-A as the entry
+    point.
+- [x] **A6.** PR-A landing checklist:
+  - `sbt clean compile` clean under `-Xfatal-warnings`. ✅
   - `sbt test` green across the build (no regression from the
-    Slice-1 baseline of 177 unit tests).
-  - `sbt scalafmtCheckAll` clean.
+    Slice-1 baseline of 177 unit tests). ✅ — `forge-agents` unit
+    suite still at 177; `forge-core` grew from 26 → 89 by
+    absorbing the moved Manifest suites + the new `ForgePathsSuite`
+    (17 tests). Total unit tests across the build: 266.
+  - `sbt scalafmtCheckAll` clean. ✅
   - `sbt "project forge-it" test` clean (no `forge-it` source
-    touched here, so this is a smoke check).
+    touched here, so this is a smoke check). ⚠️ 3 pre-existing
+    flakes in `CodexHeadlessSmokeSuite` / `CodexStreamingSpecSuite`
+    (`session is closed; further turns rejected` from
+    `CodexStreamingSession.runResumeTurn`); reproduced on clean
+    `main` HEAD via `git stash` round-trip — not a PR-A regression.
+    Codex IT flake to track outside Slice 2 (note for a future
+    `forge-agents` follow-up).
   - `grep -RE '"\.forge/' modules/ --exclude-dir=target` returns
     matches only inside `ForgePaths.scala` and any explicit
-    test-only fixture files.
+    test-only fixture files. ✅ — only match outside the helper is
+    `ManifestPatchSuite.scala:21` (test fixture for `Piece.specPath`).
   - This file's PR-A header flipped to "✅ landed" and a §3 status-log
-    entry added.
+    entry added. ✅
 
 ### 1.2 PR B — Domain model (FsmState, FsmEvent, Feature, ResumeHint, Action)
 
@@ -1008,6 +1041,31 @@ after PR-G lands.
 
 - 2026-05-26 — design-2.2.md created on the close of Slice 1
   (`design-2.1.md` closed earlier same day). No PR-A code yet.
+- 2026-05-26 — **PR-A landed.** Manifest data types (`Manifest`,
+  `ManifestPatch` / `ManifestPatchOp`, `Piece`, `PieceStatus`,
+  their suites, and the `manifest-fixture.json` test resource)
+  relocated from `forge-specs/io.forge.specs` to
+  `forge-core/io.forge.core.manifest` via `git mv` (history
+  preserved). `forge-specs` is empty of sources for now; Slice 4
+  populates it with `SpecStore` / `DocSync` / `ChangeCollector`.
+  Added `ForgePaths(repoRoot: os.Path, home: os.Path = os.home)`
+  in `io.forge.core.paths` with the 13 path methods listed under
+  A3 (every per-repo path under `repoRoot/.forge`; `pricesUser`
+  under `home/.forge`). Added `ForgePathsSuite` with 17 tests:
+  13 golden-path methods, 3 enclosing-directory invariants, plus
+  the build-enforced "no `".forge` string segment outside
+  `ForgePaths.scala`" `os.walk` sweep (graduates the AGENTS.md
+  smell-test recipe to a unit-test gate; regex catches both the
+  legacy `".forge/log"` form and the os-lib quoted-segment form
+  `repoRoot / ".forge" / "state"`). Filed S2-1 in
+  `design-rationale.md` under a new "Slice 2 spec deviations"
+  section explaining the §3.2 deviation. Wired `🟢 Slice 2 open`
+  status block into `roadmap.md` §2.2.
+  Build: `sbt clean compile` clean, `sbt scalafmtCheckAll` clean,
+  unit tests: `forge-core` 89/89, `forge-agents` 177/177.
+  Pre-existing 3-test codex IT flake (`session is closed`)
+  reproduces on clean main; not a PR-A regression, tracked for a
+  future `forge-agents` follow-up rather than blocking PR-A.
 
 ## 4. Carry-forward to v1.3
 
