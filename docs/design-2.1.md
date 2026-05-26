@@ -271,6 +271,12 @@ PR-C tests then landed:
   slice-0-report.md style — convert from "evolution record" to "Slice 1
   outcomes" (or leave as-is if the v1.2 fold-in note is still
   accurate). Decide based on what the post-mortem actually surfaced.
+- [ ] **E6.** Walk §4 "Carry-forward to v1.3" below. Every open item
+  there must be reflected somewhere durable (roadmap §3 v1.3 bucket,
+  a dedicated tracking issue, or an explicit deferred-decision note
+  in `design-rationale.md`) **before** E2 flips the §2.1 bullet to
+  `[x]`. The section-as-a-whole tick must not bury a known v1.2
+  spec/code discrepancy under it.
 
 ## 2. Order of work
 
@@ -334,8 +340,39 @@ after PR-E lands.
   `gpt-5.3-codex`). Next up: PR-E (close-out). PR-D (reviewer regression
   suites) still parked — blocked on shipped reviewer schemas + system
   prompts.
+- 2026-05-26 — **PR-C review follow-ups landed.** Four reviewer
+  comments addressed: (1) `CodexConnector.runReviewer` spawn now
+  `closeStdin`s (same hang root cause as headless/streaming); (2) C4
+  reliability suite swapped to close-then-drain; (3) the
+  `resumeStreamingSpec` system-prompt gap is recorded as a known v1.2
+  spec/code discrepancy in **design-rationale C14** and as **§4
+  carry-forward item C14** below — PR-E must carry it forward before
+  flipping the §2.1 roadmap bullet to `[x]`; (4) `CodexStreamingSession`
+  resume turns now verify thread_id matches `sessionId` and raise on
+  mismatch (with a new unit test). 174 unit tests pass.
 
-## 4. Cross-references
+## 4. Carry-forward to v1.3
+
+Items the section closure (PR-E) **must not silently bury** when it
+flips the §2.1 roadmap bullet. Each one needs a durable home — a
+roadmap §3 v1.3 bullet, a tracking issue, or an explicit
+deferred-decision entry in `design-rationale.md` — before PR-E E2
+ticks the section. PR-E item E6 walks this list.
+
+- **C14 — `CodexConnector.resumeStreamingSpec` cannot honour §7.10(a)
+  system-prompt prepending** (design-rationale C14). The shared trait
+  signature `resumeStreamingSpec(sessionId, message)` doesn't carry a
+  `systemPromptPath`, but v1.2 §7.10(a) claims the prepending
+  convention applies to resume too. v1.3 needs to decide: widen the
+  trait (drags Claude through a parameter it doesn't need), drop the
+  §7.10(a) "applies to resume" claim and shift role-framing
+  responsibility to the orchestrator's resume message, or carry
+  the path through a different seam. **Status:** documented in
+  design-rationale C14 + emphasised in the connector docstring; the
+  orchestrator's resume path (Slice 2 FSM) will need to be written
+  aware of the gap until v1.3 closes it.
+
+## 5. Cross-references
 
 - v1.2 spec for trait shape: §7.1, §7.2, §7.3, §7.4, §7.5, §7.6, §7.10
 - Decisions backing the trait-shape PR: design-rationale C11, C12
