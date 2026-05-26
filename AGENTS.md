@@ -77,8 +77,13 @@ fix this file.
   [`docs/design-rationale.md`](docs/design-rationale.md) and
   [`docs/roadmap.md`](docs/roadmap.md) §7.2): **S2-1** through
   **S2-10**, plus the Slice-1 carry-forwards **C14** and **C15**.
-- **Slice 3 (`forge-git` — BranchManager, PRWatcher, ProcessLock,
-  SessionMonitor) — next.** See design §17 / roadmap §2.3.
+- **Slice 3 — next.** `forge-git` ships `BranchManager` + `PRWatcher`;
+  `forge-app` ships `ProcessLock` + `SessionMonitor` (the rest of
+  `forge-app` — `main`, wiring, CLI — lands in Slice 4). All four
+  components are Slice-3 deliverables per design §17; the module
+  split reflects that `ProcessLock` and `SessionMonitor` don't depend
+  on `gh`/git but do need to be exercisable before Slice 4 wires up
+  the orchestrator. See roadmap §2.3.
 - Slices 4–5 scoped in design §17.
 - Phase 4 (Forge-instance pivot: multi-repo, daemon, parallel,
   containerised) is post-v1 and needs its own design doc before any
@@ -165,7 +170,7 @@ Reference file for the style we're aiming at:
 | `forge-specs` | `SpecStore`, `DocSync`, `ChangeCollector` | Slice 4 |
 | `forge-git` | `BranchManager`, `PRWatcher` | Slice 3 |
 | `forge-tui` | termflow app, panes, key bindings | Slice 5 |
-| `forge-app` | `main`, wiring, `ProcessLock`, `SessionMonitor`, CLI | Slice 4 |
+| `forge-app` | `ProcessLock`, `SessionMonitor` (Slice 3); `main`, wiring, CLI (Slice 4) | Slice 3+ |
 | `forge-it` | Integration tests against real `claude`, `codex`, `gh` | Slice 1+ |
 
 A change that spans multiple modules usually means a slice boundary

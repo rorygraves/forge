@@ -28,8 +28,8 @@ that first; everything below is Claude-Code-specific.
   `resumeStreamingSpec` system-prompt prepending), **C15** (PR-D
   ≥19/20 native schema regression suite deferred to the reviewer-asset
   PR in Slice 4), and **S2-1** through **S2-10**. Next slice: 3
-  (`forge-git` — `BranchManager`, `PRWatcher`, `ProcessLock`,
-  `SessionMonitor`).
+  (`forge-git` — `BranchManager`, `PRWatcher`; `forge-app` —
+  `ProcessLock`, `SessionMonitor`).
 - **Two architectural seams to preserve in v1 work:**
   - `ForgePaths` helper — no `.forge/...` literals outside it. Enforced
     by `ForgePathsSuite`'s `os.walk` sweep over
