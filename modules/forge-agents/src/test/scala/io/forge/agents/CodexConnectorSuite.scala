@@ -291,6 +291,48 @@ class CodexConnectorSuite extends munit.FunSuite:
     assert(result.left.exists(_.getMessage.contains("thr-actual")), clue = result)
     assert(result.left.exists(_.getMessage.contains("thr-expected-different")), clue = result)
 
+  test("in-session send() / answerQuestion: resume turn with mismatched thread_id raises §6.1 continuity error"):
+    // Two-phase fake: the first invocation emits "thr-first" (the captured session id); a counter file in /tmp
+    // causes the second invocation to emit "thr-second" (a different id). Without the mismatch check the resume
+    // turn's Init would be silently dropped and the caller's IO would succeed, masking continuity loss.
+    val counterFile = os.temp(prefix = "codex-counter-", suffix = ".txt", deleteOnExit = true)
+    os.write.over(counterFile, "0")
+    val script =
+      s"""#!/bin/sh
+         |last=""
+         |for a in "$$@"; do last="$$a"; done
+         |json_prompt=$$(printf '%s' "$$last" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g; s/$$/\\\\n/' | tr -d '\\n')
+         |n=$$(cat ${counterFile.toString})
+         |if [ "$$n" = "0" ]; then
+         |  tid="thr-first"
+         |  echo 1 > ${counterFile.toString}
+         |else
+         |  tid="thr-second"
+         |fi
+         |echo "{\\"type\\":\\"thread.started\\",\\"thread_id\\":\\"$$tid\\"}"
+         |echo '{"type":"turn.started"}'
+         |printf '%s\\n' "{\\"type\\":\\"item.completed\\",\\"item\\":{\\"id\\":\\"item_0\\",\\"type\\":\\"agent_message\\",\\"text\\":\\"echo: $$json_prompt\\"}}"
+         |echo '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":3,"reasoning_output_tokens":0}}'
+         |""".stripMargin
+    val fake = os.temp(contents = script, prefix = "fake-codex-mismatch-", suffix = ".sh", deleteOnExit = true)
+    os.perms.set(fake, "rwx------")
+    val systemPrompt = os.temp(contents = "S", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val connector = CodexConnector(
+      binary = fake.toString,
+      model = model,
+      priceTable = emptyPrices,
+      sessionSettings = defaultSettings
+    )
+    val result = connector
+      .runStreamingSpec(systemPrompt, "first")
+      .flatMap(session => session.send("second").attempt.map((session, _)))
+      .unsafeRunSync()
+    val (session, sendResult) = result
+    assertEquals(session.sessionId, "thr-first", clue = session.sessionId)
+    assert(sendResult.left.exists(_.getMessage.contains("thr-first")), clue = sendResult)
+    assert(sendResult.left.exists(_.getMessage.contains("thr-second")), clue = sendResult)
+    assert(sendResult.left.exists(_.getMessage.contains("continuity break")), clue = sendResult)
+
   test("reviewer methods raise ReviewerNotConfigured (non-retryable) when no ReviewerAssets are configured"):
     val c = newConnector
     val fid = FeatureId("feat-1")

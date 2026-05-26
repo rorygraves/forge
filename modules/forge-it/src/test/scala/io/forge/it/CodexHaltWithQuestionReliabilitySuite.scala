@@ -102,9 +102,13 @@ class CodexHaltWithQuestionReliabilitySuite extends munit.FunSuite:
       val events = connector
         .runStreamingSpec(sys, ambiguousUserPrompt)
         .flatMap: session =>
+          // close() FIRST, then drain. CodexStreamingSession keeps its channel open across turns (more turns may
+          // come), so drain-before-close would block forever. close() blocks on the turn mutex (the current turn's
+          // stdout drains naturally and the subprocess exits), then closes the channel; drain returns. Same idiom
+          // as the other PR-C suites + CodexConnectorSuite's facade tests.
           for
-            es <- session.events.compile.toVector
             _ <- session.close()
+            es <- session.events.compile.toVector
           yield es
         .unsafeRunSync()
       // Success = at least one AskUserQuestion event in the turn (the parser only emits it when tryParse succeeds —

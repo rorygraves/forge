@@ -78,12 +78,18 @@ final class CodexConnector(
           .widen
 
   /** v1.2 §7.1 — resume a previously-closed Codex spec session. The first turn of the resumed session runs `codex exec
-    * resume --json <sessionId> <message>`. §7.10(a) system-prompt prepending is skipped here because the trait
-    * signature (shared with Claude, which restores the system prompt via `--resume`) doesn't carry the path; the
-    * orchestrator that resumes a Codex session is expected to either re-issue the original prompt in `message` or
-    * accept that the resumed turns run with the model's recollection of the original spawn. §6.1 invariant on the
-    * pinned CLI: the returned `sessionId` equals the input; the factory verifies and raises if the CLI returns a
-    * mismatched thread_id.
+    * resume --json <sessionId> <message>`.
+    *
+    * **Known spec/code gap — design-rationale C14.** §7.10(a) says the system-prompt prepending convention "also
+    * applies to `resumeStreamingSpec`," but the shared trait signature (matched to Claude, which restores the prompt
+    * server-side via `--resume`) carries no `systemPromptPath`. This implementation cannot prepend a block it has no
+    * path to. The orchestrator that calls `resumeStreamingSpec` is expected to either re-issue the role framing in
+    * `message` or trust Codex's session memory of the spawn-time prompt. Resolution is parked for a v1.3 spec
+    * correction (widen the trait vs drop the §7.10(a) "applies to resume" claim).
+    *
+    * §6.1 invariant on the pinned CLI: the returned `sessionId` equals the input; the factory verifies and raises if
+    * the CLI returns a mismatched `thread_id`. In-session resume turns (`send` / `answerQuestion`) carry the same check
+    * via `CodexStreamingSession.runOneTurn` — see review comment #4.
     */
   def resumeStreamingSpec(sessionId: String, message: String): IO[StreamingSession] =
     val argv = CodexConnector.execResumeArgv(binary, sessionId, message)
@@ -186,6 +192,11 @@ final class CodexConnector(
           argv = CodexConnector.execArgv(binary, model, reviewerSettings, combined)
           payload <- Subprocess
             .spawn(argv, cwd = cwd, env = extraEnv)
+            // Same Codex-reads-stdin behaviour as `spawnHeadless` / `CodexStreamingSession.runOneTurn` — without
+            // this, `reviewDesign` / `reviewPr` / `refine` hang until `reviewerTimeout` and surface as
+            // ReviewerProcessFailure even though the prompt is on argv. The fake reviewer tests don't catch this
+            // because their shell scripts never read stdin.
+            .evalTap(_.closeStdin)
             .use(sp => CodexConnector.collectReviewerPayload(sp, reviewerTimeout))
           decoded <- IO.fromEither(
             decode(payload).left.map(detail => StructuredOutputMalformed(detail))

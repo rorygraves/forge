@@ -128,42 +128,61 @@ final class CodexStreamingSession private (
       initDef: Option[Deferred[IO, Either[Throwable, String]]]
   ): IO[Unit] =
     Subprocess.spawn(argv, cwd = cwd, env = extraEnv).use { sp =>
-      val drainStdout =
-        sp.stdout
-          .evalMap: line =>
-            parser.parse(line) match
-              case Right(events) =>
-                events.traverse_ {
-                  case AgentEvent.Init(id) =>
-                    if isFirstTurn then
-                      // First turn carries the session-level Init. Notify the factory and forward the event, then
-                      // emit a UserMessage mirror so the action-log captures the originating user input ordering-wise
-                      // after Init.
-                      initDef.fold(IO.unit)(_.complete(Right(id)).attempt.void) *>
-                        sessionChan.send(AgentEvent.Init(id)).void *>
-                        sessionChan
-                          .send(AgentEvent.UserMessage(userMessageMirror.take(200)))
-                          .void
-                    else
-                      // Resume turns also emit a thread.started; drop it to keep exactly one Init in the session
-                      // stream.
-                      IO.unit
-                  case other => sessionChan.send(other).void
-                }
-              case Left(err) =>
-                stderrBuf.update(_ :+ s"parse error: $err  line=$line")
-          .compile
-          .drain
-      val drainStderr = sp.stderr.evalMap(line => stderrBuf.update(_ :+ line)).compile.drain
-      // For resume turns we emit the mirror eagerly so the channel order is UserMessage → AssistantText/... → Result
-      // (no Init in between, since we drop the resume's thread.started). For the first turn the mirror is enqueued
-      // inside the stdout handler so it lands AFTER Init.
-      val preTurn =
-        if isFirstTurn then IO.unit
-        else sessionChan.send(AgentEvent.UserMessage(userMessageMirror.take(200))).void
-
-      val core =
-        for
+      // Per-turn capture of a resume-turn `thread.started` whose id doesn't match the session's. §6.1 invariant on
+      // the pinned CLI is that `codex exec resume <sid>` preserves the original `thread_id`; a mismatch means
+      // continuity broke (a different conversation got resumed, or the CLI silently re-keyed). The first-turn path
+      // surfaces this via the factory's hint cross-check; this Ref covers the in-session send / answerQuestion turns
+      // which would otherwise drop the mismatched event silently.
+      for
+        turnErrRef <- IO.ref(Option.empty[Throwable])
+        drainStdout =
+          sp.stdout
+            .evalMap: line =>
+              parser.parse(line) match
+                case Right(events) =>
+                  events.traverse_ {
+                    case AgentEvent.Init(id) =>
+                      if isFirstTurn then
+                        // First turn carries the session-level Init. Notify the factory and forward the event, then
+                        // emit a UserMessage mirror so the action-log captures the originating user input
+                        // ordering-wise after Init.
+                        initDef.fold(IO.unit)(_.complete(Right(id)).attempt.void) *>
+                          sessionChan.send(AgentEvent.Init(id)).void *>
+                          sessionChan
+                            .send(AgentEvent.UserMessage(userMessageMirror.take(200)))
+                            .void
+                      else if id != sessionId then
+                        // Resume turn produced a different thread_id than the one we're tracking — §6.1 invariant
+                        // violation. Record the first occurrence; the post-drain block below surfaces it as a turn
+                        // failure rather than silently dropping the event.
+                        turnErrRef.update {
+                          case None =>
+                            Some(
+                              RuntimeException(
+                                s"CodexStreamingSession($sessionId): resume turn produced thread_id '$id' " +
+                                  s"(expected '$sessionId') — §6.1 continuity break"
+                              )
+                            )
+                          case some => some
+                        }
+                      else
+                        // Resume turns also emit a thread.started with the same id; drop it to keep exactly one
+                        // Init in the session stream.
+                        IO.unit
+                    case other => sessionChan.send(other).void
+                  }
+                case Left(err) =>
+                  stderrBuf.update(_ :+ s"parse error: $err  line=$line")
+            .compile
+            .drain
+        drainStderr = sp.stderr.evalMap(line => stderrBuf.update(_ :+ line)).compile.drain
+        // For resume turns we emit the mirror eagerly so the channel order is UserMessage → AssistantText/... →
+        // Result (no Init in between, since we drop the resume's thread.started). For the first turn the mirror is
+        // enqueued inside the stdout handler so it lands AFTER Init.
+        preTurn =
+          if isFirstTurn then IO.unit
+          else sessionChan.send(AgentEvent.UserMessage(userMessageMirror.take(200))).void
+        core = for
           _ <- currentTurnRef.set(Some(sp))
           // Codex reads stdin even when the prompt is on argv (it logs "Reading additional input from stdin..." to
           // stderr and blocks until EOF). The per-turn subprocess sends nothing on stdin, so close it immediately.
@@ -178,18 +197,27 @@ final class CodexStreamingSession private (
           _ <- stdoutFiber.join.attempt.void
           _ <- stderrFiber.join.attempt.void
           _ <- currentTurnRef.set(None)
+          // Surface a resume thread_id mismatch as a turn failure (and finalise the session, mirroring the
+          // first-turn cleanup in the factory's `start`). The user's send / answerQuestion IO then raises rather
+          // than silently lying about continuity via the `sessionId` accessor.
+          maybeErr <- turnErrRef.get
+          _ <- maybeErr match
+            case None => IO.unit
+            case Some(err) =>
+              closedRef.set(true) *> sessionChan.close.attempt.void *> IO.raiseError(err)
         yield ()
-      core.guarantee(
-        // If the first turn finished without producing Init, complete initDef with Left so the factory doesn't hang.
-        // No-op if Init already arrived (Deferred.complete is single-shot).
-        if isFirstTurn then
-          initDef.fold(IO.unit)(
-            _.complete(
-              Left(RuntimeException("Codex first turn exited before producing thread.started"))
-            ).attempt.void
-          )
-        else IO.unit
-      )
+        _ <- core.guarantee(
+          // If the first turn finished without producing Init, complete initDef with Left so the factory doesn't
+          // hang. No-op if Init already arrived (Deferred.complete is single-shot).
+          if isFirstTurn then
+            initDef.fold(IO.unit)(
+              _.complete(
+                Left(RuntimeException("Codex first turn exited before producing thread.started"))
+              ).attempt.void
+            )
+          else IO.unit
+        )
+      yield ()
     }
 
   /** Snapshot of stderr lines drained across every turn so far. Useful for tests / diagnostics. */
