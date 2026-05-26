@@ -86,4 +86,65 @@ their CLIs. A few cross-cutting points that show up while working on
   change touches `forge-agents`. Mocks for Claude/Codex behaviour
   drift from reality faster than the test suite catches.
 
+## Testing & review discipline
+
+Lessons that have repeatedly bitten in this repo. Each one is also
+captured as a feedback memory; this list is the source of truth for
+human + agent reviewers.
+
+- **Mirror existing test idioms.** Before writing a new test against
+  `forge-agents` or `forge-it`, grep for the closest analogous existing
+  test and copy its lifecycle shape. Especially: **close-then-drain**
+  is the only safe order for streaming-spec / multi-process-facade
+  sessions. The events channel stays open until the underlying CLI
+  exits (which only happens after `closeStdin`), so `compile.toVector`
+  before `close()` deadlocks. Headless `-p '<prompt>'` mode is the
+  exception (CLI exits on its own). See `CodexConnectorSuite` facade
+  tests and `ClaudeStreamingSpecSuite` for the canonical idiom.
+
+- **Fake-CLI scripts must mirror real-CLI blocking behaviour.** A fake
+  shell script that doesn't `read` stdin can't catch hangs on the real
+  CLI (codex 0.133 blocks waiting for EOF on a JVM-spawned open stdin
+  pipe; that was invisible to every unit test). For any new CLI code
+  path, pair the fake-CLI unit test with an integration test in
+  `forge-it`, or convince yourself the fake's I/O behaviour matches the
+  real binary's.
+
+- **Default-on test runtime: <60s.** Anything multi-minute (≥20-sample
+  reliability checks, regression batches) is opt-in via env var. Forge
+  convention is `FORGE_IT_RUN_*`; document the gate in the suite
+  docstring's "Opt-in by default" line. See
+  `CodexHaltWithQuestionReliabilitySuite` for the pattern. Applies to
+  PR-D (reviewer regression) before it lands.
+
+- **Consistency sweep before declaring a sub-PR item done.** For each
+  new file, diff lifecycle / error handling / invariant checks against
+  the closest sibling. For each invariant assertion, grep for every
+  code path that touches the underlying datum and confirm the check
+  applies there too. Most "obvious in hindsight" review comments come
+  from this gap — the knowledge wasn't missing, the consistency check
+  was.
+
+- **"We deviate from spec §X because…" comments are flags, not
+  resolutions.** File the gap as a numbered entry in
+  `docs/design-rationale.md` (C-series for connector items) with
+  proposed v1.3 resolutions; rewrite the code comment to point at it;
+  add a carry-forward item to the active `design-<section>.md` §4 so
+  the section close can't bury it. The C14 entry is the worked
+  example.
+
+- **Section closures must explicitly carry deferrals forward.** PR-E
+  (or equivalent close-out PRs) cannot flip a roadmap `[~]` to `[x]`
+  without first walking the active `design-<section>.md`
+  "Carry-forward" list and placing each item somewhere durable
+  (roadmap v1.3 bucket, tracking issue, or design-rationale deferred
+  decision). The close-out checklist should make this a gating step,
+  not a memory check.
+
+- **Ask before scope-expanding.** If a "focused fix" needs code
+  outside the current PR's scope, use `AskUserQuestion` with 2–3
+  concrete options + a recommendation rather than silently expanding.
+  Even in auto mode. The codex 0.130→0.133 flag drift discovery is
+  the worked example.
+
 Everything else: see [`AGENTS.md`](AGENTS.md).
