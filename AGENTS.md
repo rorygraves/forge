@@ -102,9 +102,11 @@ layers — read top-down on a new task:
 
 ### Active design-`<section>`.md files
 
-- *(none currently open)* — Slice 1 closed 2026-05-26
-  (`docs/design-2.1.md` retained as the audit trail). Slice 2
-  (`forge-core`) will get a `design-2.2.md` when work starts.
+- [`docs/design-2.2.md`](docs/design-2.2.md) — Slice 2 (`forge-core`:
+  FSM, Feature, ActionLog, StateCache, `ForgePaths`). Opened
+  2026-05-26 on Slice 1 close; PR-A (Manifest relocation +
+  `ForgePaths` skeleton) is the entry point. Slice 1 audit trail
+  remains at [`docs/design-2.1.md`](docs/design-2.1.md).
 
 Don't pre-write design-`<section>`.md files for sections that aren't
 being actively worked. They drift; the roadmap is enough until the

@@ -7,12 +7,15 @@ that first; everything below is Claude-Code-specific.
 
 - **Implementation contract:** [`docs/forge-design-1.2.md`](docs/forge-design-1.2.md). The 1.1 revision is kept in-tree as an evolution record but is superseded.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
-- **Active implementation plan:** *(none currently open)*.
-  [`docs/design-2.1.md`](docs/design-2.1.md) is Slice 1's audit
-  trail — kept in-tree for history, no longer active. Slice 2
-  (`forge-core` — FSM, Feature, ActionLog, StateCache) opens with a
-  fresh `design-2.2.md`. See `AGENTS.md` §"Per-section implementation
-  plans" for the pattern (sub-PR breakdown with checkbox items).
+- **Active implementation plan:**
+  [`docs/design-2.2.md`](docs/design-2.2.md) — Slice 2 (`forge-core`:
+  FSM, Feature, ActionLog, StateCache, `ForgePaths`). Opened
+  2026-05-26 on Slice 1 close; PR-A (Manifest relocation +
+  `ForgePaths` skeleton) is the entry point. The Slice 1 audit
+  trail at [`docs/design-2.1.md`](docs/design-2.1.md) is kept
+  in-tree for history but is no longer active. See `AGENTS.md`
+  §"Per-section implementation plans" for the pattern (sub-PR
+  breakdown with checkbox items).
 - **Current state:** Slice 1 ✅ closed 2026-05-26. Both connectors
   (Claude + Codex) ship against v1.2 §7.1 with real-CLI integration
   coverage in `forge-it`. **Carry-forward** to v1.3 / Slice 4:
@@ -124,6 +127,24 @@ human + agent reviewers.
   applies there too. Most "obvious in hindsight" review comments come
   from this gap — the knowledge wasn't missing, the consistency check
   was.
+
+- **Review comments on design docs are signals, not the patch list.**
+  When a reviewer flags a contract problem in a design doc — an FSM
+  signature, a trait method, an error channel — *don't* edit only the
+  spot they pointed at and call it done. Re-walk the call chain end to
+  end: every producer of the changed type, every consumer, every
+  cross-reference, every test that asserts against the old contract.
+  The original mistake almost certainly leaked into adjacent places
+  you also wrote, and patching only the named line moves the
+  inconsistency one section over. After each round, ask "what does
+  this change *imply* elsewhere?" before declaring the round done.
+  The worked example is `design-2.2.md`'s three review rounds: round 1
+  surfaced the FSM signature gap; rounds 2 and 3 found further
+  contract leaks (`Feature` lacks history, `Refining.startedAt`
+  semantics, partial-batch crash recovery, inconsistent error
+  channels) that were already implied by round 1's fix but went
+  unaddressed because the patch was local. Cost: three review rounds
+  to settle what should have been one coherence pass.
 
 - **"We deviate from spec §X because…" comments are flags, not
   resolutions.** File the gap as a numbered entry in
