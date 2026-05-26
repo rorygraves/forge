@@ -7,26 +7,34 @@ that first; everything below is Claude-Code-specific.
 
 - **Implementation contract:** [`docs/forge-design-1.2.md`](docs/forge-design-1.2.md). The 1.1 revision is kept in-tree as an evolution record but is superseded.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
-- **Active implementation plan:**
-  [`docs/design-2.2.md`](docs/design-2.2.md) — Slice 2 (`forge-core`:
-  FSM, Feature, ActionLog, StateCache, `ForgePaths`). Opened
-  2026-05-26 on Slice 1 close; PR-A (Manifest relocation +
-  `ForgePaths` skeleton) is the entry point. The Slice 1 audit
-  trail at [`docs/design-2.1.md`](docs/design-2.1.md) is kept
-  in-tree for history but is no longer active. See `AGENTS.md`
-  §"Per-section implementation plans" for the pattern (sub-PR
-  breakdown with checkbox items).
-- **Current state:** Slice 1 ✅ closed 2026-05-26. Both connectors
-  (Claude + Codex) ship against v1.2 §7.1 with real-CLI integration
-  coverage in `forge-it`. **Carry-forward** to v1.3 / Slice 4:
-  **C14** (Codex `resumeStreamingSpec` system-prompt prepending —
-  see [`docs/design-rationale.md`](docs/design-rationale.md)) and
-  **C15** (PR-D ≥19/20 native schema regression suite deferred to
-  the reviewer-asset PR in Slice 4). Roadmap §7.2 carries the
-  roadmap-level pointers. Next slice: 2 (`forge-core`).
+- **Active implementation plan:** *(none currently open)* — Slice 2
+  closed 2026-05-26; Slice 3 opens a fresh `docs/design-2.3.md` when
+  work starts. The most recent audit trail is
+  [`docs/design-2.2.md`](docs/design-2.2.md) (Slice 2);
+  [`docs/design-2.1.md`](docs/design-2.1.md) is the Slice 1 audit
+  trail. See `AGENTS.md` §"Per-section implementation plans" for the
+  pattern (sub-PR breakdown with checkbox items).
+- **Current state:** Slices 1 and 2 ✅ closed 2026-05-26. Slice 1
+  shipped both connectors against v1.2 §7.1 with real-CLI integration
+  coverage in `forge-it`. Slice 2 shipped `forge-core` —
+  `ForgePaths`, relocated manifest data types, `FsmState` / `FsmEvent`
+  / `Feature` / `ResumeHint` / `Action` domain model, the pure
+  `Fsm.transition` covering every §11 lifecycle rule, `FileActionLog`
+  + `Feature.foldEvents`, `FileStateCache` + `RebuildState.run`, and
+  the §17 slice-2 property-test suite (357 unit tests). **Carry-forward**
+  to v1.3 / Slice 4 (see
+  [`docs/design-rationale.md`](docs/design-rationale.md) and
+  [`docs/roadmap.md`](docs/roadmap.md) §7.2): **C14** (Codex
+  `resumeStreamingSpec` system-prompt prepending), **C15** (PR-D
+  ≥19/20 native schema regression suite deferred to the reviewer-asset
+  PR in Slice 4), and **S2-1** through **S2-10**. Next slice: 3
+  (`forge-git` — `BranchManager`, `PRWatcher`, `ProcessLock`,
+  `SessionMonitor`).
 - **Two architectural seams to preserve in v1 work:**
-  - `ForgePaths` helper — no `.forge/...` literals outside it.
-    Smell test: `grep -r '"\.forge/' modules/` outside `ForgePaths.scala`.
+  - `ForgePaths` helper — no `.forge/...` literals outside it. Enforced
+    by `ForgePathsSuite`'s `os.walk` sweep over
+    `modules/**/src/main/**/*.scala` (test fixtures exempt). Adding a
+    new `".forge` literal outside `ForgePaths.scala` fails the build.
   - `Role` indirection — no `match m: Mode` outside `Mode` itself and
     connector construction.
 

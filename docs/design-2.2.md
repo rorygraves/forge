@@ -11,8 +11,11 @@
 > land; the roadmap section gets ticked off only after a code review on
 > the section as a whole.
 >
-> **Status:** active — opened 2026-05-26 on the close of Slice 1
-> (`design-2.1.md`). No code in this slice has landed yet.
+> **Status:** ✅ closed 2026-05-26 (audit trail). All seven sub-PRs
+> (PR-A → PR-G) landed; roadmap §2.2 flipped from `[~]` to `[x]`.
+> §4 carry-forwards (S2-1 → S2-10 plus the inherited C14/C15) each
+> have a durable home in [`design-rationale.md`](design-rationale.md)
+> or [`roadmap.md`](roadmap.md) §7.2.
 
 ## 0. Exit criterion for Slice 2
 
@@ -1021,45 +1024,58 @@ a one-line cross-reference to the v1.2 § that motivates it.
   to invent transitions outside the legal §11.5 crash windows,
   and (e) the multi-piece refusal — matching invariant 14.
 
-### 1.7 PR G — Close-out: code review + carry-forward walk
+### 1.7 PR G — Close-out: code review + carry-forward walk — ✅ landed 2026-05-26
 
-- [ ] **G1.** Code review on PR-A through PR-F as a section. Review
-  comments folded back into PR-A–F or into PR-G as a final fixups
-  commit.
-- [ ] **G2.** `roadmap.md` §2.2 bullets flipped from any `[~]` markers
-  to `[x]`. Status header line in `roadmap.md` updated to reflect
-  Slice 2 closure.
-- [ ] **G3.** `AGENTS.md` "Current state" Slice 2 paragraph
-  rewritten (mirror the Slice 1 wording in `AGENTS.md` today).
-  "Active design-`<section>`.md files" list returns to *(none
-  currently open)*. Module-layout table updated:
-  - `forge-core` now owns `Manifest` / `ManifestPatch` / `Piece` /
-    `PieceStatus` (consequence of PR-A A1).
-  - `forge-core` ownership row gains `PrSnapshot` (carry-forward
-    S2-4 — `AGENTS.md`'s current row places it under `forge-git`;
-    the spec §3.2 is right and the doc was wrong).
-  - `forge-specs` row narrows to `SpecStore`, `DocSync`,
-    `ChangeCollector` (which mostly land in Slice 4 — note that
-    inline). `forge-git` row narrows to `BranchManager`,
-    `PRWatcher` only.
-- [ ] **G4.** `CLAUDE.md` TL;DR "Active implementation plan" + "Current
-  state" rewritten. The `ForgePaths` seam rule in the TL;DR
-  graduates from "smell test" to "enforced by build" (per PR-A A4
-  mechanism).
-- [ ] **G5.** §4 carry-forward walked. Inherited from Slice 1:
-  - **C14** (Codex resume can't reapply system prompt). PR-C C5
-    embedded the FSM-side comment; the orchestrator-side wiring is
-    Slice 4 (which inherits the carry-forward). G5 confirms the
-    FSM comment is in place and that design-2.2 §4 still names C14
-    as the open item. No code resolution lands here; the spec gap
-    is genuinely a v1.3 question.
-  - **C15** (PR-D reviewer regression suite deferred to Slice 4
-    reviewer-asset PR). Unchanged; design-2.2 §4 re-names it.
-  - New Slice-2 carry-forwards (`S2-1` etc., named in §4 below)
-    each get a durable home in `design-rationale.md` or
-    `roadmap.md` §7.2 before G2 flips the roadmap bullet.
-- [ ] **G6.** This file flipped from "active" to "audit trail".
-  `design-2.3.md` opens when Slice 3 starts.
+- [x] **G1.** Code review on PR-A through PR-F as a section. The
+  section-level review (recorded in §3 status log below) returned
+  **no High findings** that blocked closure. Two Medium findings
+  (S2-8 `SettleTimeout` reviewer/refine phase coverage, S2-9
+  `verifyAgainstLog` cache-write-on-Consistent) were filed as new
+  carry-forwards. One Medium finding (`Replay.applyAuditPieceMerged`
+  accepting a dead `"piece"` alias) was folded into PR-G as a
+  one-line fixup (S2-10) along with deletion of the now-dead
+  `Fsm.stateTag` helper (rendered redundant by the S2-7 payload
+  encoding switch). All earlier per-PR review rounds (PR-C r1/r2,
+  PR-D r1, PR-E r1) are already in §3 below.
+- [x] **G2.** `roadmap.md` §2.2 bullet list rewritten with per-item
+  `[x]` markers covering ForgePaths, manifest relocation, domain
+  model (PR-B), `Fsm.transition` (PR-C), `FileActionLog` +
+  `Feature.foldEvents` (PR-D), `FileStateCache` + `RebuildState`
+  (PR-E), and the §17 slice-2 property-test suite (PR-F). Status
+  block flipped from 🟢 "Slice 2 open" to ✅ "Slice 2 closed". Top
+  status line bumped to draft v0.6 reflecting both slices closed.
+- [x] **G3.** `AGENTS.md` "Current state" Slice 2 paragraph rewritten;
+  Slice 3 marked "next". "Active design-`<section>`.md files" list
+  returns to *(none currently open)* with pointers to the Slice 1
+  + Slice 2 audit trails. Module-layout table updated: `forge-core`
+  now owns Manifest types + `PrSnapshot` + `RebuildState` + Cost
+  types; `forge-specs` row narrows to `SpecStore` / `DocSync` /
+  `ChangeCollector` landing in Slice 4; `forge-git` row narrows to
+  `BranchManager` / `PRWatcher`.
+- [x] **G4.** `CLAUDE.md` TL;DR "Active implementation plan" → *(none
+  currently open)* with audit-trail pointers; "Current state"
+  rewritten covering Slices 1 and 2; `ForgePaths` seam rule in the
+  TL;DR graduated from "smell test" to "build-enforced via
+  `ForgePathsSuite`'s `os.walk` sweep" per PR-A A4 mechanism.
+- [x] **G5.** §4 carry-forward walked. Inherited from Slice 1 (C14,
+  C15) — both already filed in `design-rationale.md` and surface in
+  `roadmap.md` §7.2; PR-C C5 placed the FSM-side awareness comments
+  for C14; no further code resolution at this slice. New Slice-2
+  carry-forwards each filed in `design-rationale.md` under
+  "Slice 2 spec deviations":
+  - S2-1 (manifest relocation) — already filed in PR-A A2.
+  - S2-7 (`fsm.transition` payload encoding) — already filed in PR-D.
+  - S2-2 (FsmEvent ADT shape), S2-3 (ActionLog durability), S2-4
+    (`PrSnapshot` doc mismatch), S2-5 (writer-side atomic-merge
+    test → Slice 4), S2-6 (`Feature.designPrFeedbackRound`
+    projection), S2-8 (SettleTimeout reviewer/refine phases),
+    S2-9 (`verifyAgainstLog` cache-write skip), S2-10
+    (`audit.piece_merged` payload key tightened) — filed in PR-G.
+  `roadmap.md` §7.2 mirrors every S-series entry with a v1.3 / Slice
+  4 pointer.
+- [x] **G6.** This file flipped from "active" to "audit trail" (status
+  header at the top of §0 reflects ✅ closed). `design-2.3.md` opens
+  when Slice 3 starts.
 
 ## 2. Order of work
 
@@ -1732,6 +1748,84 @@ after PR-G lands.
   `sbt test` 357/357 in `forge-core`, 181/181 in `forge-agents`
   (no regression), `forge-it` 10/10 (1 reliability suite skipped
   per `FORGE_IT_RUN_RELIABILITY` opt-in).
+- 2026-05-26 — **PR-G landed.** Slice-2 close-out per §1.7. Section
+  review on PR-A → PR-F surfaced **no High findings** that blocked
+  closure; three Mediums and two Lows were dispositioned:
+  + **Folded into PR-G as fixups:**
+    - **Dead-code removal (no behavioural change).** Deleted the
+      ~20-line `Fsm.stateTag` exhaustive match — rendered redundant
+      by the S2-7 payload-encoding switch (`fsm.transition` now
+      emits the full `FsmState` JSON via uPickle's derived enum
+      encoding, not the bare tag), so no call site referenced
+      `stateTag` any more. Caught only because `-Wunused:imports`
+      doesn't catch unused private methods.
+    - **Strictness tightening (intentional behaviour change for
+      hand-edited / hypothetical-legacy logs).** Tightened
+      `Replay.applyAuditPieceMerged` to accept the
+      `audit.piece_merged` payload key as `"p"` only (was
+      `"p"` OR `"piece"`). Production writers
+      (`Fsm.auditPieceMergedDraft` and
+      `RebuildState.syntheticAuditDraft`) only ever emit `"p"`, so
+      no Forge-written log changes behaviour; an operator-edited
+      log using the legacy `"piece"` spelling now surfaces as
+      `ReplayError.MalformedPayload` (treated as corruption)
+      rather than being silently accepted and rewritten on next
+      repair. Behaviour for the production wire form is unchanged;
+      behaviour for the legacy alias is intentionally stricter.
+      Locked by a new `FeatureFoldEventsSuite` regression test.
+      Filed as **S2-10** in `design-rationale.md`.
+  + **Filed as new carry-forwards (Slice 4):**
+    - **S2-8** — `Fsm.transition` doesn't handle `SettleTimeout`
+      for `SessionPhase.{DesignReview, CodeReview, Refine}`;
+      reviewer-side and refine-phase settle timeouts fall through
+      to a silent no-op. Slice 4 must decide between (i) adding
+      explicit handlers with phase-appropriate NHI hints or (ii)
+      documenting that the orchestrator must convert them to
+      `HarnessError`.
+    - **S2-9** — `FileStateCache.verifyAgainstLog` calls
+      `RebuildState.run` unconditionally on every invocation,
+      which always writes the cache file (temp + rename + parent
+      fsync) even when the cache is byte-equal to the rebuild
+      result. Slice 4 needs either a byte-identical compare-then-skip
+      or a manifest+log fingerprint cache to avoid the perf cost
+      under long-running orchestrator load.
+  + **Skipped (Low, not worth the noise):**
+    - Adding a property-level `Refining.startedAt` round-trip
+      assertion — already adequately covered by `FsmStateSuite`'s
+      codec round-trip and F13 fixture tests.
+    - Restructuring `requireSessionId`'s call-site pattern at the
+      two FSM consumer sites — current code is correct; the
+      `Either[FsmTransition, String]` round-trip is the typed
+      seam that lets the orchestrator's eventual
+      `RequiredSessionIdMissing` event wire up cleanly.
+  + Doc updates landing under G2/G3/G4/G5/G6:
+    - `roadmap.md` §2.2 flipped to ✅ with per-item `[x]` markers;
+      status block updated; top status line bumped to draft v0.6.
+    - `roadmap.md` §7.2 gained S2-1 through S2-10 entries
+      pointing at `design-rationale.md` for full rationale.
+    - `AGENTS.md` "Current state" Slice 2 paragraph rewritten;
+      Slice 3 marked "next"; "Active design-`<section>`.md files"
+      list returned to *(none currently open)* with audit-trail
+      pointers; module-layout table updated (forge-core now owns
+      Manifest types + PrSnapshot + RebuildState + Cost; forge-specs
+      narrows to SpecStore/DocSync/ChangeCollector landing in
+      Slice 4; forge-git narrows to BranchManager/PRWatcher);
+      ForgePaths seam description graduated from "smell test
+      `grep`" to "build-enforced unit test (`ForgePathsSuite`
+      `os.walk`)" matching the PR-A A4 mechanism.
+    - `CLAUDE.md` TL;DR updated to match.
+    - `design-rationale.md` "Slice 2 spec deviations" section
+      grew from 2 entries (S2-1, S2-7) to 10 (added S2-2, S2-3,
+      S2-4, S2-5, S2-6, S2-8, S2-9, S2-10).
+    - This file's header flipped to "✅ closed (audit trail)";
+      PR-G G1–G6 checkboxes ticked; §4 below names every Slice-2
+      carry-forward.
+  + No code regressions: `sbt clean compile` clean,
+    `sbt scalafmtCheckAll` clean, `sbt test` 358/358 in
+    `forge-core` (357 → 358 — `FeatureFoldEventsSuite` gained a
+    regression test locking the S2-10 strictness contract;
+    `Fsm.stateTag` deletion removed dead code with no test
+    impact), 181/181 in `forge-agents` (no regression).
 
 ## 4. Carry-forward to v1.3
 
@@ -1834,7 +1928,44 @@ ticks the section.
   **Status:** PR-G G5 carries forward; v1.3 §19 needs to lift
   the example to a parameterised case so the encoding is
   documented, not just illustrated.
-- *(more added as PR-A–F land if review surfaces them)*
+- **S2-8 — `Fsm.transition` doesn't handle `SettleTimeout` for three
+  `SessionPhase` variants** (PR-G section review). The driver-side
+  phases (`Spec`, `DesignRevision`, `Implement`, `Fixup`) route to
+  `NHI` with a phase-appropriate `ResumeHint`; the reviewer phases
+  (`DesignReview`, `CodeReview`) and `Refine` fall through to a
+  silent no-op and leave the FSM stuck in `DesignReviewing` /
+  `PieceAwaitingReview` / `Refining`. The orchestrator can route
+  around this by converting reviewer/refine settle timeouts to
+  `HarnessError` events at the call site, but the contract isn't
+  documented. **Status:** filed in `design-rationale.md` as S2-8;
+  Slice 4 must choose between (i) explicit handlers in the FSM with
+  phase-appropriate NHI hints + `ResumeHintCoverageSuite` rows, or
+  (ii) documenting orchestrator-side conversion as the contract.
+- **S2-9 — `StateCache.verifyAgainstLog` always writes the cache,
+  even on Consistent** (PR-G section review). `verifyAgainstLog`
+  calls `RebuildState.run` unconditionally, which always calls
+  `cache.save` at pipeline step 6 — so every consistency check
+  rewrites the cache file (temp + `Files.move(ATOMIC_MOVE)` + parent
+  fsync) even when the rebuilt `Feature` is byte-equal to the cached
+  one. Fine in unit tests; potentially a perf cliff under long-running
+  Slice-4 orchestrator load where the check fires on every
+  `forge resume` / restart / (depending on wiring) every transition.
+  **Status:** filed in `design-rationale.md` as S2-9; Slice 4 needs
+  either (a) a byte-identical compare-then-skip in `verifyAgainstLog`
+  or (b) a manifest+log fingerprint cache that lets the check skip
+  the full rebuild on unchanged inputs.
+- **S2-10 — `audit.piece_merged` payload key tightened to `"p"`
+  only** (PR-G fixups). `Replay.applyAuditPieceMerged` previously
+  accepted `"p"` OR `"piece"` as the piece-id key, but writers
+  (`Fsm.auditPieceMergedDraft` and `RebuildState.syntheticAuditDraft`)
+  only ever emit `"p"`. The fallback was dead code that risked
+  silently rewriting a hand-edited log on the next repair pass. PR-G
+  removed the alias; the new behaviour returns
+  `ReplayError.MalformedPayload` for any spelling other than `"p"`.
+  **Status:** filed in `design-rationale.md` as S2-10; v1.3 §19
+  should pin the `audit.piece_merged` payload schema explicitly
+  (`{ p, prNumber, mergeCommit, mergedAt }`) so future
+  implementations don't re-derive the alias question.
 
 ## 5. Cross-references
 

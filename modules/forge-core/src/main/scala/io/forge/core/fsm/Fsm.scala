@@ -1037,31 +1037,6 @@ object Fsm:
       )
     )
 
-  /** Stable tag for an `FsmState` value, used in `fsm.transition` payloads (§19 wire example shows simple class names
-    * like `"PieceImplementing"`). Exhaustive match (rather than `getClass.getSimpleName`, which is empty for some Scala
-    * 3 enum case instances).
-    */
-  private def stateTag(s: FsmState): String = s match
-    case FsmState.Drafting => "Drafting"
-    case FsmState.InteractiveSpec => "InteractiveSpec"
-    case _: FsmState.DesignReviewing => "DesignReviewing"
-    case _: FsmState.DesignNeedsHumanInput => "DesignNeedsHumanInput"
-    case _: FsmState.DesignAwaitingMerge => "DesignAwaitingMerge"
-    case _: FsmState.DesignPrFeedback => "DesignPrFeedback"
-    case FsmState.DesignReady => "DesignReady"
-    case _: FsmState.PieceImplementing => "PieceImplementing"
-    case _: FsmState.PieceAwaitingCi => "PieceAwaitingCi"
-    case _: FsmState.PieceAwaitingReview => "PieceAwaitingReview"
-    case _: FsmState.PieceCiFailed => "PieceCiFailed"
-    case _: FsmState.PieceReviewFailed => "PieceReviewFailed"
-    case _: FsmState.PieceFixingUp => "PieceFixingUp"
-    case _: FsmState.PieceAwaitingMerge => "PieceAwaitingMerge"
-    case _: FsmState.Refining => "Refining"
-    case _: FsmState.PlanningUpdate => "PlanningUpdate"
-    case _: FsmState.NeedsHumanIntervention => "NeedsHumanIntervention"
-    case FsmState.FeatureDone => "FeatureDone"
-    case _: FsmState.Abandoned => "Abandoned"
-
   // §11.5 CI rollup classification. Required-check failures are anything with a "bad" conclusion; "ready" means every
   // required check has conclusion = Success; otherwise still pending.
   private enum CiOutcome:

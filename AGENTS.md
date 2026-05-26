@@ -56,8 +56,30 @@ fix this file.
   orchestrator-side `HaltWithQuestion` re-spawn loop also lands with
   Slice 2 FSM — that's an orchestrator concern, not a connector one.
 - **Slice 2 (`forge-core` — FSM, Feature, ActionLog, StateCache) —
-  next.** See design §17 / roadmap §2.2.
-- Slices 3–5 scoped in design §17.
+  ✅ closed 2026-05-26.** `forge-core` ships the `ForgePaths` helper
+  (build-gated smell test for `".forge` literals outside the helper),
+  the relocated manifest data types under `io.forge.core.manifest`
+  (carry-forward **S2-1**), the §6 domain model (`FsmState`,
+  `FsmEvent` 20-variant ADT, `Feature`, `ResumeHint`, `Action` /
+  `ActionDraft`, `PrSnapshot`, core-side reviewer-verdict
+  projections), the pure `Fsm.transition(feature, event, config):
+  (Feature, Vector[ActionDraft])` covering every §11 lifecycle rule,
+  `FileActionLog` (NDJSON `APPEND | SYNC` with replay
+  truncate-and-recover on partial trailing line), `Feature.foldEvents`
+  projecting every §6.1 field plus `observedTransitions` /
+  `observedPieceMerges`, `FileStateCache` (atomic temp +
+  `ATOMIC_MOVE` + parent fsync) with `verifyAgainstLog` per §11.0 step
+  4, and `RebuildState.run` with a pure `reconcile` over the four
+  §11.5 partial-merge sub-cases. Property-test suite covers §17
+  slice-2 invariants 1–13; invariant 14's writer side is deferred to
+  Slice 4 (**S2-5**). PR-A through PR-G in `design-2.2.md` are
+  landed. **Carry-forward to v1.3 / Slice 4** (see
+  [`docs/design-rationale.md`](docs/design-rationale.md) and
+  [`docs/roadmap.md`](docs/roadmap.md) §7.2): **S2-1** through
+  **S2-10**, plus the Slice-1 carry-forwards **C14** and **C15**.
+- **Slice 3 (`forge-git` — BranchManager, PRWatcher, ProcessLock,
+  SessionMonitor) — next.** See design §17 / roadmap §2.3.
+- Slices 4–5 scoped in design §17.
 - Phase 4 (Forge-instance pivot: multi-repo, daemon, parallel,
   containerised) is post-v1 and needs its own design doc before any
   code lands. See [`docs/roadmap.md`](docs/roadmap.md).
@@ -102,11 +124,11 @@ layers — read top-down on a new task:
 
 ### Active design-`<section>`.md files
 
-- [`docs/design-2.2.md`](docs/design-2.2.md) — Slice 2 (`forge-core`:
-  FSM, Feature, ActionLog, StateCache, `ForgePaths`). Opened
-  2026-05-26 on Slice 1 close; PR-A (Manifest relocation +
-  `ForgePaths` skeleton) is the entry point. Slice 1 audit trail
-  remains at [`docs/design-2.1.md`](docs/design-2.1.md).
+*(none currently open)*
+
+Recently-closed audit trails: [`docs/design-2.1.md`](docs/design-2.1.md)
+(Slice 1, closed 2026-05-26), [`docs/design-2.2.md`](docs/design-2.2.md)
+(Slice 2, closed 2026-05-26). `design-2.3.md` opens when Slice 3 starts.
 
 Don't pre-write design-`<section>`.md files for sections that aren't
 being actively worked. They drift; the roadmap is enough until the
@@ -138,10 +160,10 @@ Reference file for the style we're aiming at:
 
 | Module | Owns | Lands in |
 |---|---|---|
-| `forge-core` | FSM, Feature, ActionLog, StateCache, domain model, `Mode`, `Ids`, `Question`, `FeatureIdSlugger` | Slice 2 |
-| `forge-agents` | `Connector`, `AgentSession`, `StreamingSession`, Claude/Codex adapters, `Cost`, `Reviews`, `Prompts` | Slice 1 |
-| `forge-specs` | `Manifest`, `ManifestPatch`, `Piece`, `PieceStatus`, SpecStore, ChangeCollector | Partly Slice 1 (manifest types), rest Slice 2 |
-| `forge-git` | `BranchManager`, `PRWatcher`, `PrSnapshot` ADT | Slice 3 |
+| `forge-core` | FSM, `Feature`, `ActionLog`, `StateCache`, `RebuildState`, `Manifest` / `ManifestPatch` / `Piece` / `PieceStatus`, `PrSnapshot` ADT, `ForgePaths`, domain model, `Mode`, `Ids`, `Question`, `FeatureIdSlugger`, `Cost` / `CostTotals` | Slice 2 (manifest types relocated here per **S2-1**; `PrSnapshot` here per §3.2, correcting an earlier `AGENTS.md` row that placed it under `forge-git` — **S2-4**) |
+| `forge-agents` | `Connector`, `AgentSession`, `StreamingSession`, Claude/Codex adapters, `Reviews`, `Prompts` | Slice 1 |
+| `forge-specs` | `SpecStore`, `DocSync`, `ChangeCollector` | Slice 4 |
+| `forge-git` | `BranchManager`, `PRWatcher` | Slice 3 |
 | `forge-tui` | termflow app, panes, key bindings | Slice 5 |
 | `forge-app` | `main`, wiring, `ProcessLock`, `SessionMonitor`, CLI | Slice 4 |
 | `forge-it` | Integration tests against real `claude`, `codex`, `gh` | Slice 1+ |
@@ -169,7 +191,10 @@ forgePaths.featureLog(featureId)      // → .forge/log/<feature>.jsonl
 os.write(repoRoot / ".forge" / "log" / s"$feature.jsonl", ...)
 ```
 
-Smell test: `grep '"\.forge/'` outside `ForgePaths` itself.
+Enforcement: a build-gated unit test (`ForgePathsSuite`'s `os.walk`
+sweep) fails the build if a `".forge` literal appears in any
+`modules/**/src/main/**/*.scala` file outside `ForgePaths.scala`.
+Test fixtures (`src/test/`) are exempt by design.
 
 ### 2. Role-trait stub (design §17 Slice 1)
 

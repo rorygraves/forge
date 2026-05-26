@@ -234,6 +234,34 @@ class FeatureFoldEventsSuite extends munit.FunSuite:
         assertEquals(m, P1Pr)
       case other => fail(s"expected AuditPrNumberMismatch, got $other")
 
+  // S2-10: only "p" is the canonical piece-id key on audit.piece_merged. A hand-edited or legacy log using "piece"
+  // surfaces as MalformedPayload (treated as corruption) rather than being silently accepted and rewritten on next
+  // repair. Locks the PR-G fixup that removed the `.orElse(obj.get("piece"))` fallback in Replay.applyAuditPieceMerged.
+  test("foldEvents — S2-10: audit.piece_merged with 'piece' (legacy alias) raises MalformedPayload"):
+    val seed = Feature.initial(
+      FeatureA,
+      FsmFixtures.manifest(Vector(pieceMerged(P1, 1, prNumber = P1Pr), piecePending(P2, 2)))
+    )
+    val legacyAlias = Action(
+      seq = 0L,
+      at = at(0),
+      feature = FeatureA,
+      piece = Some(P1),
+      actor = None,
+      role = None,
+      kind = "audit.piece_merged",
+      payload = ujson.Obj(
+        "piece" -> ujson.Str(P1.value),
+        "prNumber" -> ujson.Num(P1Pr.value.toDouble),
+        "mergeCommit" -> ujson.Str("a" * 40),
+        "mergedAt" -> ujson.Str(MergedAt.toString)
+      )
+    )
+    val Left(err) = Feature.foldEvents(seed, Vector(legacyAlias)): @unchecked
+    err match
+      case ReplayError.MalformedPayload(0L, "audit.piece_merged", _) => ()
+      case other => fail(s"expected MalformedPayload for audit.piece_merged, got $other")
+
   // --- harness.error log_truncated is a no-op projection ---
 
   test("foldEvents — harness.error log_truncated is a no-op (does not affect any projection)"):

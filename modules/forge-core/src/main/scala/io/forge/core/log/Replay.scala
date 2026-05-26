@@ -352,11 +352,13 @@ object Replay:
 
   /** §19 `audit.piece_merged` payload: `{ p, prNumber, mergeCommit, mergedAt }`. Replay collects the piece id into
     * `observedPieceMerges` and cross-checks `prNumber` against the manifest's record (which the seed `Feature`
-    * carries). Mismatch surfaces as `AuditPrNumberMismatch`; the manifest is the §4 source of truth.
+    * carries). Mismatch surfaces as `AuditPrNumberMismatch`; the manifest is the §4 source of truth. The accepted
+    * payload key is `"p"`; any other spelling surfaces as `MalformedPayload` (a hand-edited log with a different key is
+    * treated as corruption rather than silently rewritten).
     */
   private def applyAuditPieceMerged(st: FoldState, action: Action): Either[ReplayError, FoldState] =
     val obj = action.payload.objOpt.getOrElse(ujson.Obj().obj)
-    val pieceStr = obj.get("p").orElse(obj.get("piece")).flatMap(_.strOpt)
+    val pieceStr = obj.get("p").flatMap(_.strOpt)
     val prNumberJs = obj.get("prNumber").flatMap(_.numOpt)
     (pieceStr, prNumberJs) match
       case (Some(pStr), Some(pr)) =>

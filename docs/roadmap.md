@@ -6,13 +6,19 @@
 > §17 of the design); later phases capture direction and have not yet been
 > turned into specs.
 >
-> **Status:** draft v0.5 — 2026-05-26. **Slice 1 closed** (PR-A
-> through PR-E in [`design-2.1.md`](design-2.1.md)). Both connectors
-> implement the v1.2 §7.1 streaming-spec driver methods end-to-end,
-> with real-CLI integration tests in `forge-it`. PR-D (reviewer
-> schema regression suite) deferred to the reviewer-asset PR in
-> Slice 4 per design-rationale **C15**. Next active slice: 2 (FSM,
-> Feature, ActionLog, StateCache).
+> **Status:** draft v0.6 — 2026-05-26. **Slices 1 and 2 closed.**
+> Slice 1 (PR-A → PR-E in [`design-2.1.md`](design-2.1.md)) ships
+> both connectors against the v1.2 §7.1 streaming-spec trait with
+> real-CLI integration tests in `forge-it`. Slice 2 (PR-A → PR-G in
+> [`design-2.2.md`](design-2.2.md)) ships `forge-core` — `ForgePaths`
+> + relocated manifest types, `FsmState`/`FsmEvent`/`Feature`,
+> `Fsm.transition` per §11, `FileActionLog` + `Feature.foldEvents`,
+> `FileStateCache` + `RebuildState.run`, and a property-test suite
+> covering the §17 slice-2 invariants. Carry-forwards to v1.3 /
+> Slice 4: **C14**, **C15**, and **S2-1** through **S2-10** (each
+> with a durable home in [`design-rationale.md`](design-rationale.md)
+> or §7.2 below). Next active slice: 3 (`BranchManager`,
+> `PRWatcher`, `ProcessLock`, `SessionMonitor`).
 
 ## 0. How to read this
 
@@ -106,16 +112,41 @@ deferred to Slice 4 reviewer-asset PR) — have durable homes in
 
 ### 2.2 Slice 2 — FSM, Feature, ActionLog, StateCache (≈ week 2)
 
-`forge-core` per §17 slice 2. Property tests for the seven invariants
-(session-id projection lifecycles, reorder, atomic merge mutation,
-`requireSessionId` returning `Left`, replay reproduction).
+- [x] `ForgePaths(repoRoot)` owns every `.forge/` location; build-gated
+  smell test (`ForgePathsSuite` `os.walk` sweep) blocks new
+  `".forge` literals outside the helper.
+- [x] Manifest data types relocated from `forge-specs` to `forge-core`
+  (`io.forge.core.manifest`); spec deviation tracked as **S2-1** in
+  [`design-rationale.md`](design-rationale.md).
+- [x] `FsmState` / `FsmEvent` / `Feature` / `ResumeHint` / `Action`
+  domain model with codecs (PR-B). `PrSnapshot` ADT and core-side
+  reviewer-verdict projections live in `forge-core` per v1.2 §3.2.
+- [x] `Fsm.transition(feature, event, config): (Feature,
+  Vector[ActionDraft])` — pure, covers every §11 lifecycle rule.
+- [x] `FileActionLog` (NDJSON append-only, `APPEND | SYNC`, replay
+  truncate-and-recover on partial trailing line) and
+  `Feature.foldEvents` projecting every §6.1 field plus
+  `observedTransitions` / `observedPieceMerges` for reconcile.
+- [x] `FileStateCache` (atomic temp + `Files.move(ATOMIC_MOVE)` + parent
+  fsync) and `StateCache.verifyAgainstLog` per §11.0 step 4.
+- [x] `RebuildState.run(featureId, paths, manifestStore, log, cache)`
+  with pure `reconcile` over the four §11.5 partial-merge sub-cases.
+- [x] Property-test suite covers §17 slice-2 invariants 1–13; invariant
+  14's writer-side test is deferred to Slice 4 (S2-5).
 
-🟢 **Slice 2 open — 2026-05-26.** Active implementation plan in
-[`design-2.2.md`](design-2.2.md): seven sub-PRs A → G, strictly linear.
-PR-A (Manifest relocation into `forge-core` + `ForgePaths` skeleton) is
-the entry point; sub-PR status and dated landings live in
-`design-2.2.md` §3, with deferred decisions captured in §4 and walked
-forward by PR-G G5 before this section flips to `[x]`.
+✅ **Slice 2 closed 2026-05-26.** Detailed history of how it got
+there (PR-A through PR-G) lives in
+[`design-2.2.md`](design-2.2.md) §3 (status log) and §4
+(carry-forward to v1.3). Carry-forward bullets — **S2-1** (manifest
+relocation), **S2-2** (FsmEvent ADT shape), **S2-3** (ActionLog
+durability), **S2-4** (PrSnapshot ownership in `AGENTS.md`), **S2-5**
+(writer-side atomic-merge test, Slice 4), **S2-6**
+(`designPrFeedbackRound` projection), **S2-7** (`fsm.transition`
+payload encoding), **S2-8** (`SettleTimeout` reviewer/refine phase
+coverage), **S2-9** (`verifyAgainstLog` cache-write skip on
+Consistent), **S2-10** (`audit.piece_merged` payload key tightened
+to `"p"` only) — have durable homes in
+[`design-rationale.md`](design-rationale.md) and §7.2 below.
 
 ### 2.3 Slice 3 — BranchManager, PRWatcher, ProcessLock, SessionMonitor (≈ week 3)
 
@@ -449,6 +480,79 @@ explicit deferred-decision entry in
   measurement requires shipped reviewer schemas + system prompts
   which land alongside `ForgePaths` in Slice 4. PR-D becomes a gating
   check on that PR; v1.3 §17 reorganisation should absorb the move.
+- **S2-1 — Manifest data types live in `forge-core`, not `forge-specs`.**
+  v1.2 §3.2 names "Manifest" under `forge-specs`; the implementation
+  places `Manifest` / `ManifestPatch` / `Piece` / `PieceStatus` under
+  `io.forge.core.manifest` to break a cyclic dependency. v1.3 §3.2
+  needs the re-attribution; full rationale in `design-rationale.md`
+  S2-1.
+- **S2-2 — `FsmEvent` ADT shape not enumerated in v1.2.** v1.2 §17 names
+  `FsmEvent` but doesn't spell out the variants. Slice-2 PR-B settled
+  the 20-variant list; the chosen variants are the de-facto contract
+  for Slice 3 (`PRWatcher` / `BranchManager` / `SessionMonitor`) and
+  Slice 4 (orchestrator loop). v1.3 should lift the variants into §6
+  or §11 as appropriate; full rationale in `design-rationale.md` S2-2.
+- **S2-3 — `ActionLog` write durability vs. throughput.** v1.2 §19 says
+  "append-only" without specifying fsync. The Slice-2 impl uses
+  `APPEND + SYNC`; if Slice 4 surfaces a perf cliff under high write
+  rates, the fallback is per-batch `force()` and the trade-off needs
+  documenting. Full rationale in `design-rationale.md` S2-3 (only
+  opens as a v1.3 spec gap if the cliff actually fires).
+- **S2-4 — `PrSnapshot` ownership doc mismatch in `AGENTS.md`.** v1.2
+  §3.2 places `PrSnapshot` in `forge-core`; the Slice-2 implementation
+  matches the spec. The pre-Slice-2 `AGENTS.md` module-layout table
+  placed it in `forge-git`; PR-G corrected the table. No v1.3 spec
+  change needed (§3.2 already correct); full note in `design-rationale.md`
+  S2-4.
+- **S2-5 — Writer-side atomic-merge ordering test deferred to Slice 4.**
+  Slice 2 F13 covers the *reader* side of §11.5 step 1 (replay
+  correctly recovers from a crash between manifest write and FSM
+  transition). The *writer* side (assert the orchestrator atomically
+  persists `manifest.json` before the state-cache write) needs an
+  orchestrator under test, which lands with Slice 4's headless feature
+  loop. Tracked in `design-rationale.md` S2-5.
+- **S2-6 — `Feature.designPrFeedbackRound: Int` projection not in v1.2
+  §6.** v1.2 §11.3 says `DesignPrFeedback(prNumber, round + 1)` but the
+  §6 `Feature` case class as written doesn't carry the counter the
+  "+1" reads from. The Slice-2 implementation adds the field with a
+  default of 0; v1.3 §6 needs the field added to `Feature` (and
+  optionally a §11.3 sentence naming the counter source). Full
+  rationale in `design-rationale.md` S2-6.
+- **S2-7 — `fsm.transition` payload encodes full `FsmState`, not the
+  class-name tag.** v1.2 §19's worked example shows `"from":
+  "PieceImplementing"` as a bare string. The Slice-2 implementation
+  emits the full `FsmState` JSON via uPickle's enum encoding so
+  parameterised states (with piece id, prNumber, round, startedAt) can
+  round-trip; singleton cases still serialise as bare strings (so the
+  §19 example is the singleton-case form of the encoding). v1.3 §19
+  needs the example lifted to a parameterised case; full rationale in
+  `design-rationale.md` S2-7.
+- **S2-8 — `Fsm.transition` doesn't handle `SettleTimeout` for three
+  `SessionPhase` variants.** `Spec` / `DesignRevision` / `Implement` /
+  `Fixup` route to `NeedsHumanIntervention` with a phase-appropriate
+  hint; `DesignReview` / `CodeReview` / `Refine` fall through to a
+  silent no-op. The orchestrator can route around this via
+  `HarnessError`, but the contract isn't documented. v1.3 §11 should
+  either add explicit reviewer/refine settle-timeout handlers in the
+  FSM or document that the orchestrator must convert them to
+  `HarnessError`. Tracked in `design-rationale.md` S2-8.
+- **S2-9 — `StateCache.verifyAgainstLog` always writes the cache, even
+  on Consistent.** The current implementation calls `RebuildState.run`
+  unconditionally, which always calls `cache.save` at pipeline step 6
+  — so every consistency check writes a temp file, renames it over the
+  target, and fsyncs the parent. Fine in tests; potentially a perf
+  cliff in long-running Slice-4 orchestrator sessions. Slice 4 needs
+  to either compare to a cheap fingerprint (manifest mtime + last log
+  seq) before running the full rebuild, or have `RebuildState.run`
+  skip `save` on byte-equal match. Tracked in `design-rationale.md`
+  S2-9.
+- **S2-10 — `audit.piece_merged` payload key tightened to `"p"`
+  only.** PR-D `Replay.applyAuditPieceMerged` originally accepted both
+  `"p"` and `"piece"` as the piece-id key, but writers only ever emit
+  `"p"`. The fallback was dead and risked silently rewriting a
+  hand-edited log on next repair. PR-G removed the alias. v1.3 §19
+  should keep `"p"` as the canonical wire form (matching the §11.5
+  step 1 wording). Tracked in `design-rationale.md` S2-10.
 
 ---
 
