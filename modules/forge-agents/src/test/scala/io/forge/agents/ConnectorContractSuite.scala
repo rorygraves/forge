@@ -4,6 +4,7 @@ import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import fs2.Stream
 import io.forge.core.{QuestionMechanism, SchemaMechanism}
+import io.forge.core.cost.Cost
 
 /** Smoke test — verifies the §7.1 trait shape is concrete enough to implement without unimplemented members. Every
   * method here returns a failing IO; the point is the compile-time signature check.

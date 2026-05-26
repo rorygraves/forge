@@ -2,6 +2,7 @@ package io.forge.agents
 
 import cats.effect.IO
 import io.forge.core.{QuestionMechanism, SchemaMechanism}
+import io.forge.core.cost.Cost
 
 /** §7.1 — driver + reviewer over a single CLI.
   *

@@ -3,6 +3,7 @@ package io.forge.agents
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import io.forge.core.{FeatureId, PieceId, QuestionMechanism, SchemaMechanism}
+import io.forge.core.cost.Cost
 import scala.concurrent.duration.*
 
 class CodexConnectorSuite extends munit.FunSuite:

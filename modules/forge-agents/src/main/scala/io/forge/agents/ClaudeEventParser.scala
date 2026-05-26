@@ -1,6 +1,7 @@
 package io.forge.agents
 
 import io.forge.core.{Question, QuestionSeverity}
+import io.forge.core.cost.Cost
 import ujson.Value
 
 /** §7.1 — parse one line of `claude -p --output-format stream-json --verbose` into zero, one, or more `AgentEvent`s.

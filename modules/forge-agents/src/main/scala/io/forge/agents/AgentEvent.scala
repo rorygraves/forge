@@ -1,6 +1,7 @@
 package io.forge.agents
 
 import io.forge.core.Question
+import io.forge.core.cost.Cost
 
 /** §7.1 — events emitted by a driver session's stdout. The orchestrator translates these into action-log entries (§19);
   * the connector itself is actor-agnostic, so no `actor` field lives here.

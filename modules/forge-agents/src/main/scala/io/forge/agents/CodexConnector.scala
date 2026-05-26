@@ -3,6 +3,7 @@ package io.forge.agents
 import cats.effect.IO
 import cats.syntax.all.*
 import io.forge.core.{QuestionMechanism, SchemaMechanism}
+import io.forge.core.cost.Cost
 import ujson.Value
 
 import scala.concurrent.duration.*

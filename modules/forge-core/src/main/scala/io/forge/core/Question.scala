@@ -1,5 +1,7 @@
 package io.forge.core
 
+import upickle.default.{readwriter, ReadWriter}
+
 /** A driver-originated question awaiting human input. Same shape regardless of the underlying delivery mechanism (§7.2
   * / §7.3).
   */
@@ -8,7 +10,7 @@ final case class Question(
     options: Vector[String],
     allowFreeText: Boolean,
     severity: QuestionSeverity
-)
+) derives ReadWriter
 
 /** §6 — only `Blocking` forces a state transition into a *NeedsHumanInput state during design review (§11.2 step 11).
   */
@@ -29,3 +31,8 @@ object QuestionSeverity:
       case QuestionSeverity.Blocking => "blocking"
       case QuestionSeverity.Clarifying => "clarifying"
       case QuestionSeverity.Optional => "optional"
+
+  given ReadWriter[QuestionSeverity] = readwriter[String].bimap(
+    _.asString,
+    s => fromString(s).fold(msg => throw IllegalArgumentException(msg), identity)
+  )

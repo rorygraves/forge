@@ -1,5 +1,6 @@
 package io.forge.agents
 
+import io.forge.core.cost.Cost
 import ujson.Value
 
 /** §7.1 — parse one line of `codex exec --json` into zero, one, or more `AgentEvent`s.

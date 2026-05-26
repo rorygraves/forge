@@ -198,12 +198,12 @@ needs a spec correction to match. The §4 carry-forward records this.
   - This file's PR-A header flipped to "✅ landed" and a §3 status-log
     entry added. ✅
 
-### 1.2 PR B — Domain model (FsmState, FsmEvent, Feature, ResumeHint, Action)
+### 1.2 PR B — Domain model (FsmState, FsmEvent, Feature, ResumeHint, Action) — ✅ landed 2026-05-26
 
 PR-B is the *types-only* PR. Pure values + ReadWriter codecs. No
 behaviour, no I/O.
 
-- [ ] **B0.** Core-side, provider-neutral types that `FsmEvent` and
+- [x] **B0.** Core-side, provider-neutral types that `FsmEvent` and
   `Feature` will reference. v1.2 §3.2 names "PrSnapshot ADT" inside
   `forge-core`; AGENTS.md currently places it under `forge-git` — the
   spec is right because `forge-git` depends on `forge-core` and the
@@ -228,7 +228,7 @@ behaviour, no I/O.
     FSM never sees the raw reviewer JSON. This breaks the
     forge-core → forge-agents dependency that would otherwise be
     needed.
-- [ ] **B1.** `FsmState` enum in `io.forge.core.fsm`, exactly per
+- [x] **B1.** `FsmState` enum in `io.forge.core.fsm`, exactly per
   v1.2 §6. Includes `Drafting`, `InteractiveSpec`,
   `DesignReviewing(round)`, `DesignNeedsHumanInput(round, questions)`,
   `DesignAwaitingMerge(prNumber)`, `DesignPrFeedback(prNumber, round)`,
@@ -239,11 +239,11 @@ behaviour, no I/O.
   `PlanningUpdate(reason, patch)`, `NeedsHumanIntervention(reason, hint)`,
   `FeatureDone`, `Abandoned(reason)`. Sealed-trait-style ReadWriter
   (uPickle's `derives ReadWriter` on enums tags by case name).
-- [ ] **B2.** `ResumeHint` enum per v1.2 §6 — `ResumeAfterHumanPush`,
+- [x] **B2.** `ResumeHint` enum per v1.2 §6 — `ResumeAfterHumanPush`,
   `CommitAndPushHumanFix`, `RunAnotherFixup`,
   `ResolveLocalImplementationChanges`, `ReopenDesign`,
   `ApplyPlanningUpdate(patch)`, `AbortOrAbandon`. ReadWriter derives.
-- [ ] **B3.** Two case classes, splitting the §6 `Action` shape
+- [x] **B3.** Two case classes, splitting the §6 `Action` shape
   along the pure/effectful seam introduced by C2:
   - `ActionDraft` — `feature: FeatureId, piece: Option[PieceId],
     actor: Option[String], role: Option[String], kind: String,
@@ -264,7 +264,7 @@ behaviour, no I/O.
   NDJSON stays `ts` per §19. Suite asserts the wire string matches
   §19's example. (`ActionDraft` has no on-disk shape — it never
   serialises directly; it always goes through `stamp`.)
-- [ ] **B4.** `FsmEvent` ADT. **This is the main design judgement of
+- [x] **B4.** `FsmEvent` ADT. **This is the main design judgement of
   PR-B.** v1.2 §17 says only "FSM as `(FsmState, FsmEvent) =>
   (FsmState, List[ActionLogEntry])`" without spelling the ADT out, so
   PR-B settles it. Sketch (cross-referenced to the §11 lifecycle
@@ -350,17 +350,17 @@ behaviour, no I/O.
     the §15 command table.
   - `HarnessError(reason)`.
   ReadWriter derives for all variants.
-- [ ] **B5.** `Feature` case class in `io.forge.core.fsm` per v1.2 §6:
+- [x] **B5.** `Feature` case class in `io.forge.core.fsm` per v1.2 §6:
   `id, manifest, state, cost, designSessionId,
   currentPieceSessionId, branchProtectionCacheEpoch`. ReadWriter
   derives via `Json.given` + the moved `Manifest` ReadWriter.
-- [ ] **B6.** `Cost` / `CostTotals` lift the existing
+- [x] **B6.** `Cost` / `CostTotals` lift the existing
   `io.forge.agents.Cost` into the domain layer **iff** the type is
   trivially-movable (no cats-effect / fs2 deps). Otherwise leave the
   agent-side type alone and define a `CostTotals` in `forge-core`
   that the orchestrator projects into. Decided in PR-B from the
   actual `Cost.scala` shape; expected to be a simple move.
-- [ ] **B7.** Codec round-trip suites for every new type — encode →
+- [x] **B7.** Codec round-trip suites for every new type — encode →
   decode → `assertEquals(original, roundtripped)`. One suite per
   type family (`FsmStateSuite`, `FsmEventSuite`, `FeatureSuite`,
   `ActionSuite`). No transition tests yet (those are PR-C).
@@ -1110,6 +1110,58 @@ after PR-G lands.
     `CodexStreamingSpecSuite` C2/C3/C5/C6) passes against the real
     `codex 0.133` CLI on the maintainer's account; `forge-agents`
     unit suite grew 180 → 181.
+- 2026-05-26 — **PR-B landed.** Types-only PR per §1.2. Added the
+  `forge-core` domain model:
+  + `io.forge.core.pr.PrSnapshot` (+ `PrState`, `ReviewDecision`,
+    `CheckState`, `CheckConclusion`, `CheckResult`, `CheckRollup`,
+    `PrComment`) — wire-shape ADT for §6 / §11.3 / §11.5 PR events.
+    Lives in `forge-core` per v1.2 §3.2 (carry-forward S2-4 records
+    the `AGENTS.md` row that still places it in `forge-git`; PR-G
+    G3 corrects the doc).
+  + `io.forge.core.review.{DesignReviewVerdict, PrReviewVerdict,
+    RefineVerdict}` — core-side reviewer-verdict summaries. The FSM
+    sees only these projections; `forge-agents` keeps the rich
+    `DesignReview` / `PrReview` / `RefineResult` shapes. Breaks the
+    forge-core → forge-agents dependency that would otherwise be
+    needed.
+  + `io.forge.core.fsm.{FsmState, ResumeHint, Feature, FsmEvent,
+    SessionPhase, SettleOutcome, PlanningChoice, BudgetScope,
+    UserCommand}`. `FsmState` has all 19 cases per §6;
+    `ResumeHint` has all 7 cases. `FsmEvent` has 20 cases — the
+    B4 sketch was settled with one rename: the design-review event
+    variant becomes `DesignReviewReceived` (B4 sketched it as
+    `DesignReviewVerdict`) to avoid clashing with the verdict ADT
+    of the same name that it carries. The `CodeReviewVerdict` event
+    variant is unchanged because the verdict ADT it carries is named
+    `PrReviewVerdict` (no clash). The variant list is the de-facto
+    contract for Slice 3 (`BranchManager`, `PRWatcher`,
+    `SessionMonitor`) and Slice 4 (orchestrator loop) — see
+    carry-forward S2-2.
+  + `io.forge.core.log.{Action, ActionDraft}` — the split between
+    the pure transition output (`ActionDraft`, no `seq` / no `at`)
+    and the on-disk shape (`Action`, with both, stamped by
+    `ActionLog.append` in PR-D D1). `Action.at: Instant` carries
+    `@key("ts")` so the §19 NDJSON wire form keeps `"ts"`; the
+    `ActionSuite` asserts the wire form matches the §19 example
+    fields (`seq`, `ts`, `feature`, `piece`, `actor`, `role`,
+    `kind`, `payload`).
+  + `io.forge.core.cost.{Cost, CostTotals}` — B6 lift. `Cost` moved
+    from `io.forge.agents.Cost` via `git mv` (history preserved);
+    `CostTotals` (feature/piece/turn USD running totals) added.
+    forge-agents call sites (Connector trait, Claude/Codex
+    connectors, parsers, suites) updated to import from the new
+    location — no shim aliases per AGENTS.md "Things to not do".
+  + Round-trip suites under `forge-core/test`: `PrSnapshotSuite`
+    (10 tests), `ReviewVerdictsSuite` (7), `CostSuite` (3),
+    `FsmStateSuite` (4 — covers ResumeHint + every FsmState
+    variant), `FsmEventSuite` (10 — covers FsmEvent + its 4
+    supporting enums + UserCommand), `FeatureSuite` (2),
+    `ActionSuite` (6 — including the `at`↔`ts` wire-name
+    assertion). +41 unit tests; `forge-core` grew 89 → 130. Also
+    added `derives ReadWriter` to `Question` (it's now referenced
+    by `DesignReviewVerdict.BlockingQuestions`).
+  Build: `sbt clean compile` clean, `sbt scalafmtCheckAll` clean,
+  unit tests: `forge-core` 130/130, `forge-agents` 181/181.
 
 ## 4. Carry-forward to v1.3
 

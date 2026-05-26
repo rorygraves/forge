@@ -3,6 +3,7 @@ package io.forge.agents
 import cats.effect.IO
 import fs2.Stream
 import io.forge.core.{Mode, QuestionMechanism, SchemaMechanism}
+import io.forge.core.cost.Cost
 
 class RoleSuite extends munit.FunSuite:
 

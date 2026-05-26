@@ -14,6 +14,9 @@ project/metals.sbt
 .vscode/
 *.iml
 
+# Claude Code session state
+.claude/scheduled_tasks.lock
+
 # OS
 .DS_Store
 Thumbs.db
