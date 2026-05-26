@@ -165,6 +165,10 @@ final class CodexStreamingSession private (
       val core =
         for
           _ <- currentTurnRef.set(Some(sp))
+          // Codex reads stdin even when the prompt is on argv (it logs "Reading additional input from stdin..." to
+          // stderr and blocks until EOF). The per-turn subprocess sends nothing on stdin, so close it immediately.
+          // Same rationale as CodexConnector.spawnHeadless — see comment there.
+          _ <- sp.closeStdin
           _ <- preTurn
           stdoutFiber <- drainStdout.start
           stderrFiber <- drainStderr.start

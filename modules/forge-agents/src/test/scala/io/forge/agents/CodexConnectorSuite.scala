@@ -39,7 +39,8 @@ class CodexConnectorSuite extends munit.FunSuite:
     assert(argv.contains("--json"), clue = argv)
     assert(argv.containsSlice(List("-m", model)), clue = argv)
     assert(argv.containsSlice(List("--sandbox", "read-only")), clue = argv)
-    assert(argv.containsSlice(List("--ask-for-approval", "never")), clue = argv)
+    // codex ≥0.131 — `-c approval_policy=<mode>` replaces `-a/--ask-for-approval <mode>`.
+    assert(argv.containsSlice(List("-c", "approval_policy=never")), clue = argv)
     // Prompt is the last positional argument.
     assertEquals(argv.last, "hello")
 
@@ -64,8 +65,10 @@ class CodexConnectorSuite extends munit.FunSuite:
   test("execResumeArgv carries only thread id, user msg, and --json (no sticky flags per §7.10(c))"):
     val argv = CodexConnector.execResumeArgv("codex", "thread-abc", "follow-up question")
     assertEquals(argv, List("codex", "exec", "resume", "--json", "thread-abc", "follow-up question"))
-    // Negative: should not contain any sticky flag.
-    Seq("--sandbox", "--output-schema", "--add-dir", "--ask-for-approval", "-C").foreach: flag =>
+    // Negative: should not contain any sticky flag. `--ask-for-approval` no longer exists in codex ≥0.131 (replaced
+    // by `-c approval_policy=...`, which IS legal on resume), so it's not in this list — exec resume's rejection
+    // surface narrowed in 0.133 to just the path-bound flags.
+    Seq("--sandbox", "--output-schema", "--add-dir", "-C").foreach: flag =>
       assert(!argv.contains(flag), clue = s"$flag should not appear in resume argv: $argv")
 
   // --- streaming-spec multi-process facade tests ---

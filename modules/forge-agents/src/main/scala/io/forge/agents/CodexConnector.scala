@@ -143,8 +143,11 @@ final class CodexConnector(
       .flatMap: combined =>
         val argv = CodexConnector.execArgv(binary, model, sessionSettings, combined)
         val parser = new CodexEventParser(priceTable, model)
+        // Codex reads stdin even when the prompt is on argv (it logs "Reading additional input from stdin..." to
+        // stderr and blocks until EOF). The JVM's ProcessBuilder leaves the child's stdin as an open pipe by default
+        // — close it explicitly so the CLI proceeds. Headless one-shots send nothing on stdin anyway.
         StreamingDriver.fromSubprocess(
-          Subprocess.spawn(argv, cwd = cwd, env = extraEnv),
+          Subprocess.spawn(argv, cwd = cwd, env = extraEnv).evalTap(_.closeStdin),
           parser.parse,
           initTimeout
         )
@@ -208,7 +211,11 @@ object CodexConnector:
       combinedPrompt: String
   ): List[String] =
     val sandbox = List("--sandbox", settings.sandbox)
-    val approval = List("--ask-for-approval", settings.approvalMode)
+    // codex CLI ≥0.131 removed the `-a/--ask-for-approval` flag in favour of a `-c approval_policy=<mode>` config
+    // override (TOML key/value form). The semantics match — "never", "untrusted", etc. — but the wire shape is
+    // different. Slice 0 §2.2 was pinned against 0.130.0; this is the §2.2 update for ≥0.131. Still emitted on every
+    // `exec` spawn (it's not sticky for resume — codex now resolves approval_policy per-call from config + overrides).
+    val approval = List("-c", s"approval_policy=${settings.approvalMode}")
     val addDirs = settings.addDirs.toList.flatMap(d => List("--add-dir", d.toString))
     val schema = settings.outputSchema.toList.flatMap(p => List("--output-schema", p.toString))
     val cd = settings.workingDirectory.toList.flatMap(p => List("-C", p.toString))
