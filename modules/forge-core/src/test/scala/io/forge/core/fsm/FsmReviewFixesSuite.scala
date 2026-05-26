@@ -180,6 +180,101 @@ class FsmReviewFixesSuite extends munit.FunSuite:
     val (humanOut, _) = Fsm.transition(f, FsmEvent.PrSnapshotUpdated(P1, changesRequestedSnapshot(wrongPr)))
     assertEquals(humanOut.state, FsmState.PieceAwaitingMerge(P1, P1Pr))
 
+  // ---------------------------------------------------------------------------
+  // §6.1: every NHI transition from a piece state clears currentPieceSessionId.
+  //
+  // The reviewer's third Medium finding: toNeedsHumanIntervention was preserving the stale piece-side projection on
+  // most failure paths. The fix enforces the invariant in the helper plus the two direct-construction sites
+  // (handleMerged mismatch, prNumberMismatch). One test per piece-phase NHI entry that the FSM can actually drive.
+  // ---------------------------------------------------------------------------
+
+  test("PieceImplementing + SettleTimeout → NHI clears currentPieceSessionId (§6.1)"):
+    val f = featureIn(
+      FsmState.PieceImplementing(P1),
+      pieces = Vector(pieceInProgress(P1, 1), piecePending(P2, 2)),
+      currentPieceSessionId = Some("impl-1")
+    )
+    val (out, _) = Fsm.transition(f, FsmEvent.SettleTimeout(SessionPhase.Implement, "1800s"))
+    assert(out.state.isInstanceOf[FsmState.NeedsHumanIntervention])
+    assertEquals(out.currentPieceSessionId, None)
+
+  test("PieceImplementing + HarnessError → NHI clears currentPieceSessionId"):
+    val f = featureIn(
+      FsmState.PieceImplementing(P1),
+      pieces = Vector(pieceInProgress(P1, 1), piecePending(P2, 2)),
+      currentPieceSessionId = Some("impl-1")
+    )
+    val (out, _) = Fsm.transition(f, FsmEvent.HarnessError("change_collector_denied"))
+    assert(out.state.isInstanceOf[FsmState.NeedsHumanIntervention])
+    assertEquals(out.currentPieceSessionId, None)
+
+  test("PieceAwaitingCi exhausted → NHI clears currentPieceSessionId"):
+    val f = featureIn(
+      FsmState.PieceAwaitingCi(P1, P1Pr),
+      pieces = Vector(pieceInProgress(P1, 1, prNumber = Some(P1Pr), attempts = 3), piecePending(P2, 2)),
+      currentPieceSessionId = Some("impl-1")
+    )
+    val (out, _) = Fsm.transition(f, FsmEvent.PrSnapshotUpdated(P1, failedCi(P1Pr)))
+    assert(out.state.isInstanceOf[FsmState.NeedsHumanIntervention])
+    assertEquals(out.currentPieceSessionId, None)
+
+  test("PieceAwaitingMerge + PR closed → NHI clears currentPieceSessionId"):
+    val f = featureIn(
+      FsmState.PieceAwaitingMerge(P1, P1Pr),
+      pieces = Vector(pieceInProgress(P1, 1, prNumber = Some(P1Pr)), piecePending(P2, 2)),
+      currentPieceSessionId = Some("impl-1")
+    )
+    val (out, _) = Fsm.transition(f, FsmEvent.PrSnapshotUpdated(P1, closedSnapshot(P1Pr)))
+    assert(out.state.isInstanceOf[FsmState.NeedsHumanIntervention])
+    assertEquals(out.currentPieceSessionId, None)
+
+  test("PieceFixingUp + SettleTimeout → NHI clears currentPieceSessionId"):
+    val f = featureIn(
+      FsmState.PieceFixingUp(P1, P1Pr, attempt = 1),
+      pieces = Vector(pieceInProgress(P1, 1, prNumber = Some(P1Pr), attempts = 1), piecePending(P2, 2)),
+      currentPieceSessionId = Some("fixup-1")
+    )
+    val (out, _) = Fsm.transition(f, FsmEvent.SettleTimeout(SessionPhase.Fixup, "900s"))
+    assert(out.state.isInstanceOf[FsmState.NeedsHumanIntervention])
+    assertEquals(out.currentPieceSessionId, None)
+
+  test("PieceAwaitingMerge + Merged field mismatch (handleMerged direct construction) clears currentPieceSessionId"):
+    val pre = pieceMerged(P1, 1, P2Pr /* wrong */, Sha40Other, MergedAt)
+    val f = featureIn(
+      FsmState.PieceAwaitingMerge(P1, P1Pr),
+      pieces = Vector(pre, piecePending(P2, 2)),
+      currentPieceSessionId = Some("impl-1")
+    )
+    val (out, _) = Fsm.transition(f, FsmEvent.Merged(P1, P1Pr, Sha40Other, MergedAt, ObservedAt))
+    assert(out.state.isInstanceOf[FsmState.NeedsHumanIntervention])
+    assertEquals(out.currentPieceSessionId, None)
+
+  test("PieceAwaitingMerge + Merged prNumber mismatch (prNumberMismatch helper) clears currentPieceSessionId"):
+    val f = featureIn(
+      FsmState.PieceAwaitingMerge(P1, P1Pr),
+      pieces = Vector(pieceInProgress(P1, 1, prNumber = Some(P1Pr)), piecePending(P2, 2)),
+      currentPieceSessionId = Some("impl-1")
+    )
+    val wrongPr = io.forge.core.PrNumber(9999)
+    val (out, _) = Fsm.transition(f, FsmEvent.Merged(P1, wrongPr, Sha40Other, MergedAt, ObservedAt))
+    assert(out.state.isInstanceOf[FsmState.NeedsHumanIntervention])
+    assertEquals(out.currentPieceSessionId, None)
+
+  test("design-phase NHI is a no-op for currentPieceSessionId (already None)"):
+    val f = featureIn(
+      FsmState.DesignReviewing(round = 1),
+      designSessionId = Some("sess-1"),
+      currentPieceSessionId = None
+    )
+    val (out, _) = Fsm.transition(f, FsmEvent.SettleTimeout(SessionPhase.DesignRevision, "x"))
+    assert(out.state.isInstanceOf[FsmState.NeedsHumanIntervention])
+    assertEquals(out.currentPieceSessionId, None)
+    assertEquals(
+      out.designSessionId,
+      Some("sess-1"),
+      "designSessionId NOT cleared on NHI — §6.1 ties its clear to entering DesignReady"
+    )
+
   test("Merged with mismatched prNumber → NHI(AbortOrAbandon) + harness.error pr_number_mismatch"):
     val f = featureIn(
       FsmState.PieceAwaitingMerge(P1, P1Pr),

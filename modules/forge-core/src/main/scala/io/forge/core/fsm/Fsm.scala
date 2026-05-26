@@ -745,7 +745,8 @@ object Fsm:
             reason = s"manifest merged record disagrees with Merged event for piece ${piece.value}",
             resumeHint = ResumeHint.AbortOrAbandon
           )
-          val updated = feature.copy(state = to)
+          // §6.1: NHI from a piece state clears currentPieceSessionId.
+          val updated = feature.copy(state = to, currentPieceSessionId = None)
           (updated, Vector(fsmTransitionDraft(feature, state, to, piece = Some(piece)), mismatchDraft))
 
       case Some(_) =>
@@ -902,7 +903,12 @@ object Fsm:
       hint: ResumeHint
   ): (Feature, Vector[ActionDraft]) =
     val to = FsmState.NeedsHumanIntervention(reason, hint)
-    val updated = feature.copy(state = to)
+    // §6.1: currentPieceSessionId is cleared on advancing to NeedsHumanIntervention. From design-phase states the
+    // field is already None (it's only ever populated in piece states), so this is a no-op there; from piece-phase
+    // states (PieceImplementing/PieceAwaitingCi/.../Refining) it drops the now-stale projection. designSessionId is
+    // intentionally NOT cleared here — §6.1 ties its clear to entering DesignReady, and the
+    // `Resume(ReopenDesign)` path handles design-phase re-entry with its own designPrFeedbackRound reset.
+    val updated = feature.copy(state = to, currentPieceSessionId = None)
     val drafts =
       if feature.state == to then Vector.empty
       else Vector(fsmTransitionDraft(feature, feature.state, to))
@@ -938,7 +944,8 @@ object Fsm:
         "observedPr" -> ujson.Num(observed.value.toDouble)
       )
     )
-    val updated = feature.copy(state = to)
+    // §6.1: NHI from a piece state clears currentPieceSessionId.
+    val updated = feature.copy(state = to, currentPieceSessionId = None)
     (updated, Vector(fsmTransitionDraft(feature, from, to, piece = piece), mismatchDraft))
 
   private def toAbandoned(feature: Feature, reason: String): (Feature, Vector[ActionDraft]) =

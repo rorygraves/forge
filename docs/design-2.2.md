@@ -1311,6 +1311,40 @@ after PR-G lands.
   `forge-core`, 181/181 in `forge-agents` (no regression),
   `forge-it` 10/10 (1 reliability suite skipped per
   `FORGE_IT_RUN_RELIABILITY` opt-in).
+- 2026-05-26 — **PR-C review-round 2 fix.** One additional
+  finding from a second pass at the §6.1 projection invariant:
+  + **Medium — `toNeedsHumanIntervention` was preserving stale
+    `currentPieceSessionId`** on most piece-state failure paths.
+    §6.1 specifies "cleared on advancing to NeedsHumanIntervention",
+    but the prior helper only updated `state` — so e.g.
+    `PieceImplementing + SettleTimeout(Implement)` entered NHI
+    with the old impl session still projected. The earlier
+    round-1 fix of `Resume(RunAnotherFixup)`'s
+    `clearCurrentPieceSession = true` was patching one resume
+    path rather than the invariant at the NHI transition itself.
+    Fixed by clearing `currentPieceSessionId` in
+    `toNeedsHumanIntervention` (covers every NHI helper caller)
+    and in the two direct-construction NHI sites — `handleMerged`
+    field-mismatch path and `prNumberMismatch` helper — that
+    don't go through the helper. `designSessionId` is
+    intentionally NOT cleared: §6.1 ties its clear to
+    `DesignReady`; the `Resume(ReopenDesign)` path resets
+    `designPrFeedbackRound` and the orchestrator re-spawns
+    fresh design driver. `handleResume`'s explicit
+    `clearCurrentPieceSession` policy stays in place as a
+    documentation marker (now redundant for cases coming from
+    NHI, since the field is already `None`).
+  + 8 new tests in `FsmReviewFixesSuite` walking every
+    piece-phase NHI entry — `PieceImplementing` settle timeout +
+    `HarnessError`, `PieceAwaitingCi` exhausted, `PieceAwaitingMerge`
+    PR closed, `PieceFixingUp` settle timeout, the two direct-
+    construction sites — plus a design-phase no-op check
+    confirming `designSessionId` is preserved.
+    `forge-core` grew 219 → 227.
+  Build: `sbt scalafmtCheckAll` clean, `sbt test` 227/227 in
+  `forge-core`, 181/181 in `forge-agents` (no regression),
+  `forge-it` 10/10 (1 reliability suite skipped per
+  `FORGE_IT_RUN_RELIABILITY` opt-in).
 
 ## 4. Carry-forward to v1.3
 
