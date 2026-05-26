@@ -129,7 +129,7 @@ skeleton; `G` and `H` close the section). Slice 2's experience is that
 linear is operationally simpler — §2 below names the safe
 parallelisation points but doesn't promise to use them.
 
-### 1.1 PR A — `forge-git` module skeleton + `GhClient` / `GitClient` foundations — ⏳ pending
+### 1.1 PR A — `forge-git` module skeleton + `GhClient` / `GitClient` foundations — ✅ landed
 
 `forge-git` currently has zero sources (`build.sbt` declares the
 module; `modules/forge-git/src/` is empty). PR-A lays the foundation
@@ -141,7 +141,7 @@ The big subprocess-utility question — *do we lift Slice 1's
 from `forge-git`, or invoke `gh` / `git` directly via `os-lib`?* —
 gets settled in PR-A.
 
-- [ ] **A1.** **Decide subprocess-utility ownership and document the
+- [x] **A1.** **Decide subprocess-utility ownership and document the
   decision as carry-forward S3-1.** Recommendation: `forge-git` uses
   `os-lib`'s `os.proc(...).call(cwd, env, check = false,
   stderr = os.Pipe)` directly for one-shot `gh` / `git`
@@ -159,7 +159,7 @@ gets settled in PR-A.
       adapters; nothing in `forge-git` cares about agent traits).
   S3-1 records the decision in `design-rationale.md` so a future
   reader doesn't re-derive it from grep failures.
-- [ ] **A2.** `io.forge.git.cli.GhClient` trait + concrete
+- [x] **A2.** `io.forge.git.cli.GhClient` trait + concrete
   `RealGhClient(repoRoot: os.Path, env: Map[String, String] =
   Map.empty)`. Trait methods cover the Slice-3 surface; each method
   returns `IO[Either[GhError, A]]` for a typed `A`:
@@ -216,7 +216,7 @@ gets settled in PR-A.
   changes against the integration `gh` version pin.
   Spec: v1.2 §3.3 (CLIs only), §9 (`gh pr view` / `gh api`
   invocations), design-rationale RL1.
-- [ ] **A3.** `io.forge.git.cli.GitClient` trait + concrete
+- [x] **A3.** `io.forge.git.cli.GitClient` trait + concrete
   `RealGitClient(repoRoot: os.Path)`. Methods cover the Slice-3
   surface; each returns `IO[Either[GitError, A]]`:
     - `currentBranch: IO[Either[GitError, BranchName]]` —
@@ -282,13 +282,13 @@ gets settled in PR-A.
   PR-G's IT exercises the real `git` semantics; unit tests use
   `FakeGitClient` stubs (in-memory dictionary keyed by command shape).
   Spec: v1.2 §9, §11.3 step 5, design-rationale BM1.
-- [ ] **A4.** `FakeGhClient` / `FakeGitClient` test fixtures under
+- [x] **A4.** `FakeGhClient` / `FakeGitClient` test fixtures under
   `modules/forge-git/src/test/scala/io/forge/git/cli/fake/`. Each
   exposes a builder API (`FakeGhClient.builder.prView(pr,
   responses).build`) so per-suite stubs are obvious at the call site.
   No dependency on the real `gh` / `git` binaries; suites that need
   the real CLI live in `forge-it` (PR-G).
-- [ ] **A5.** Wire `design-2.3.md` into the parent docs (mirrors PR-A
+- [x] **A5.** Wire `design-2.3.md` into the parent docs (mirrors PR-A
   A5 in Slice 2):
     - `AGENTS.md` §"Active design-`<section>`.md files" — replace
       *(none currently open)* with the design-2.3.md pointer.
@@ -298,7 +298,7 @@ gets settled in PR-A.
     - `roadmap.md` §2.3 — add a 🟢 "Slice 3 open — 2026-05-26" status
       block pointing at `design-2.3.md` with PR-A as the entry point
       (mirroring Slice 2's open-section flavoured pattern).
-- [ ] **A6.** PR-A landing checklist:
+- [x] **A6.** PR-A landing checklist:
     - `sbt clean compile` clean under `-Xfatal-warnings`.
     - `sbt test` green; no regression on `forge-core` (358) or
       `forge-agents` (181) baselines. `forge-git` gains its first
@@ -1161,6 +1161,16 @@ after PR-H lands.
 
 - 2026-05-26 — design-2.3.md created on the close of Slice 2
   (`design-2.2.md` closed earlier same day). No PR-A code yet.
+- 2026-05-26 — PR-A landed. `forge-git` module skeleton in place under
+  `io.forge.git.cli`: `GhClient` / `GitClient` traits, `RealGhClient` /
+  `RealGitClient` (`os.proc.call` one-shot — **S3-1** filed in
+  `design-rationale.md`), `GhError` / `GitError` ADTs with
+  classifier helpers, `FakeGhClient` / `FakeGitClient` builder fixtures.
+  `forge-git` test count 0 → 32 (classifiers + fake-client smoke);
+  `forge-core` 358 and `forge-agents` 181 baselines unchanged.
+  `ForgePathsSuite` `os.walk` sweep still green over the new sources
+  (no `.forge` literals introduced). PR-B (`PrSnapshotDecoder` +
+  `PollBaseline`) is the next entry point.
 
 ## 4. Carry-forward to v1.3
 

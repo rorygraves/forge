@@ -328,6 +328,17 @@
 
 ---
 
+## Slice 3 spec deviations
+
+### S3-1. `forge-git` invokes `gh` / `git` via `os-lib` directly, not the `forge-agents.Subprocess` streaming wrapper (slice-3 PR-A)
+**Decision (slice-3 PR-A):** `forge-git`'s `RealGhClient` and `RealGitClient` call `os.proc(argv).call(cwd = repoRoot, env = ..., check = false, stderr = os.Pipe)` for every `gh` / `git` invocation. `forge-git` does **not** depend on `forge-agents`; the `Subprocess` streaming wrapper stays where Slice 1 placed it. The shared `invoke(argv, stdinIfAny): IO[Either[GhError, String]]` helper inside `RealGhClient` (and its `GitError` sibling inside `RealGitClient`) owns exit-code / stderr classification — there is no shared subprocess utility in `forge-core`.
+**Why this is a deviation:** v1.2 §3.3 / §22 say "CLIs only" but don't pin which subprocess primitive each module uses. Slice 1 introduced `forge-agents.Subprocess` as a streaming wrapper sized for the long-lived Claude / Codex sessions (per-line stdout `Stream[IO, String]`, separate stderr, SIGTERM-grace-SIGKILL kill semantics). Slice 3's `gh pr view` / `git fetch` / `git push` / `git tag` invocations are **one-shot**: command runs, exits, stdout + stderr + exit code captured in one go. `os.proc(...).call` returns a `CommandResult` carrying exactly that triple, blocking until exit. No streaming, no kill protocol, no fs2 stream lifecycle.
+**Rejected:** (a) **Lift `Subprocess` into `forge-core`** — adds `fs2-core` + `fs2-io` deps to the lowest-layer module (currently `cats-effect` + `upickle` + `os-lib`) for a use case (one-shot invocation) that doesn't need streaming. `forge-core` would carry the streaming primitive purely so `forge-git` can wrap it back into a blocking call. (b) **Depend on `forge-agents` from `forge-git`** — reverses the module-layout intent (`forge-agents` owns CLI-of-Claude / CLI-of-Codex adapters; nothing in `forge-git` cares about agent traits). Drags `AgentEvent`, `Connector`, and `Prompts` into a transitive classpath that has no business with PR shape. (c) **Introduce a third subprocess utility shared by both modules** — minimum viable shape would be a `cats-effect`-flavoured wrapper around `os.proc.call`, and the only consumer is `forge-git`; premature abstraction with no other caller.
+**Action required for v1:** none — this is a module-layout call, not a spec gap. No v1.3 §3.2 / §3.3 edit needed. The carry-forward exists so a future contributor wondering "why isn't there one subprocess utility?" can read the answer without re-deriving it from grep failures.
+**In the spec today:** v1.2 §3.3 (CLIs only), §22 (orchestrator talks to CLIs); `modules/forge-agents/src/main/scala/io/forge/agents/Subprocess.scala` (streaming wrapper, Slice-1 surface); `modules/forge-git/src/main/scala/io/forge/git/cli/` (one-shot `os.proc.call` callers, Slice-3 surface).
+
+---
+
 ## CI policy
 
 ### CI1. CI policy has two variants only, not five
