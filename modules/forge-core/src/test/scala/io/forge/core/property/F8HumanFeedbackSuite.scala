@@ -49,54 +49,65 @@ class F8HumanFeedbackSuite extends ScalaCheckSuite:
   private val genPieceId: Gen[PieceId] = Gen.oneOf("p1", "p2", "p3").map(PieceId(_))
   private val genFeatureSeed: Gen[Feature] = Generators.genInitialFeature
 
-  /** Snapshot that the FSM treats as "human comment / CHANGES_REQUESTED". */
-  private def humanFeedbackSnapshot(prNumber: PrNumber): io.forge.core.pr.PrSnapshot =
-    val choice = scala.util.Random.nextBoolean()
-    if choice then FsmTrajectory.changesRequestedSnapshot(prNumber)
-    else FsmTrajectory.humanCommentSnapshot(prNumber)
+  /** ScalaCheck-controlled choice between the two "human override" snapshot shapes the FSM treats identically — a
+    * reviewer `CHANGES_REQUESTED` decision and one or more unseen human comments. Routing the choice through the
+    * generator (rather than `scala.util.Random`) keeps the failing seed reproducible: if the regression hits only one
+    * shape, the seed reported by ScalaCheck reproduces it exactly.
+    */
+  private def genHumanFeedbackSnapshot(prNumber: PrNumber): Gen[io.forge.core.pr.PrSnapshot] =
+    Gen.oneOf(
+      FsmTrajectory.changesRequestedSnapshot(prNumber),
+      FsmTrajectory.humanCommentSnapshot(prNumber)
+    )
 
   property("F8 — DesignAwaitingMerge + human-feedback snapshot → DesignPrFeedback (never forward to DesignReady)") {
     forAll(genFeatureSeed, Generators.genPrNumber) { (seed: Feature, prNumber: PrNumber) =>
-      val staged = seed.copy(
-        state = FsmState.DesignAwaitingMerge(prNumber),
-        designSessionId = Some("sid-design"),
-        manifest = seed.manifest.copy(designPr = Some(prNumber))
-      )
-      val (after, _) = Fsm.transition(staged, FsmEvent.DesignPrSnapshotUpdated(humanFeedbackSnapshot(prNumber)))
-      after.state match
-        case _: FsmState.DesignPrFeedback => proved
-        case FsmState.DesignReady => falsified :| s"forward to DesignReady from human-feedback"
-        case other => falsified :| s"expected DesignPrFeedback, got $other"
+      forAll(genHumanFeedbackSnapshot(prNumber)) { snapshot =>
+        val staged = seed.copy(
+          state = FsmState.DesignAwaitingMerge(prNumber),
+          designSessionId = Some("sid-design"),
+          manifest = seed.manifest.copy(designPr = Some(prNumber))
+        )
+        val (after, _) = Fsm.transition(staged, FsmEvent.DesignPrSnapshotUpdated(snapshot))
+        after.state match
+          case _: FsmState.DesignPrFeedback => proved
+          case FsmState.DesignReady => falsified :| s"forward to DesignReady from human-feedback"
+          case other => falsified :| s"expected DesignPrFeedback, got $other"
+      }
     }
   }
 
   property("F8 — PieceAwaitingReview + human override → PieceReviewFailed (never forward)") {
     forAll(genPieceId, Generators.genPrNumber) { (piece: PieceId, prNumber: PrNumber) =>
-      val staged = featureWithInProgressPiece(piece, prNumber).copy(
-        state = FsmState.PieceAwaitingReview(piece, prNumber),
-        currentPieceSessionId = Some("sid-piece")
-      )
-      val (after, _) = Fsm.transition(staged, FsmEvent.PrSnapshotUpdated(piece, humanFeedbackSnapshot(prNumber)))
-      after.state match
-        case _: FsmState.PieceReviewFailed => proved
-        case _: FsmState.PieceAwaitingMerge => falsified :| "forward to PieceAwaitingMerge"
-        case _: FsmState.Refining => falsified :| "forward to Refining"
-        case FsmState.FeatureDone => falsified :| "forward to FeatureDone"
-        case other => falsified :| s"unexpected target $other"
+      forAll(genHumanFeedbackSnapshot(prNumber)) { snapshot =>
+        val staged = featureWithInProgressPiece(piece, prNumber).copy(
+          state = FsmState.PieceAwaitingReview(piece, prNumber),
+          currentPieceSessionId = Some("sid-piece")
+        )
+        val (after, _) = Fsm.transition(staged, FsmEvent.PrSnapshotUpdated(piece, snapshot))
+        after.state match
+          case _: FsmState.PieceReviewFailed => proved
+          case _: FsmState.PieceAwaitingMerge => falsified :| "forward to PieceAwaitingMerge"
+          case _: FsmState.Refining => falsified :| "forward to Refining"
+          case FsmState.FeatureDone => falsified :| "forward to FeatureDone"
+          case other => falsified :| s"unexpected target $other"
+      }
     }
   }
 
   property("F8 — PieceAwaitingMerge + human override → PieceReviewFailed (never to Refining)") {
     forAll(genPieceId, Generators.genPrNumber) { (piece: PieceId, prNumber: PrNumber) =>
-      val staged = featureWithInProgressPiece(piece, prNumber).copy(
-        state = FsmState.PieceAwaitingMerge(piece, prNumber),
-        currentPieceSessionId = Some("sid-piece")
-      )
-      val (after, _) = Fsm.transition(staged, FsmEvent.PrSnapshotUpdated(piece, humanFeedbackSnapshot(prNumber)))
-      after.state match
-        case _: FsmState.PieceReviewFailed => proved
-        case _: FsmState.Refining => falsified :| "forward to Refining"
-        case FsmState.FeatureDone => falsified :| "forward to FeatureDone"
-        case other => falsified :| s"unexpected target $other"
+      forAll(genHumanFeedbackSnapshot(prNumber)) { snapshot =>
+        val staged = featureWithInProgressPiece(piece, prNumber).copy(
+          state = FsmState.PieceAwaitingMerge(piece, prNumber),
+          currentPieceSessionId = Some("sid-piece")
+        )
+        val (after, _) = Fsm.transition(staged, FsmEvent.PrSnapshotUpdated(piece, snapshot))
+        after.state match
+          case _: FsmState.PieceReviewFailed => proved
+          case _: FsmState.Refining => falsified :| "forward to Refining"
+          case FsmState.FeatureDone => falsified :| "forward to FeatureDone"
+          case other => falsified :| s"unexpected target $other"
+      }
     }
   }
