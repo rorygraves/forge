@@ -41,14 +41,18 @@ fix this file.
   channel with resume-turn Init filtered, thread-id mismatch on
   resume raises; headless + Layer-5 reviewer one-shots also covered),
   shared `ReviewDecoders` + `ReviewerPrompts` + `ReviewerAssets` +
-  typed `ReviewerError` adapter errors. **PR-A (trait-shape code
-  change) in `design-2.1.md` complete.** Still to come: real-CLI
-  streaming integration tests (PR-B Claude, PR-C Codex —
-  resume-with-session-id-preserved, kill mid-stream,
-  `answerQuestion` end-to-end), orchestrator-side `HaltWithQuestion`
-  re-spawn loop (lands with Slice 2 FSM), real-CLI reviewer
-  regression suites (PR-D, blocked on shipped schemas + reviewer
-  prompts), full §17 forge-it integration test list.
+  typed `ReviewerError` adapter errors. **PR-A (trait-shape), PR-B
+  (Claude streaming integration tests), and PR-C (Codex streaming
+  integration tests) in `design-2.1.md` complete.** PR-C also folded
+  in two upstream connector fixes the integration suite surfaced
+  against `codex-cli 0.133.0`: `--ask-for-approval` → `-c
+  approval_policy=...` (the flag was removed in codex ≥0.131); and
+  `closeStdin` right after spawn on every Codex subprocess (JVM
+  ProcessBuilder leaves stdin open; codex hangs on the pipe). Still
+  to come: orchestrator-side `HaltWithQuestion` re-spawn loop (lands
+  with Slice 2 FSM); real-CLI reviewer regression suites (PR-D,
+  blocked on shipped schemas + reviewer prompts); PR-E close-out;
+  full §17 forge-it integration test list.
 - Slices 2–5 scoped in design §17.
 - Phase 4 (Forge-instance pivot: multi-repo, daemon, parallel,
   containerised) is post-v1 and needs its own design doc before any

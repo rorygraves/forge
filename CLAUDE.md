@@ -9,18 +9,23 @@ that first; everything below is Claude-Code-specific.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
 - **Active implementation plan:** [`docs/design-2.1.md`](docs/design-2.1.md) — Slice 1 / Agent connectors. Per-section breakdown into named sub-PRs (A, B, C…) with checkbox items. See `AGENTS.md` §"Per-section implementation plans" for the pattern. Read this *before* picking up Slice-1 work — it tells you what's done, what's next, and which sub-PR each task belongs to.
 - **Current state:** Slice 0 complete; Slice 1 (`forge-agents`) in
-  progress. **PR-A (trait-shape code change) complete:** items A1–A6
-  landed — event-shape change with `toolUseId: Option[String]` on
-  `AskUserQuestion`, `StreamingSession.answerQuestion` extension,
-  `StreamingDriver` `initialUserInput` + `encodeAnswer` hooks,
-  `ClaudeConnector` streaming-spec methods wired through
-  `StreamingDriver` (with `encodeToolResultJson` + `MissingToolUseId`
-  adapter error), and `CodexConnector` streaming-spec via the new
-  `CodexStreamingSession` multi-process facade. Next up: PR-B / PR-C
-  add the real-CLI integration tests (Claude + Codex streaming
-  round-trips against `claude` / `codex` on PATH); PR-D is the
-  reviewer schema regression suite (blocked on shipped schemas +
-  system prompts); PR-E does the roadmap close-out.
+  progress. **PR-A complete (trait-shape code change), PR-B + PR-C
+  complete (real-CLI integration tests):** Claude streaming-spec
+  round-trip, resume, `answerQuestion(Some(id), …)`, and `kill()`
+  mid-stream pass against Claude 2.1.150 in `ClaudeStreamingSpecSuite`
+  (~16s). Codex headless smoke, multi-turn `send()`, resume thread_id
+  preservation, `answerQuestion` via resume, and `kill()` mid-turn
+  pass against `codex-cli 0.133.0` across `CodexHeadlessSmokeSuite`,
+  `CodexStreamingSpecSuite` (~45s). C4 (HaltWithQuestion reliability
+  sample, 20 real-CLI runs) is opt-in via `FORGE_IT_RUN_RELIABILITY=1`.
+  Two upstream fixes folded into PR-C: `CodexConnector.execArgv`
+  swapped `--ask-for-approval` for `-c approval_policy=...` (codex
+  ≥0.131); Codex spawns now `closeStdin` immediately (JVM ProcessBuilder
+  leaves stdin open; codex hangs on the open pipe). PR-C tests default
+  to `gpt-5-codex` with `FORGE_IT_CODEX_MODEL` override for
+  account-tier-restricted setups. Next up: PR-D is the reviewer schema
+  regression suite (blocked on shipped schemas + system prompts);
+  PR-E does the roadmap close-out.
 - **Two architectural seams to preserve in v1 work:** `ForgePaths`
   helper (no `.forge/...` literals outside it) and `Role` indirection
   (no `match m: Mode` outside `Mode` and connector construction). See

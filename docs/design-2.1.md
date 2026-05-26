@@ -138,45 +138,105 @@ is in.
     "✅ landed 2026-05-25" in the §1.1 header ✅.
   Done.
 
-### 1.2 PR B — Claude streaming integration tests (forge-it)
+### 1.2 PR B — Claude streaming integration tests (forge-it) ✅ landed 2026-05-26
 
-- [ ] **B1.** Real-CLI streaming-spec round-trip: spawn with `(prompt,
+- [x] **B1.** Real-CLI streaming-spec round-trip: spawn with `(prompt,
   "hi")`, drain to first Result, capture sessionId, close. Assert the
   sessionId is a UUID and the stream contains the expected event
-  shape (Init → ≥1 AssistantText/ToolUse → CostUpdate → Result).
-- [ ] **B2.** Resume round-trip: spawn → close → resume with a new
+  shape (Init → ≥1 AssistantText/ToolUse → CostUpdate → Result). Lands
+  in `ClaudeStreamingSpecSuite`. Note: close-before-drain is the
+  required idiom in streaming-spec mode (`-p --input-format
+  stream-json` keeps stdin open; the events channel only closes after
+  the CLI exits, which only happens after `closeStdin` signals EOF) —
+  the existing headless smoke suite gets away with drain-first because
+  `-p '<prompt>'` mode reads no stdin. Done.
+- [x] **B2.** Resume round-trip: spawn → close → resume with a new
   message; assert `newSessionId == oldSessionId` (§6.1 invariant on the
-  pinned CLI).
-- [ ] **B3.** answerQuestion against a contrived prompt that elicits an
+  pinned CLI). Done — passes against Claude 2.1.150.
+- [x] **B3.** answerQuestion against a contrived prompt that elicits an
   `AskUserQuestion` tool use. Capture the `toolUseId` from the stream,
   call `answerQuestion(Some(id), "yes")`, assert the session continues
-  without re-asking and ends with a successful Result.
-- [ ] **B4.** kill() exercised mid-stream; verify no zombie subprocess
-  and the events stream terminates cleanly.
-- [ ] **B5.** All four tests gated identically to
+  without re-asking and ends with a successful Result. Uses a Ref +
+  Deferred collector pattern (fs2 Channels are single-consumer, so a
+  second `compile.toVector` after a `takeThrough` race is unsafe).
+  Done.
+- [x] **B4.** kill() exercised mid-stream; verify no zombie subprocess
+  and the events stream terminates cleanly. Done — kill() finalises
+  the events channel so `compile.toVector` returns promptly.
+- [x] **B5.** All four tests gated identically to
   `ClaudeHeadlessSmokeSuite` (PATH probe + `FORGE_IT_SKIP_CLAUDE=1`
-  escape hatch).
+  escape hatch). Done.
 - Spec: §17 slice-1 forge-it test list.
 
-### 1.3 PR C — Codex streaming integration tests (forge-it)
+### 1.3 PR C — Codex streaming integration tests (forge-it) ✅ landed 2026-05-26
 
-- [ ] **C1.** Real-CLI headless smoke (mirror of
+PR-C also folded in two small upstream fixes the integration suite
+surfaced while running against the installed `codex-cli 0.133.0` (Slice
+0 was pinned against 0.130.0):
+
+  - **`CodexConnector.execArgv` flag update.** `-a/--ask-for-approval
+    <mode>` was removed in ≥0.131 in favour of a `-c
+    approval_policy=<mode>` config override (TOML key/value form).
+    Connector + the `execArgv` unit test in `CodexConnectorSuite`
+    updated to match the new wire shape. The `execResumeArgv`
+    negative-flag assertion also dropped the now-nonexistent
+    `--ask-for-approval` from its rejection set; resume still rejects
+    `--sandbox`, `--output-schema`, `--add-dir`, `-C`, but the
+    sticky-settings surface narrowed in 0.133. §7.10(c) spec
+    consequences parked for now — the contract is still "sticky flags
+    require a fresh spawn", just with a different rejection list.
+  - **stdin EOF on Codex spawns.** Codex CLI reads stdin even when the
+    prompt is on argv (it logs `"Reading additional input from
+    stdin..."` to stderr and blocks until EOF). JVM
+    `ProcessBuilder` leaves the child's stdin as an open pipe, so
+    Codex hangs waiting for EOF. `CodexConnector.spawnHeadless` and
+    `CodexStreamingSession.runOneTurn` both call `sp.closeStdin` right
+    after spawn so the CLI proceeds. Slice 0 didn't catch this because
+    it ran codex from a shell with implicit EOF; the JVM-spawned path
+    is the first to exercise the open-stdin behaviour.
+
+PR-C tests then landed:
+
+- [x] **C1.** Real-CLI headless smoke (mirror of
   `ClaudeHeadlessSmokeSuite`): `gpt-5-codex` against a trivial prompt;
   full event pipeline produces Init + AssistantText + CostUpdate +
-  Result; CostUpdate USD > 0 via the shipped price table.
-- [ ] **C2.** streamingSpec round-trip via the multi-process facade:
+  Result; CostUpdate USD > 0 via the shipped price table. Lands in
+  `CodexHeadlessSmokeSuite`. The model defaults to `gpt-5-codex` but
+  can be overridden via `FORGE_IT_CODEX_MODEL` for accounts that
+  return 400 invalid_request_error on `gpt-5-codex` (e.g. ChatGPT
+  accounts must use `gpt-5.3-codex`). The override must still match a
+  `prices.example.json` entry or the USD > 0 assertion fails. Done.
+- [x] **C2.** streamingSpec round-trip via the multi-process facade:
   initial spawn + at least one follow-up `send()`; assert thread_id
-  preserved across all turns.
-- [ ] **C3.** resumeStreamingSpec preserves thread_id (§6.1).
-- [ ] **C4.** **HaltWithQuestion reliability sample** — contrived
+  preserved across all turns. Done — exactly one `Init` event across
+  both turns (resume turn's `thread.started` is dropped by the
+  facade); two `Result` events.
+- [x] **C3.** resumeStreamingSpec preserves thread_id (§6.1). Done —
+  the §6.1 invariant holds against `codex exec resume <sid>`.
+- [x] **C4.** **HaltWithQuestion reliability sample** — contrived
   ambiguous prompt run ≥20 times; assert ≥19/20 produce a parseable
   halt envelope (§7.3 / §16 threshold). On miss, the test fails with the
-  rate so we can decide whether to narrow scope per §16.1.
-- [ ] **C5.** answerQuestion routes through the resume path (no
-  outstanding tool_use to reference).
-- [ ] **C6.** kill() mid-turn on the facade; verify no zombie
-  subprocess.
-- [ ] **C7.** PATH-probe + `FORGE_IT_SKIP_CODEX=1` gating.
+  rate so we can decide whether to narrow scope per §16.1. Lands in
+  `CodexHaltWithQuestionReliabilitySuite`. **Opt-in via
+  `FORGE_IT_RUN_RELIABILITY=1`** — even when `codex` is on PATH the
+  suite skips unless the gate is flipped, so the default forge-it test
+  run isn't dominated by 20 real-model calls (~2–5 minutes wall-clock).
+  The halt-envelope system prompt spells the JSON schema literally — a
+  loose-worded variant was observed to fall well short of the bar. The
+  gating bar itself (§16) hasn't been re-measured on `codex-cli 0.133`
+  yet; that's an on-demand exercise the gate enables. Done.
+- [x] **C5.** answerQuestion routes through the resume path (no
+  outstanding tool_use to reference). Done — `answerQuestion(_,
+  answer)` is byte-for-byte equivalent to `send(answer)` on Codex; the
+  test exercises the resume path with `toolUseId = None` to match
+  what a real §7.3 halt envelope would emit.
+- [x] **C6.** kill() mid-turn on the facade; verify no zombie
+  subprocess. Done — `kill()` SIGTERMs the active subprocess
+  (Subprocess.kill blocks on `waitFor`, so the test only completes
+  once the OS reap is done) and finalises the events channel.
+- [x] **C7.** PATH-probe + `FORGE_IT_SKIP_CODEX=1` gating. Done —
+  applied across all three new Codex suites (`CodexHeadlessSmokeSuite`,
+  `CodexStreamingSpecSuite`, `CodexHaltWithQuestionReliabilitySuite`).
 - Spec: §17 slice-1 forge-it test list.
 
 ### 1.4 PR D — reviewer regression suites (forge-it)
@@ -250,6 +310,30 @@ after PR-E lands.
   landing. Next up: PR-B (Claude real-CLI streaming integration tests).
   PR-C (Codex) can land in parallel with PR-B once we have a real
   `codex` binary available in CI.
+- 2026-05-26 — **PR-B complete.** `ClaudeStreamingSpecSuite` lands
+  with B1–B4 against Claude CLI 2.1.150; all four pass (~16s total).
+  Close-before-drain idiom needed because streaming-spec mode keeps
+  stdin open, so the events channel only closes after `closeStdin`
+  signals EOF. B3 uses a Ref + Deferred collector pattern (fs2
+  Channels are single-consumer; a second `compile.toVector` after a
+  `takeThrough` race is unsafe).
+- 2026-05-26 — **PR-C complete.** Three suites land
+  (`CodexHeadlessSmokeSuite`, `CodexStreamingSpecSuite`,
+  `CodexHaltWithQuestionReliabilitySuite`). C1, C2, C3, C5, C6 pass
+  against `codex-cli 0.133.0` (~45s combined). C4 is opt-in behind
+  `FORGE_IT_RUN_RELIABILITY=1` — 20 real-CLI runs take 2–5 minutes
+  wall-clock so it's gated off the default test pass. Two upstream
+  fixes folded into PR-C: (1) `CodexConnector.execArgv` swapped
+  `--ask-for-approval <mode>` for `-c approval_policy=<mode>` (the
+  flag was removed in codex ≥0.131); (2) `CodexConnector.spawnHeadless`
+  + `CodexStreamingSession.runOneTurn` now close the child's stdin
+  immediately after spawn — codex hangs on a JVM-spawned open stdin
+  pipe even when the prompt is on argv. PR-C tests default to
+  `gpt-5-codex` but accept `FORGE_IT_CODEX_MODEL` override for
+  account-tier-restricted setups (e.g. ChatGPT accounts must use
+  `gpt-5.3-codex`). Next up: PR-E (close-out). PR-D (reviewer regression
+  suites) still parked — blocked on shipped reviewer schemas + system
+  prompts.
 
 ## 4. Cross-references
 
