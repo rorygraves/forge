@@ -433,18 +433,35 @@ PR-B is the *decode-only* PR. Pure functions from `ujson.Value` →
       `BranchManager.baseFreshness` reads it without mutating the
       `forge-core` `PrSnapshot` ADT. Empty `commits` array →
       `DecodeError.MissingField("commits[-1].oid")`.
-- [x] **B4.** **Comment baseline filter is a pure function**
-  (`Comments.unseen(entries, baseline)`) tested independently from
-  `decode`. Updated post review round 1 to take `(Instant, A)` pairs
-  + `Option[Instant]` baseline (S3-7). Three properties:
-    - Strictly-greater comparison via `Instant.isAfter` — `at ==
-      baseline` is excluded. Pinned with a dedicated "equality
-      boundary" test so a future "let's use `compareTo >= 0`"
-      regression can't slip through.
-    - Empty baseline → every entry is unseen.
-    - Baseline equal to the latest entry's timestamp → empty unseen
-      set. Plus an ordering-preservation test (decoder relies on
-      input order being preserved by the helper).
+- [x] **B4.** **Two pure helpers** tested independently from
+  `decode`, exercised by `CommentsSuite`:
+    - `Comments.unseen(entries: Vector[(Instant, String, A)], cursor:
+      Option[BaselineCursor]): Vector[A]` — the round-2 contract
+      (S3-7). Retains entries where
+      `at.isAfter(cursor.at) || (at == cursor.at &&
+      !cursor.seenIds.contains(id))`. **Equality at the watermark
+      can survive** when the id is fresh — that's the load-bearing
+      fix for `gh`'s second-granularity timestamps. Empty cursor
+      (`None`) → every entry unseen regardless of id. Pinned
+      properties:
+        - Strictly-after branch: entry at `T` excluded when
+          `cursor.at = T+1`; entry at `T+1` unseen when
+          `cursor.at = T`.
+        - Equality + id tie-breaker: entry at `cursor.at` with a
+          DIFFERENT id surfaces (the reviewer's concrete
+          same-second worry); entry at `cursor.at` with an id IN
+          `cursor.seenIds` is excluded.
+        - Empty cursor → all entries unseen.
+        - Output preserves input order (decoder relies on this).
+    - `Comments.advance(entries: Vector[(Instant, String)], prior:
+      Option[BaselineCursor]): Option[BaselineCursor]` — computes
+      the next watermark + `seenIds` from the **full** observed
+      set. Four cases pinned: empty entries keep prior unchanged;
+      max strictly after prior moves the watermark and resets
+      `seenIds` to the ids at the new watermark; max equal to prior
+      unions `prior.seenIds` with ids at the watermark (so polls
+      that share a second accumulate); max before prior is treated
+      defensively (keep prior).
 - [x] **B5.** Decoder test suite under
   `modules/forge-git/src/test/scala/io/forge/git/watcher/`. Fixture
   JSON files under
