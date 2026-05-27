@@ -77,15 +77,56 @@ fix this file.
   [`docs/design-rationale.md`](docs/design-rationale.md) and
   [`docs/roadmap.md`](docs/roadmap.md) §7.2): **S2-1** through
   **S2-10**, plus the Slice-1 carry-forwards **C14** and **C15**.
-- **Slice 3 — 🟢 active (opened 2026-05-26).** `forge-git` ships
-  `BranchManager` + `PRWatcher`; `forge-app` ships `ProcessLock` +
-  `SessionMonitor` (the rest of `forge-app` — `main`, wiring, CLI —
-  lands in Slice 4). All four components are Slice-3 deliverables
-  per design §17; the module split reflects that `ProcessLock` and
-  `SessionMonitor` don't depend on `gh`/git but do need to be
-  exercisable before Slice 4 wires up the orchestrator. The
-  per-task implementation plan + sub-PR breakdown (PR-A → PR-H) lives
-  in [`docs/design-2.3.md`](docs/design-2.3.md). See roadmap §2.3.
+- **Slice 3 (`forge-git` — BranchManager + PRWatcher; `forge-app` —
+  ProcessLock + SessionMonitor) — ✅ closed 2026-05-27.**
+  `forge-git` ships `GhClient` / `GitClient` traits with
+  `os-lib`-backed `RealGhClient` / `RealGitClient` (one-shot
+  `os.proc.call` per **S3-1**), typed `GhError` / `GitError` ADTs,
+  `FakeGhClient` / `FakeGitClient` builder fixtures (**S3-3**
+  testability seam), `PrSnapshotDecoder` covering every §6 field
+  with explicit CI6 handling (`mergeStateStatus` ignored;
+  merge driven by `state == "MERGED"` + non-null `mergedAt`),
+  `PollBaseline` cursors as `BaselineCursor(at, seenIds)` with the
+  round-2 same-second tie-breaker (**S3-7**), the empty-body
+  `unseenComments` filter, the `reviewDecision: ""` null-flattening
+  quirk (**S3-8**), `Comments.unseen` / `Comments.advance` pure
+  helpers, `BranchManager` covering the full §9 surface (preflight
+  per §15, syncBase per BM1, createDesignBranch / createPieceBranch
+  returning `(branch, baseSha)`, baseFreshness per BM2 with
+  `Updated(newBaseSha)` re-read after `gh pr update-branch`,
+  force-with-lease push surfacing `ForceLeaseRejected` per §11.3
+  step 5, createPr per BM8 via stdout-URL parse (**S3-6**),
+  tagSnapshot / pushTag / deleteRemoteTag / pruneSnapshotTags per
+  §11.3 step 4 retention), `BranchProtectionCache` keyed by
+  `(featureId, baseBranch, cacheEpoch)` per CI5 with TTL eviction
+  and an Unauthorized-empty-overlay fallback (**S3-2** process-local
+  watch item), `PRWatcher` as `fs2.Stream[IO, PollResult]` against
+  the §9 pinned 11-field set with rate-limit back-off honouring
+  `Retry-After` per RL1, baseline cursor advancement on `Snapshot`
+  only, and three-consecutive-rate-limits-before-failing (**S3-4**).
+  `forge-app` ships `ProcessLock` per §13 (`FileChannel.tryLock` on
+  `paths.lockFile` + sibling `paths.lockMetadataFile`, per-instance
+  reference counting so nested same-JVM acquires share the OS lock,
+  `forceRelease` with `LiveHolderRefused` against an in-process
+  holder), `SessionMonitor` per §12 / §7.9 (settle timeout +
+  per-turn cost cap invoke `session.kill()`, feature/piece budget
+  breaches emit `BudgetBreached` without killing per §12 check 2 via
+  an end-of-turn flush, kill-failure resilience via
+  `killError: Option[String]` on `SettleTimeout` /
+  `TurnBudgetBreached`, scope limited to the four driver phases per
+  **S3-5** / S2-8 — reviewer/refine deferred to Slice 4A). PR-A
+  through PR-H in `design-2.3.md` are landed. Real-`gh` + real-`git`
+  integration coverage in `forge-it`: `BranchManagerIntegrationSuite`
+  (opt-in via `FORGE_IT_GH_REPO`) drives clone → bootstrap-main →
+  syncBase → createPieceBranch → push → createPr → pollOnce(Open)
+  → prMerge → pollOnce(Merged); `ProcessLockMultiJvmSuite` (opt-in
+  via `FORGE_IT_RUN_PROCLOCK`) covers the three cross-JVM
+  `FileProcessLock` scenarios (live `Held`, crash-stale recovery,
+  `forceRelease` live-refusal). **Carry-forward to v1.3 / Slice 4**
+  (see [`docs/design-rationale.md`](docs/design-rationale.md) and
+  [`docs/roadmap.md`](docs/roadmap.md) §7.2): **S3-1** through
+  **S3-8**, plus the Slice-1/2 carry-forwards **C14**, **C15**,
+  and **S2-1** through **S2-10**.
 - Slices 4–5 scoped in design §17.
 - Phase 4 (Forge-instance pivot: multi-repo, daemon, parallel,
   containerised) is post-v1 and needs its own design doc before any
@@ -131,14 +172,13 @@ layers — read top-down on a new task:
 
 ### Active design-`<section>`.md files
 
-- [`docs/design-2.3.md`](docs/design-2.3.md) — Slice 3 (`BranchManager`,
-  `PRWatcher` in `forge-git`; `ProcessLock`, `SessionMonitor` in
-  `forge-app`). Opened 2026-05-26; entry point is PR-A
-  (`forge-git` skeleton + `GhClient` / `GitClient` foundations).
+*(none currently open — Slice 4 opens its own `docs/design-2.4.md`
+when work starts.)*
 
 Recently-closed audit trails: [`docs/design-2.1.md`](docs/design-2.1.md)
 (Slice 1, closed 2026-05-26), [`docs/design-2.2.md`](docs/design-2.2.md)
-(Slice 2, closed 2026-05-26).
+(Slice 2, closed 2026-05-26), [`docs/design-2.3.md`](docs/design-2.3.md)
+(Slice 3, closed 2026-05-27).
 
 Don't pre-write design-`<section>`.md files for sections that aren't
 being actively worked. They drift; the roadmap is enough until the

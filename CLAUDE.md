@@ -7,30 +7,36 @@ that first; everything below is Claude-Code-specific.
 
 - **Implementation contract:** [`docs/forge-design-1.2.md`](docs/forge-design-1.2.md). The 1.1 revision is kept in-tree as an evolution record but is superseded.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
-- **Active implementation plan:**
-  [`docs/design-2.3.md`](docs/design-2.3.md) — Slice 3 opened
-  2026-05-26 (`BranchManager`, `PRWatcher` in `forge-git`;
-  `ProcessLock`, `SessionMonitor` in `forge-app`). Entry point is
-  PR-A. The most recent closed audit trails are
-  [`docs/design-2.2.md`](docs/design-2.2.md) (Slice 2) and
+- **Active implementation plan:** *(none currently open — Slice 4
+  opens `docs/design-2.4.md` when work starts.)* The most recent
+  closed audit trails are [`docs/design-2.3.md`](docs/design-2.3.md)
+  (Slice 3, closed 2026-05-27),
+  [`docs/design-2.2.md`](docs/design-2.2.md) (Slice 2), and
   [`docs/design-2.1.md`](docs/design-2.1.md) (Slice 1). See
   `AGENTS.md` §"Per-section implementation plans" for the pattern
   (sub-PR breakdown with checkbox items).
-- **Current state:** Slices 1 and 2 ✅ closed 2026-05-26; Slice 3
-  🟢 active. Slice 1 shipped both connectors against v1.2 §7.1 with
-  real-CLI integration coverage in `forge-it`. Slice 2 shipped
-  `forge-core` — `ForgePaths`, relocated manifest data types,
+- **Current state:** Slices 1, 2, and 3 ✅ closed 2026-05-27.
+  Slice 1 shipped both connectors against v1.2 §7.1 with real-CLI
+  integration coverage in `forge-it`. Slice 2 shipped `forge-core` —
+  `ForgePaths`, relocated manifest data types,
   `FsmState` / `FsmEvent` / `Feature` / `ResumeHint` / `Action`
   domain model, the pure `Fsm.transition` covering every §11
   lifecycle rule, `FileActionLog` + `Feature.foldEvents`,
-  `FileStateCache` + `RebuildState.run`, and the §17 slice-2
-  property-test suite (357 unit tests). Slice 3 is now active per
-  `design-2.3.md`. **Carry-forward** to v1.3 / Slice 4 (see
+  `FileStateCache` + `RebuildState.run`. Slice 3 shipped
+  `forge-git` (`GhClient` / `GitClient` one-shot CLI seams,
+  `PrSnapshotDecoder` + `BaselineCursor(at, seenIds)`,
+  `BranchManager` + `BranchProtectionCache`, `PRWatcher`) and
+  `forge-app` (`ProcessLock`, `SessionMonitor`) — every component
+  the Slice-4 orchestrator needs to produce `FsmEvent`s from the
+  outside world. Test scope: `forge-core` 358, `forge-agents` 181,
+  `forge-git` 163, `forge-app` 46, `forge-it` 10 default-on + 5
+  opt-in. **Carry-forward** to v1.3 / Slice 4 (see
   [`docs/design-rationale.md`](docs/design-rationale.md) and
   [`docs/roadmap.md`](docs/roadmap.md) §7.2): **C14** (Codex
   `resumeStreamingSpec` system-prompt prepending), **C15** (PR-D
-  ≥19/20 native schema regression suite deferred to the reviewer-asset
-  PR in Slice 4), and **S2-1** through **S2-10**.
+  ≥19/20 native schema regression suite deferred to the
+  reviewer-asset PR in Slice 4), **S2-1** through **S2-10**, and
+  **S3-1** through **S3-8**.
 - **Two architectural seams to preserve in v1 work:**
   - `ForgePaths` helper — no `.forge/...` literals outside it. Enforced
     by `ForgePathsSuite`'s `os.walk` sweep over

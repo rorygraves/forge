@@ -6,7 +6,7 @@
 > §17 of the design); later phases capture direction and have not yet been
 > turned into specs.
 >
-> **Status:** draft v0.7 — 2026-05-26. **Slices 1 and 2 closed.**
+> **Status:** draft v0.8 — 2026-05-27. **Slices 1, 2, and 3 closed.**
 > Slice 1 (PR-A → PR-E in [`design-2.1.md`](design-2.1.md)) ships
 > both connectors against the v1.2 §7.1 streaming-spec trait with
 > real-CLI integration tests in `forge-it`. Slice 2 (PR-A → PR-G in
@@ -14,19 +14,22 @@
 > + relocated manifest types, `FsmState`/`FsmEvent`/`Feature`,
 > `Fsm.transition` per §11, `FileActionLog` + `Feature.foldEvents`,
 > `FileStateCache` + `RebuildState.run`, and a property-test suite
-> covering the §17 slice-2 invariants. Carry-forwards to v1.3 /
-> Slice 4: **C14**, **C15**, and **S2-1** through **S2-10** (each
-> with a durable home in [`design-rationale.md`](design-rationale.md)
-> or §7.2 below — §7.2 is now grouped by what closing each item
-> requires). Next active slice: 3 (`BranchManager`, `PRWatcher` in
-> `forge-git`; `ProcessLock`, `SessionMonitor` in `forge-app`). v0.7
-> rewrites §2.3 and §2.4: §2.3 names the module split and the
-> fake-`gh` + sacrificial-repo test plan; §2.4 splits Slice 4
-> dependency-shaped into **4A** (reviewer assets, `forge-specs`
-> repopulation, PR-D regression gate) → **4B** (orchestrator loop,
-> CLI, self-hosting gate). MVP-gate recommendation changes away
-> from "Forge builds its own Slice 5 (TUI)" to a contained,
-> low-variance first feature.
+> covering the §17 slice-2 invariants. Slice 3 (PR-A → PR-H in
+> [`design-2.3.md`](design-2.3.md)) ships `forge-git` (`GhClient` /
+> `GitClient` one-shot CLI seams, `PrSnapshotDecoder` + `PollBaseline`
+> with `BaselineCursor(at, seenIds)`, `BranchManager` +
+> `BranchProtectionCache`, `PRWatcher`) and `forge-app` (`ProcessLock`,
+> `SessionMonitor`) — every component the Slice-4 orchestrator needs
+> to produce `FsmEvent`s from the outside world. Carry-forwards to
+> v1.3 / Slice 4: **C14**, **C15**, **S2-1** through **S2-10**, and
+> **S3-1** through **S3-8** (each with a durable home in
+> [`design-rationale.md`](design-rationale.md) or §7.2 below — §7.2
+> is grouped by what closing each item requires). Next active slice:
+> 4, split dependency-shaped per v0.7 into **4A** (reviewer assets,
+> `forge-specs` repopulation, PR-D regression gate) → **4B**
+> (orchestrator loop, CLI, self-hosting gate). MVP-gate recommendation
+> stays as v0.7: pick a contained, low-variance first feature, not
+> "Forge builds its own Slice 5 (TUI)".
 
 ## 0. How to read this
 
@@ -158,32 +161,86 @@ to `"p"` only) — have durable homes in
 
 ### 2.3 Slice 3 — BranchManager, PRWatcher, ProcessLock, SessionMonitor
 
-🟢 **Slice 3 open — 2026-05-26.** Per-task implementation plan +
-sub-PR breakdown (PR-A → PR-H) lives in
-[`design-2.3.md`](design-2.3.md); entry point is PR-A (`forge-git`
-module skeleton + `GhClient` / `GitClient` foundations). Per §17
-slice 3, two modules ship together:
+- [x] `forge-git` module skeleton — `GhClient` / `GitClient` traits
+  with `os-lib`-backed `RealGhClient` / `RealGitClient` one-shot CLI
+  invocation; typed `GhError` / `GitError` ADTs (rate-limit,
+  not-found, auth, transient, parse-failure); `FakeGhClient` /
+  `FakeGitClient` builder fixtures. Subprocess-utility ownership
+  decision (no `forge-agents` dependency, no `forge-core` streaming
+  primitive) filed as **S3-1**.
+- [x] `PrSnapshotDecoder` + `Comments.unseen` / `Comments.advance`
+  — pure `ujson.Value → Either[DecodeError, DecodedSnapshot]`
+  decoder covering every §6 field, including the `mergeStateStatus`
+  trap (CI6: merge driven by `state == "MERGED"` + non-null
+  `mergedAt`), the `reviewDecision: ""` null-flattening quirk
+  (**S3-8**), and the empty-body filter on `unseenComments`.
+  `PollBaseline` cursors are
+  `BaselineCursor(at: Instant, seenIds: Set[String])` with a
+  round-2 same-second tie-breaker (**S3-7**); `Comments.advance`
+  surfaces the next cursor on `DecodedSnapshot.nextBaseline` so the
+  orchestrator persists exactly what the next poll needs.
+- [x] `BranchManager` + `BranchProtectionCache` — full §9 surface
+  (`preflight` per §15, `syncBase` per BM1, `createDesignBranch` /
+  `createPieceBranch` returning `(branch, baseSha)`, `baseFreshness`
+  per BM2 with `Updated(newBaseSha)` re-read after
+  `gh pr update-branch`, `pushCurrentBranch` with force-with-lease
+  surfacing `BranchError.ForceLeaseRejected` per §11.3 step 5,
+  `createPr` per BM8 via stdout-URL parse (**S3-6**),
+  `tagSnapshot` / `pushTag` / `deleteRemoteTag` /
+  `pruneSnapshotTags` per §11.3 step 4 retention).
+  `(featureId, baseBranch, cacheEpoch)`-keyed in-memory cache per
+  CI5 with TTL eviction and an Unauthorized-empty-overlay fallback.
+  Process-local in-memory cache scope filed as **S3-2** (watch item
+  only).
+- [x] `PRWatcher` — `fs2.Stream[IO, PollResult]` polling against
+  `GhClient.prView` with the §9 pinned 11-field set, rate-limit
+  back-off honouring `Retry-After` per RL1, baseline cursor
+  advancement on `Snapshot` only per S3-7 round 2, and three-
+  consecutive-rate-limits-before-failing per **S3-4**. `pollOnce` +
+  `watch(pr, baselineRef)` factory methods covering both startup
+  one-shot snapshots and the continuous-polling FSM driver path.
+- [x] `forge-app` module skeleton — `ProcessLock` per §13
+  (`FileChannel.tryLock` on `paths.lockFile` + sibling
+  `paths.lockMetadataFile`), per-instance reference counting so
+  nested same-JVM acquires share the OS lock, `LockAcquireResult`
+  = `Acquired | Stale(meta) | Held(otherMeta)` per BM4 / BM5,
+  `forceRelease` with `LiveHolderRefused` against an in-process
+  holder.
+- [x] `SessionMonitor` per §12 / §7.9 — watches the connector's
+  `Stream[IO, AgentEvent]`, tracks per-session elapsed time +
+  accumulated `BigDecimal` cost, invokes `session.kill()` on settle
+  timeout or per-turn cost breach (§12 check 3); feature/piece
+  budget breaches emit `MonitorOutcome.BudgetBreached` without
+  killing (§12 check 2, end-of-turn flush). Kill-failure resilience
+  via `killError: Option[String]` on `SettleTimeout` /
+  `TurnBudgetBreached`. Scope is the four driver phases
+  (`Spec`, `DesignRevision`, `Implement`, `Fixup`); reviewer/refine
+  phases deferred to Slice 4A per **S3-5** / S2-8. Trait abstractions
+  on `GhClient` / `GitClient` filed as **S3-3** (testability seam).
+- [x] Fake-`gh` unit coverage — `PrSnapshotDecoderSuite` against 11
+  fixture JSON files under `gh-pr-view/` plus inline negative cases,
+  `CommentsSuite` (round-2 cursor mechanics), `BranchManagerPreflightSuite`,
+  `BranchManagerBaseFreshnessSuite`, `BranchProtectionCacheSuite`,
+  `PRWatcherRateLimitSuite` / `…BaselineSuite` /
+  `…MergedDetectionSuite`, `FileProcessLockSuite`, and
+  `SessionMonitorSettleSuite` / `…TurnCostSuite` / `…FeatureCostSuite`
+  / `…PieceCostSuite` / `…PhaseCoverageSuite` /
+  `…ReviewRound{1,2}Suite`. `forge-git` 163 tests, `forge-app` 46
+  tests across the new sources.
+- [x] Sacrificial-repo integration path —
+  `BranchManagerIntegrationSuite` + `ProcessLockMultiJvmSuite` in
+  `forge-it`, opt-in via `FORGE_IT_GH_REPO` / `FORGE_IT_RUN_PROCLOCK`
+  per the default-on `<60s` budget; drives clone → bootstrap-main →
+  syncBase → createPieceBranch → push → createPr → pollOnce(Open) →
+  prMerge → pollOnce(Merged) against real `gh` + `git`. IT surfaced
+  the `reviewDecision: ""` decoder quirk now pinned as **S3-8**.
 
-- **`forge-git`** — `BranchManager` (branch creation returning
-  `(branchName, baseSha)`, push, PR creation, preflight, snapshot
-  tags); `PRWatcher` (30s poller, `PrSnapshot` ADT, branch-protection
-  cache scoped by `(featureId, baseBranch, cacheEpoch)`).
-- **`forge-app`** — `ProcessLock` (`FileChannel.tryLock` on
-  `.forge/state/.lock` + sibling `.lock.json` metadata per §13);
-  `SessionMonitor` (watches the events stream, tracks elapsed time,
-  invokes `session.kill()` on settle timeout or per-turn cost
-  breach). `main` / wiring / CLI stays out of this slice — that
-  lands in Slice 4.
-
-Both `BranchManager` and `PRWatcher` are `gh`-JSON-decoding,
-rate-limit-shaped, and branch-protection-shaped — failure modes that
-an E2E test exercises poorly. `design-2.3.md` plans
-**fake-`gh` unit coverage** for the decoder edge cases (merge-state
-semantics per §9 / CI6, stale comments/reviews, branch-protection
-cache invalidation, rate-limit back-off per RL1/RL2, mergeable
-states) **plus** one sacrificial-repo integration path (branch, push,
-PR, observe watcher → merge transitions). E2E-only would miss most
-of the decoder failure modes.
+✅ **Slice 3 closed 2026-05-27.** Detailed history of how it got
+there (PR-A through PR-H) lives in
+[`design-2.3.md`](design-2.3.md) §3 (status log) and §4
+(carry-forward to v1.3). Carry-forward bullets — **S3-1** through
+**S3-8** — have durable homes in
+[`design-rationale.md`](design-rationale.md) and §7.2 below.
 
 ### 2.4 Slice 4 — Reviewer assets + `forge-specs` (4A) → headless orchestrator + REPL (4B)
 
@@ -579,6 +636,25 @@ do not block Slice 4 code.
   must either drop the claim or widen the trait signature to carry
   `systemPromptPath`. Coupled to the Slice-4 orchestrator
   decision below.
+- **S3-6 — `gh pr create` has no `--json` flag.** v1.3
+  design-rationale BM8 needs the wording corrected to name the
+  stdout-URL parse contract (`gh pr create … | parse /pull/<n>/`);
+  optionally name a two-call fallback (`gh pr create … && gh pr
+  view <url> --json number`) for installations behind a
+  strict-no-stdout proxy. Slice 3 already ships the URL-regex
+  parser.
+- **S3-7 — `PollBaseline` cursors are
+  `BaselineCursor(at: Instant, seenIds: Set[String])`; empty-body
+  posts are dropped at decode time.** v1.3 design-rationale RL2 and
+  v1.2 §6 / §9 need the cursor shape, the same-second `seenIds`
+  tie-breaker (one-second timestamp resolution on `gh`), and the
+  empty-body filter on `unseenComments` documented. Slice 3 already
+  ships the round-2 contract.
+- **S3-8 — `reviewDecision: ""` (empty string) decodes as `None`.**
+  v1.3 §9 should note the `gh` null-flattening quirk on the
+  `reviewDecision` field alongside the field listing. Slice 3
+  already pins the contract via `open-fresh-no-reviews.json` +
+  unit test.
 
 #### 7.2.2 Slice 4 implementation / test gates (must land before §2.4 closes)
 
@@ -619,12 +695,44 @@ defaults, not code changes.
   temp+rename+fsync on every consistency check; fallback is a
   byte-identical compare-then-skip or a manifest+log fingerprint
   cache. Watch item only.
+- **S3-2 — `BranchProtectionCache` is process-local in-memory.**
+  Default behaviour: no on-disk persistence; epoch bumps on every
+  `forge resume` re-fetch from `gh api` (~150ms per resume). Watch
+  item only — if Slice 4 surfaces a need to persist the cache
+  across orchestrator restarts, S3-2 reopens as a Slice-4 watch
+  item.
+- **S3-4 — `PRWatcher.PollResult.RateLimited` is a non-failing
+  stream event with a three-consecutive-rate-limit cliff.** The
+  watcher emits `RateLimited(retryAfter)` once per back-off and
+  promotes the Nth consecutive into `Failed(GhError.RateLimited)`.
+  Watch item only — if Slice 4 wants a tighter contract (e.g.
+  first rate-limit becomes a hard `Failed`, or the threshold
+  becomes config-shaped), S3-4 is the anchor.
 
-#### 7.2.4 Doc-correction-only (no v1.3 spec change needed)
+#### 7.2.4 No v1.3 spec change needed (durable explanation in design-rationale)
 
 - **S2-4 — `PrSnapshot` ownership doc mismatch.** v1.2 §3.2 was
   already correct; the `AGENTS.md` module-layout table was the
   outlier and was corrected by PR-G G3. Closed.
+- **S3-1 — `forge-git` invokes `gh` / `git` via `os-lib` directly,
+  not `forge-agents.Subprocess`.** Module-layout call: one-shot CLI
+  invocations don't need the streaming wrapper Slice 1 introduced
+  for the long-lived Claude / Codex sessions. No v1.3 §3.2 / §3.3
+  edit needed; design-rationale S3-1 captures the reasoning so a
+  future contributor doesn't re-derive it.
+- **S3-3 — `GhClient` / `GitClient` trait abstractions.** v1.2 §9
+  lists `BranchManager` / `PRWatcher` methods but doesn't mandate
+  an inner abstraction; Slice 3 introduces traits + `Real…` impls +
+  `Fake…` test fixtures purely as a testability seam so the §9 /
+  §11.3 / §11.4 / §11.5 logic exercises don't need a real `gh`
+  binary. No v1.3 spec change needed.
+- **S3-5 — `SessionMonitor` scope excludes reviewer/refine phases.**
+  Mirrors **S2-8** on the SessionMonitor side: the four driver
+  phases are the only ones with a `Stream[IO, AgentEvent]` to
+  watch; reviewer/refine are one-shot adapter calls whose
+  wall-clock caps live in Slice 4A's reviewer-asset wrappers. No
+  separate v1.3 spec change — S2-8's resolution covers both
+  sides.
 
 ---
 

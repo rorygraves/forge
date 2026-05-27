@@ -11,13 +11,14 @@
 > land; the roadmap section gets ticked off only after a code review on
 > the section as a whole.
 >
-> **Status:** 🟢 open — 2026-05-26. Slice 2 closed earlier the same day
-> (see [`design-2.2.md`](design-2.2.md) for the audit trail). Slice 3
-> opens with PR-A as the entry point. v1.3 carry-forwards inherited from
-> Slices 1–2 (**C14**, **C15**, **S2-1** through **S2-10**) live in
+> **Status:** ✅ closed — 2026-05-27. PR-A → PR-H landed. This file is
+> now the audit trail; `roadmap.md` §2.3 carries the section's closing
+> bullets. v1.3 carry-forwards inherited from Slices 1–2 (**C14**,
+> **C15**, **S2-1** through **S2-10**) plus new Slice-3 deviations
+> (**S3-1** through **S3-8**) live in
 > [`design-rationale.md`](design-rationale.md) and
-> [`roadmap.md`](roadmap.md) §7.2; §4 below walks them again at section
-> closure.
+> [`roadmap.md`](roadmap.md) §7.2; §4 below is the reconciled
+> Slice-3 list.
 
 ## 0. Exit criterion for Slice 3
 
@@ -1165,9 +1166,9 @@ via env var.
   [test runtime cost is design](file:///Users/rory.graves/.claude/projects/-Users-rory-graves-workspace-home-forge/memory/feedback-test-runtime-cost.md)
   memory.
 
-### 1.8 PR H — Close-out: code review + carry-forward walk — ⏳ pending
+### 1.8 PR H — Close-out: code review + carry-forward walk — ✅ landed
 
-- [ ] **H1.** Code review on PR-A through PR-G as a section. The
+- [x] **H1.** Code review on PR-A through PR-G as a section. The
   section-level review checklist (mirroring PR-G in Slice 2):
     - Does every §9 / §13 / §15 / §11.3 step 5 rule have at least
       one named test under PR-A..G?
@@ -1187,7 +1188,7 @@ via env var.
       [feedback-design-review-coherence-pass](file:///Users/rory.graves/.claude/projects/-Users-rory-graves-workspace-home-forge/memory/feedback-design-review-coherence-pass.md):
       treat any review finding as a signal to re-walk the whole
       contract.
-- [ ] **H2.** `roadmap.md` §2.3 bullet list rewritten with per-item
+- [x] **H2.** `roadmap.md` §2.3 bullet list rewritten with per-item
   `[x]` markers covering `BranchManager`, `PRWatcher`, `ProcessLock`,
   `SessionMonitor`, fake-`gh` unit coverage (decoder edge cases per
   CI6 / RL1 / RL2 / branch-protection cache / mergeable states), and
@@ -1195,15 +1196,15 @@ via env var.
   🟢 "Slice 3 open" to ✅ "Slice 3 closed". Top status line bumped
   to draft v0.8 reflecting all three Phase-1 component slices
   closed.
-- [ ] **H3.** `AGENTS.md` "Current state" gets a Slice 3 paragraph
+- [x] **H3.** `AGENTS.md` "Current state" gets a Slice 3 paragraph
   (mirroring the Slice 1 / Slice 2 paragraphs in length and detail);
   Slice 4 marked "next". "Active design-`<section>`.md files" list
   returns to *(none currently open)* with audit-trail pointers to
   Slices 1, 2, and 3.
-- [ ] **H4.** `CLAUDE.md` TL;DR "Active implementation plan" →
+- [x] **H4.** `CLAUDE.md` TL;DR "Active implementation plan" →
   *(none currently open)* with audit-trail pointers; "Current state"
   rewritten covering Slices 1, 2, and 3.
-- [ ] **H5.** §4 carry-forward walked. Inherited from Slices 1–2
+- [x] **H5.** §4 carry-forward walked. Inherited from Slices 1–2
   (**C14**, **C15**, **S2-1** through **S2-10**) — each already filed
   in `design-rationale.md` and surfaced in `roadmap.md` §7.2; no
   Slice-3 code resolution. New Slice-3 carry-forwards (each filed in
@@ -1223,7 +1224,7 @@ via env var.
     - **S3-5** (SessionMonitor scope excludes reviewer/refine
       phases — alignment with **S2-8**) — filed in PR-F.
   `roadmap.md` §7.2 mirrors every S3-* entry with a Slice-4 pointer.
-- [ ] **H6.** This file flipped from "active" to "audit trail" (status
+- [x] **H6.** This file flipped from "active" to "audit trail" (status
   header at the top of §0 reflects ✅ closed). `design-2.4.md`
   opens when Slice 4 starts (and inherits §4 below as its starting
   carry-forward list).
@@ -1573,6 +1574,32 @@ after PR-H lands.
   env var). `forge-core` 358 / `forge-agents` 181 / `forge-app` 46
   unchanged; `scalafmtCheckAll` clean. PR-H (close-out) is the next
   entry point.
+- 2026-05-27 — PR-H landed; Slice 3 closed. H1 section-level review
+  walked the §9 / §13 / §15 / §11.3-step-5 spec rules, the decoder
+  edge cases (CI6, RL1, RL2, branch-protection cache, mergeable
+  states), the S2-5 / S2-8 docstring anchors, and the cross-PR
+  coherence surface (decoder → BranchManager overlay → PRWatcher,
+  `BaseFreshness.Updated(newBaseSha)` propagation, `MonitorOutcome
+  .killError` consumer alignment, `PollResult.Snapshot` baseline-
+  Ref advancement); returned "no findings". H2 rewrote
+  `roadmap.md` §2.3 as a closed `[x]` bullet list, bumped the
+  status line to draft v0.8 covering Slices 1/2/3 closed, and
+  added S3-1..S3-8 to §7.2's three remaining buckets (S3-6/7/8 in
+  §7.2.1 spec-text edits, S3-2/S3-4 in §7.2.3 conditional watch
+  items, S3-1/S3-3/S3-5 in §7.2.4 no-spec-change). H3 added the
+  Slice-3 paragraph to `AGENTS.md` and returned the active
+  design-section list to *(none currently open)*. H4 mirrored the
+  same updates into `CLAUDE.md`'s TL;DR. H5 filed the missing
+  S3-3, S3-4, S3-5 entries in `design-rationale.md` (S3-1 / S3-6 /
+  S3-7 / S3-8 were already filed; S3-2 stays as a conditional
+  roadmap §7.2.3 watch item per the design plan). H6 flipped this
+  file's status header from 🟢 open to ✅ closed and reconciled
+  §4's expected-vs-actual list (the H1 review found no surprises;
+  expected and actual sets matched 1:1). Final test scope unchanged
+  from PR-G: `forge-core` 358, `forge-agents` 181, `forge-git` 163,
+  `forge-app` 46, `forge-it` 10 default-on + 5 opt-in. `design-2.4.md`
+  opens when Slice 4A starts; it inherits §4's reconciled
+  carry-forward list as its starting set.
 
 ## 4. Carry-forward to v1.3
 
@@ -1621,11 +1648,15 @@ ticks the section.
       driver phases per F4; reviewer/refine wall-clock caps live in
       Slice 4's reviewer-asset wrappers. F4's docstring names S2-8.
 
-### New in Slice 3 (provisional — settled at PR-H)
+### New in Slice 3 (reconciled at PR-H — final)
 
-The list below is the *expected* Slice-3 deviations. PR-H reconciles
-the actual set against this expectation (carry-forwards that didn't
-materialize get pruned; new ones surfaced by code review get added).
+PR-H's H1 coherence review returned "no findings", so the expected
+set below matched the actual set 1:1. **S3-1, S3-3, S3-4, S3-5,
+S3-6, S3-7, S3-8** are filed in
+[`design-rationale.md`](design-rationale.md) under "Slice 3 spec
+deviations"; **S3-2** lives only as a conditional watch item in
+[`roadmap.md`](roadmap.md) §7.2.3 (Slice 4 reopens it as a
+design-rationale entry only if it surfaces a cost cliff).
 
 - **S3-1 — Subprocess utility ownership: `forge-git` uses `os-lib`
   `os.proc.call`, not the `forge-agents.Subprocess` streaming class**
@@ -1640,12 +1671,14 @@ materialize get pruned; new ones surfaced by code review get added).
   C5). v1.2 §8.1 says the cache is "scoped by `(featureId,
   baseBranch, cacheEpoch)`" but doesn't say where it lives. Slice 3
   keeps it in memory; the epoch on `Feature` (Slice 2 PR-B) is the
-  invalidation key. If Slice 4 surfaces a need to persist the cache
-  across orchestrator restarts (e.g., to avoid a `gh api` round-trip
-  on every `forge run` warm-up), S3-2 reopens as a Slice-4 watch
-  item. **Default behaviour:** no persistence; epoch bumps on
-  every `forge resume` re-fetch from `gh api`. Cost: one HTTP round
-  per resume, ~150ms, well under the perceptible threshold.
+  invalidation key. Durable home: [`roadmap.md`](roadmap.md) §7.2.3
+  (conditional watch item). If Slice 4 surfaces a need to persist
+  the cache across orchestrator restarts (e.g., to avoid a `gh api`
+  round-trip on every `forge run` warm-up), S3-2 reopens as a full
+  design-rationale entry. **Default behaviour:** no persistence;
+  epoch bumps on every `forge resume` re-fetch from `gh api`. Cost:
+  one HTTP round per resume, ~150ms, well under the perceptible
+  threshold.
 - **S3-3 — `GhClient` / `GitClient` trait abstractions** (PR-A A2 /
   A3). v1.2 §9 lists `BranchManager` and `PRWatcher` methods but
   doesn't mandate an inner abstraction. Slice 3 introduces traits +
