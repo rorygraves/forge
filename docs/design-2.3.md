@@ -35,17 +35,20 @@ this slice is done when:
    - `PrSnapshotDecoder.decode(json, baseline, botLogin):
      Either[DecodeError, DecodedSnapshot]` — provider-neutral
      decode of `gh pr view --json …` output into a
-     `DecodedSnapshot(snapshot: PrSnapshot, headSha: Sha)`. The
-     `PrSnapshot` half lands in `forge-core` per Slice-2 **S2-4**
-     (see
+     `DecodedSnapshot(snapshot: PrSnapshot, headSha: Sha,
+     nextBaseline: PollBaseline)`. The `PrSnapshot` half lands in
+     `forge-core` per Slice-2 **S2-4** (see
      `modules/forge-core/src/main/scala/io/forge/core/pr/PrSnapshot.scala`);
      `headSha` lives outside the snapshot because v1.2 §6
      `PrSnapshot` doesn't carry it and `BranchManager.baseFreshness`
-     needs it parallel-fielded.
+     needs it parallel-fielded. `nextBaseline` is the
+     [[PollBaseline]] the orchestrator should persist after consuming
+     the snapshot (watermark + same-second `seenIds` per
+     design-rationale **S3-7** round 2).
      The decoder owns the **`mergeStateStatus` trap** per
      design-rationale CI6 (merge is detected from `state == "MERGED"`
      + non-null `mergedAt`, never from `mergeStateStatus`) and the
-     "new since baseline" filter per RL2.
+     "new since baseline" filter per RL2 / S3-7.
    - `BranchManager` per v1.2 §9 — `preflight`, `syncBase`,
      `createDesignBranch`, `createPieceBranch`, `baseFreshness`,
      `pushCurrentBranch` (with `forceWithLease`), `createPr`,
@@ -349,13 +352,16 @@ PR-B is the *decode-only* PR. Pure functions from `ujson.Value` →
 - [x] **B2.** `PrSnapshotDecoder.decode(json: ujson.Value, baseline:
   PollBaseline, botLogin: String): Either[DecodeError,
   DecodedSnapshot]` — the canonical decoder entrypoint.
-  `DecodedSnapshot(snapshot: PrSnapshot, headSha: Sha)` is a small
-  PR-B-introduced wrapper that pairs the `forge-core` `PrSnapshot`
-  with the head-sha read from `commits[-1].oid`. `DecodedSnapshot`
-  lives in `io.forge.git.watcher` (not `forge-core`) because v1.2
-  §6 `PrSnapshot` deliberately doesn't carry `headSha`; PR-B respects
-  that and surfaces it as a sibling field. `DecodeError` is a
-  sealed trait local to `io.forge.git.watcher` with cases:
+  `DecodedSnapshot(snapshot: PrSnapshot, headSha: Sha, nextBaseline:
+  PollBaseline)` is a small PR-B-introduced wrapper that pairs the
+  `forge-core` `PrSnapshot` with (a) the head-sha read from
+  `commits[-1].oid` and (b) the post-poll [[PollBaseline]] the
+  orchestrator should persist for the next call (round-2 addition
+  per S3-7). `DecodedSnapshot` lives in `io.forge.git.watcher` (not
+  `forge-core`) because v1.2 §6 `PrSnapshot` deliberately doesn't
+  carry `headSha`; PR-B respects that and surfaces it as a sibling
+  field. `DecodeError` is a sealed trait local to
+  `io.forge.git.watcher` with cases:
     - `MissingField(path: String)` — required field absent.
     - `UnknownEnumValue(field: String, observed: String,
       knownValues: Vector[String])` — `state`, `mergeable`,
@@ -365,8 +371,10 @@ PR-B is the *decode-only* PR. Pure functions from `ujson.Value` →
     - `MalformedShape(path: String, expected: String, observed:
       String)` — JSON shape mismatch (e.g. array where object
       expected).
-  Decoded output is a `forge-core` `PrSnapshot`. The decoder does
-  **not** mutate baseline state — that's the watcher's job (PR-D).
+  The decoder is pure — it consumes the prior baseline, computes the
+  next one via [[Comments.advance]] over the full observed `(at, id)`
+  set, and surfaces it on `nextBaseline`. Persisting the baseline
+  across polls is the orchestrator's job (PR-D / Slice 4).
 - [x] **B3.** Field-by-field decode rules (each rule paired with a
   test under B5):
     - `state` → `PrState.fromString` (already in
@@ -393,9 +401,11 @@ PR-B is the *decode-only* PR. Pure functions from `ujson.Value` →
       PR-B emits everything under `observed`, leaves `required` as
       `Vector.empty`. PR-C `BranchManager.snapshotWithRequiredOverlay`
       promotes the named subset.
-    - `comments` → filter to entries with `createdAt` strictly after
-      `baseline.lastSeenCommentAt` via [[Comments.unseen]]; convert
-      to `PrComment` (id = the wire `id` string, the GraphQL global
+    - `comments` → filter to entries that pass the
+      `baseline.commentCursor` test via [[Comments.unseen]]
+      (`at.isAfter(cursor.at) || (at == cursor.at &&
+      !cursor.seenIds.contains(id))` — see S3-7 round 2); convert to
+      `PrComment` (id = the wire `id` string, the GraphQL global
       node id). Skip Forge's own comments (`author.login ==
       config.github.botLogin`, default `"forge-bot"` — Slice 4 wires
       the actual login; PR-B accepts the login as a decoder arg).
@@ -404,12 +414,20 @@ PR-B is the *decode-only* PR. Pure functions from `ujson.Value` →
       and a literally-empty comment would spuriously trip it.
     - `reviews` → folded into the same `unseenComments` vector for
       FSM purposes; baseline cursor is `submittedAt` vs
-      `baseline.lastSeenReviewAt`. Each review's `body` lands as a
-      `PrComment` with `path = None` / `line = None`. **Empty-body
-      review submissions are dropped** (review round 1) so plain
-      approvals don't surface as override signal; blocking review
-      state still flows through `reviewDecision ==
-      CHANGES_REQUESTED`.
+      `baseline.reviewCursor` with the same `BaselineCursor`
+      mechanic. Each review's `body` lands as a `PrComment` with
+      `path = None` / `line = None`. **Empty-body review
+      submissions are dropped** (review round 1) so plain approvals
+      don't surface as override signal; blocking review state still
+      flows through `reviewDecision == CHANGES_REQUESTED`.
+    - `nextBaseline` is computed by feeding the **full** decoded
+      `(at, id)` set for each collection (including bot-author and
+      empty-body entries — they're "observed" from the cursor's
+      perspective even though they're filtered out of
+      `unseenComments`) into [[Comments.advance]]. The orchestrator
+      persists the result; the next poll then correctly skips
+      everything Forge has seen, including same-second siblings of
+      the prior watermark.
     - `commits[-1].oid` → populates `DecodedSnapshot.headSha`
       (alongside the `PrSnapshot` payload), so
       `BranchManager.baseFreshness` reads it without mutating the
@@ -645,32 +663,49 @@ The §9 / §15 / §11.3 step 5 logic. Pure when given fake `GhClient` /
   factory methods:
     - `watch(pr: PrNumber, baseline: Ref[IO, PollBaseline]):
       Stream[IO, PollResult]` — continuous polling. The `Ref` exists
-      because the baseline mutates as new comments are seen; the
-      orchestrator (Slice 4) owns the `Ref` and persists baseline
-      checkpoints to manifest/log on its own cadence.
-    - `pollOnce(pr: PrNumber, baseline: PollBaseline):
-      IO[(PollBaseline, PollResult)]` — single poll, returned new
-      baseline + outcome. Useful for the orchestrator's
-      `forge resume` startup path where it wants one snapshot before
-      entering the FSM loop.
+      because the baseline mutates as new comments / reviews are
+      seen; the orchestrator (Slice 4) owns the `Ref` and persists
+      baseline checkpoints to manifest/log on its own cadence.
+    - `pollOnce(pr: PrNumber, baseline: PollBaseline): IO[PollResult]`
+      — single poll, returning the typed outcome. The "advance the
+      baseline" channel is **not** a tuple parameter: per S3-7 round
+      2, `PollResult.Snapshot(decoded)` already carries
+      `decoded.nextBaseline`, so callers update their `Ref` via
+      `case PollResult.Snapshot(d) => baseline.set(d.nextBaseline)`
+      and leave the prior baseline untouched for `RateLimited` /
+      `Failed`. Useful for the orchestrator's `forge resume` startup
+      path where it wants one snapshot before entering the FSM loop.
   `PollResult` is a sealed trait:
     - `Snapshot(decoded: DecodedSnapshot)` — clean poll. Reuses the
-      PR-B `DecodedSnapshot(snapshot, headSha)` shape verbatim so
-      there's one canonical wire-decoded shape from gh JSON onward.
+      PR-B `DecodedSnapshot(snapshot, headSha, nextBaseline)` shape
+      verbatim so there's one canonical wire-decoded shape from gh
+      JSON onward; the embedded `nextBaseline` is the cursor +
+      same-second `seenIds` the orchestrator persists next.
     - `RateLimited(retryAfter: Option[FiniteDuration])` — RL1
       back-off. The stream sleeps `retryAfter` (or
       `config.github.rateLimitBackoffMs` default 60000) and continues.
+      Baseline is unchanged from input — no decoded snapshot, nothing
+      to advance.
     - `Failed(error: GhError)` — non-rate-limit `GhError`. The stream
       surfaces and continues; the orchestrator decides whether to
-      keep watching or escalate to `HarnessError`.
+      keep watching or escalate to `HarnessError`. Baseline unchanged
+      for the same reason.
 - [ ] **D2.** `RealPRWatcher(gh: GhClient, decoder: PrSnapshotDecoder,
-  config: PRWatcherConfig, clock: Clock[IO])`. The polling loop is
-  `Stream.repeatEval(pollOnce(pr, baseline.get).flatMap { case (new,
-  result) => baseline.set(new).as(result) }).metered(pollInterval)`
+  config: PRWatcherConfig, clock: Clock[IO])`. The polling loop reads
+  the current baseline, calls `pollOnce`, and writes back
+  `decoded.nextBaseline` on the `Snapshot` variant only:
+  ```scala
+  Stream.repeatEval {
+    baseline.get.flatMap(b => pollOnce(pr, b)).flatTap {
+      case PollResult.Snapshot(d) => baseline.set(d.nextBaseline)
+      case _                      => IO.unit
+    }
+  }.metered(pollInterval)
+  ```
   with `metered` adapting to `result match { case RateLimited(d) =>
-  d.getOrElse(default); case _ => pollInterval }`. The `metered`
-  hook above is sketch; PR-D settles the exact `Stream` shape from
-  the call-site test fixtures.
+  d.getOrElse(default); case _ => pollInterval }`. Both fragments are
+  sketch; PR-D settles the exact `Stream` shape from the call-site
+  test fixtures.
 - [ ] **D3.** Rate-limit recovery semantics (RL1 / §18
   `rateLimitBackoffMs`):
     - `RateLimited(retryAfter: Some(d))` → sleep `d`, then continue.
@@ -1035,8 +1070,11 @@ via env var.
     5. `BranchManager.createPr(title, body, base = "main")` → assert
        `Right(prNumber)`.
     6. Run `PRWatcher.pollOnce(prNumber, PollBaseline.empty)` →
-       assert `Snapshot(DecodedSnapshot(snap, _))` with
-       `snap.state == Open`.
+       assert `Snapshot(DecodedSnapshot(snap, _, _))` with
+       `snap.state == Open`. The third pattern-bind slot is
+       `nextBaseline` (S3-7 round 2); the IT doesn't need to
+       assert against it directly but should thread it back into
+       step 8's `pollOnce` call.
     7. **Merge via the test using `gh.prMerge` (PR-A's `GhClient`
        grows a `prMerge` method here — minimum surface for the IT
        to drive its own merge).** Spec note: §11 keeps "piece PRs
@@ -1044,8 +1082,9 @@ via env var.
        BranchManager's Slice-3 trait; it's an IT-only helper on
        `RealGhClient`. PR-G's scaladoc + test name make the test-only
        use explicit.
-    8. `PRWatcher.pollOnce` again → assert
-       `Snapshot(DecodedSnapshot(snap, _))` with
+    8. `PRWatcher.pollOnce(prNumber, nextBaseline)` again (passing
+       the baseline from step 6's decoded snapshot) → assert
+       `Snapshot(DecodedSnapshot(snap, _, _))` with
        `snap.state == Merged`, non-null `mergedAt` and `mergeCommit`.
     9. Cleanup: `BranchManager.deleteRemoteTag` is not in scope here;
        the branch lingers (the sacrificial repo accepts that — the
