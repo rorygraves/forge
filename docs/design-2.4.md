@@ -808,127 +808,288 @@ The heart of Slice 4B. Wires Slices 1–3 together through
 `Fsm.transition`.
 
 - [ ] **J1.** `io.forge.app.orchestrator.Orchestrator` —
-  the headless feature loop. Pseudocode:
+  the headless feature loop. Pseudocode (the three
+  sub-phases from J2 are explicit; `currentDriverSession`
+  is the `Ref[IO, Option[ActiveSession]]` defined in J2):
   ```
-  loop:
-    feature ← rebuildState.run(featureId, paths, specStore, log, cache)
+  start:
+    RebuildResult(feature, inFlightSessions) ←
+      rebuildState.run(featureId, paths, specStore, log, cache)
+    currentDriverSession ← Ref.of(None)
+    for each s in inFlightSessions:
+      // synthetic HarnessError per phase × FSM state; routes to NHI before any source race
+      feature ← applyEvent(feature, syntheticHarnessError(s, feature.state))
     if terminal(feature.state):
       return feature
-    sources ← collectSources(feature)   // SessionMonitor / PRWatcher / ReviewerCall / user
-    event   ← race(sources)
+
+  loop:
+    // sub-phase I: state-entry side effects (idempotent — only runs
+    //              once per state since last transition)
+    if entered(feature.state):
+      feature ← runEntryHook(feature, currentDriverSession)
+      // entry hooks: driver spawn (Implement / Fixup / DesignRevision entry);
+      // reviewer-call entry-spawn (DesignReviewing-no-session / PieceAwaitingReview / Refining);
+      // PR-baseline capture (PieceAwaitingCi / PieceAwaitingReview / PieceAwaitingMerge / DesignAwaitingMerge);
+      // feedback-bundle write (DesignPrFeedback)
+    if terminal(feature.state):
+      return feature
+
+    // sub-phase II: race the source set named in J2's selection table
+    activeSession ← currentDriverSession.get
+    sources ← eventSources(feature.state, activeSession)
+    (event, source) ← race(sources)
+
+    // FSM transition
     (feature', actions) ← Fsm.transition(feature, event, config)
-    persistAtomically(feature.manifest, feature'.manifest)  // §11.4 step 1 / §11.5 step 1
+    persistAtomically(feature.manifest, feature'.manifest)
     log.appendAll(actions)
     cache.save(feature')
-    feature := feature'
+
+    // sub-phase III: post-settle synthesis (only if FSM no-op AND source was SessionMonitor)
+    if feature'.state == feature.state && source == SessionMonitor:
+      currentDriverSession.set(None)   // source-driven clear (J2 lifecycle rule)
+      synthEvent ← runPostSettleSideEffects(feature', event)
+      // synthesized event feeds back into Fsm.transition WITHIN the same iteration
+      (feature', actions') ← Fsm.transition(feature', synthEvent, config)
+      persistAtomically(feature'.manifest, /* still */ feature'.manifest)
+      log.appendAll(actions')
+      cache.save(feature')
+    else if source == SessionMonitor:
+      // state changed; session cleared by source-driven rule
+      currentDriverSession.set(None)
+
+    feature ← feature'
+    goto loop
   ```
   The atomic-manifest-persist before the action log + cache
   is the **S2-5** writer-side invariant. The §11.5 step 1
   crash window (manifest written, log not yet) is recovered
   by `RebuildState.reconcile` (already in `forge-core`).
-- [ ] **J2.** Event sources — `Orchestrator` selects sources
-  per iteration as a deterministic function of `(state,
-  currentDriverSession.isDefined)`, **not** by FSM state
-  alone. The orchestrator carries one piece of local state
-  the FSM doesn't model:
+  The `inFlightSessions` projection is a Slice-4 widening
+  of `RebuildState.run`'s return shape (carry-forward
+  **S4-4**); see J2 for the per-phase × FSM-state
+  synthetic-`HarnessError` mapping.
+- [ ] **J2.** Event sources, session lifecycle, post-settle
+  synthesis, and restart recovery. `Orchestrator`'s loop has
+  **three internal sub-phases** that interleave the pure
+  `Fsm.transition` reactive core with the §11 side-effect
+  contract:
+
+  - **(I) State-entry side effects.** On entering a new FSM
+    state, the orchestrator runs entry-only side effects
+    (spawn driver session if the state requires one;
+    state-entry-spawn a `ReviewerCall` for `DesignReviewing`
+    no-session / `Refining` / `PieceAwaitingReview`; capture
+    initial PR baseline; write the feedback bundle for
+    `DesignPrFeedback`) before racing any sources.
+  - **(II) Source race.** While the FSM state is stable and
+    no post-settle synthesis is pending, the orchestrator
+    races a fixed source set for the current
+    `(FsmState, activeSession)` pair. Whichever source's
+    event arrives first is fed into `Fsm.transition`.
+  - **(III) Post-settle synthesis.** When a `SessionMonitor`
+    outcome arrives and the resulting `Fsm.transition` is a
+    no-op (because §11 requires orchestrator side effects
+    between settle and the next state — most prominently
+    `PieceImplementing`'s commit + push + createPr →
+    `PrOpened` sequence; see "Why the Implement case is
+    structured this way" below), the orchestrator runs the
+    side effects synchronously and synthesizes the next
+    `FsmEvent` for `Fsm.transition` to consume **inside the
+    same loop iteration**. No external sources are raced
+    during this window.
+
+  **Active-session shape.** The orchestrator carries one
+  piece of local state the FSM doesn't model:
   ```scala
-  // io.forge.app.orchestrator.OrchestratorLocal
-  currentDriverSession: Ref[IO, Option[StreamingSession]]
+  // io.forge.app.orchestrator
+  final case class ActiveSession(phase: SessionPhase,
+                                 session: AgentSession)
+
+  currentDriverSession: Ref[IO, Option[ActiveSession]]
   ```
-  Set immediately after the orchestrator spawns a session
-  via `runStreamingSpec` / `resumeStreamingSpec` /
-  `runHeadlessImplementation` / `runFixup`; cleared when
-  the FSM consumes any session-ending event for the
-  driver phases (`Settled / SettleTimeout /
-  TurnBudgetBreached / BudgetBreached / HarnessError`
-  where the carried `SessionPhase` is one of
-  `Spec | DesignRevision | Implement | Fixup`).
+  Typed `Option[ActiveSession]`, not
+  `Option[StreamingSession]`. `runHeadlessImplementation` and
+  `runFixup` return the headless `AgentSession` parent trait,
+  not `StreamingSession` (see
+  `modules/forge-agents/src/main/scala/io/forge/agents/Connector.scala`
+  and `AgentSession.scala` — only Spec / DesignRevision
+  return `StreamingSession`). The `phase` field carries
+  enough type information to safely downcast where the
+  streaming surface is needed: `forge spec` REPL (PR-M M2)
+  pattern-matches
+  `case Some(ActiveSession(SessionPhase.Spec, s:
+  StreamingSession)) => …` and raises
+  `IllegalStateException` on a non-streaming session for a
+  streaming phase (defensive guard against a future
+  refactor changing Connector return types). `SessionMonitor`
+  consumes only the `AgentSession` surface (`events` +
+  `kill()`), so the headless / streaming distinction is
+  invisible there.
 
   **Why orchestrator-local, not a `Feature` projection.**
   §11.2 step 12, §11.3 step 2, and the entry rules for
   `PieceImplementing` / `PieceFixingUp` all spawn driver
   sessions inside a single FSM state (e.g.
   `DesignReviewing(round)` contains a reviewer sub-phase
-  AND a driver-revision sub-phase) — the FSM state alone
+  AND a driver-revision sub-phase). The FSM state alone
   doesn't disambiguate "are we currently running the
   reviewer one-shot, or watching a driver settle?"
   Modelling that as orchestrator-local state instead of an
   extra FSM field keeps the FSM ADT minimal (§22 "no
-  half-states") and matches §11.2's prose-driven
-  sub-phase structure. The `<actor>.spawn` /
-  `<actor>.resume` action-log entries are the durable
-  record of session presence; the orchestrator can rebuild
-  `currentDriverSession`'s logical bit (`isDefined`) from
-  the log on restart by checking whether the most recent
-  session-related action is a spawn/resume with no
-  subsequent `Settled` / `SettleTimeout` / etc. for the
-  same phase. Documented inline in `Orchestrator`'s
-  scaladoc; PR-J's `OrchestratorRestartSuite` pins the
-  recovery rule.
+  half-states") and matches §11.2's prose-driven sub-phase
+  structure.
 
-  **Source-selection rule** (the orchestrator's
-  `eventSources(state, hasDriverSession):
-  Vector[EventSource]` — rendered as a code block so the
-  alignment survives nested-list rendering):
-
+  **`currentDriverSession` lifecycle is source-driven, not
+  event-payload-driven** (this is the corrected rule —
+  `FsmEvent.HarnessError(reason: String)` carries no
+  `SessionPhase`, so payload-keyed clearing is impossible).
+  The orchestrator's race-and-dispatch step records which
+  source produced the event in a loop-local tag:
   ```
-  state                                hasDriver  sources this iteration
-  -----                                ---------  ----------------------
-  Drafting                             —          (none — spawn runStreamingSpec, re-loop)
-  InteractiveSpec                      true       SessionMonitor(Spec) + REPL (forge spec only)
-  DesignReviewing(round)               false      ReviewerCall.designReview (one-shot)
-  DesignReviewing(round)               true       SessionMonitor(DesignRevision) — revision settle after request_changes
-  DesignNeedsHumanInput(round, _)      —          user Q&A (forge run: --answer-file; forge spec: REPL inline)
-  DesignAwaitingMerge(prNumber)        false      PRWatcher(prNumber)
-  DesignPrFeedback(prNumber, round)    true       SessionMonitor(DesignRevision) — orchestrator spawns resumeStreamingSpec on entry
-  DesignReady                          —          (none — advance to first PieceImplementing(p), re-loop)
-  PieceImplementing(p)                 true       SessionMonitor(Implement)
-  PieceAwaitingCi(p, prNumber)         false      PRWatcher(prNumber)
-  PieceAwaitingReview(p, prNumber)     false      PRWatcher(prNumber) + ReviewerCall.prReview (race)
-  PieceCiFailed / PieceReviewFailed    —          (none — spawn runFixup, transition to PieceFixingUp)
-  PieceFixingUp(p, prNumber, attempt)  true       SessionMonitor(Fixup)
-  PieceAwaitingMerge(p, prNumber)      false      PRWatcher(prNumber)
-  Refining(p, prNumber, _)             false      ReviewerCall.refine (one-shot)
-  PlanningUpdate(_, _)                 —          user Q&A (apply/defer/reopen/ignore per §14.3)
-  NeedsHumanIntervention / FeatureDone —          (none — loop exits to caller)
-  Abandoned                            —          (none — loop exits to caller)
+  source = SessionMonitor    → MonitorOutcome → FsmEvent;
+                                ALWAYS clear currentDriverSession
+                                (the underlying subprocess is gone
+                                whether outcome is Settled, SettleTimeout,
+                                TurnBudgetBreached, BudgetBreached, or
+                                a kill-while-running HarnessError)
+  source = PRWatcher         → never touches currentDriverSession
+                                (no session is live when PRWatcher is the
+                                selected source per the table below)
+  source = ReviewerCall      → never touches currentDriverSession
+                                (reviewer wrappers don't share a session
+                                with the driver phases)
+  source = user (REPL/Q&A)   → never touches currentDriverSession on its
+                                own; downstream FSM transitions may add a
+                                fresh session via the state-entry hook
+  source = synthetic (post-settle, in-flight-restart)
+                              → clears or sets per the synthesis recipe
+                                (see post-settle table below); never reads
+                                from a payload phase field
   ```
 
-  The `PieceAwaitingReview` race is well-defined: PRWatcher
-  and ReviewerCall produce disjoint `FsmEvent` types
-  (`PrSnapshotUpdated` / `CodeReviewVerdict`), so whichever
-  arrives first transitions the FSM and the other source's
-  in-flight fiber is cancelled on state change. The
-  baseline cursor only advances on `Snapshot` arrival (§S3-7
-  round-2 contract).
+  **(II) Source-selection table.** Consulted only while no
+  post-settle synthesis is pending. `activeSession` is
+  pattern-matched on the `Option[ActiveSession]`; when None
+  the phase column shows `—`, when Some the phase is the
+  exact `SessionPhase` and the session type is enforced at
+  state-entry:
 
-  **Illegal combinations actively guarded.** The function
-  asserts `hasDriverSession` is **false** for states where
-  the spec says no driver session should be live
-  (`DesignAwaitingMerge`, `PieceAwaitingCi`,
-  `PieceAwaitingReview`, `PieceAwaitingMerge`, `Refining`,
-  `DesignReviewing` reviewer-sub-phase) — a true here would
-  mean session lifecycle leaked across phases (FSM bug
-  or orchestrator bug). Likewise `hasDriverSession` is
-  **true** for the four pure-driver states (`InteractiveSpec`,
-  `DesignPrFeedback`, `PieceImplementing`, `PieceFixingUp`)
-  by construction — orchestrator spawns the session on
-  state entry before re-entering the source-selection
-  loop. Spec backing: §11.2 step 12 (driver-active in
-  `DesignReviewing` only after `request_changes`); §11.3
-  step 2 (driver-active in `DesignPrFeedback` for the
-  whole state); §11.4 step 2 / §11.5 step 1 / §11.6
-  (driver session lifetime bracketed by `PieceImplementing`
-  / `PieceFixingUp` entry-and-settle).
+  ```
+  state                                activeSession                        sources this iteration
+  -----                                -------------                        ----------------------
+  Drafting                             None                                 (none — entry hook fires UserCommand.New, re-loop)
+  InteractiveSpec                      Some(Spec, _: StreamingSession)      SessionMonitor + REPL (forge spec only)
+  DesignReviewing(round)               None                                 ReviewerCall.designReview (entry-spawned)
+  DesignReviewing(round)               Some(DesignRevision, _: Streaming)   SessionMonitor (revision settle after request_changes)
+  DesignNeedsHumanInput(round, _)      None                                 user Q&A (forge run: --answer-file; forge spec: REPL inline)
+  DesignAwaitingMerge(prNumber)        None                                 PRWatcher(prNumber)
+  DesignPrFeedback(prNumber, round)    Some(DesignRevision, _: Streaming)   SessionMonitor (entry-spawned resumeStreamingSpec)
+  DesignReady                          None                                 (none — entry hook advances to first PieceImplementing or FeatureDone)
+  PieceImplementing(p)                 Some(Implement, _: AgentSession)     SessionMonitor
+  PieceAwaitingCi(p, prNumber)         None                                 PRWatcher(prNumber)
+  PieceAwaitingReview(p, prNumber)     None                                 PRWatcher(prNumber) + ReviewerCall.prReview (entry-spawned race)
+  PieceCiFailed / PieceReviewFailed    None                                 (none — entry hook spawns runFixup, re-loop)
+  PieceFixingUp(p, prNumber, attempt)  Some(Fixup, _: AgentSession)         SessionMonitor
+  PieceAwaitingMerge(p, prNumber)      None                                 PRWatcher(prNumber)
+  Refining(p, prNumber, _)             None                                 ReviewerCall.refine (entry-spawned)
+  PlanningUpdate(_, _)                 None                                 user Q&A (apply/defer/reopen/ignore per §14.3)
+  NeedsHumanIntervention/FeatureDone/Abandoned  None                        (none — loop exits to caller)
+  ```
+
+  Notes on specific rows:
+  - **`PieceAwaitingReview` race.** PRWatcher and
+    ReviewerCall produce disjoint `FsmEvent` types
+    (`PrSnapshotUpdated` / `CodeReviewVerdict`); whichever
+    transitions the FSM first wins, and the other source's
+    in-flight fiber is cancelled on state change. The
+    baseline cursor only advances on `Snapshot` arrival
+    (§S3-7 round-2 contract). The reviewer fiber is
+    state-entry-spawned, not race-spawned per iteration —
+    each entry to `PieceAwaitingReview` issues one
+    `ReviewerCall.prReview` call.
+  - **`InteractiveSpec` reachability.** Only `forge spec`
+    enters `InteractiveSpec`; `forge run` invoked on a
+    feature whose state is `InteractiveSpec` refuses at
+    handler-level (§15 / PR-M M3) and prints a hint to
+    run `forge spec` instead.
+
+  **(III) Post-settle synthesis recipes** (the missing
+  glue between `MonitorOutcome` and the FSM's
+  state-transition events for the four driver phases —
+  drawn directly from §11):
+
+  ```
+  state                  monitor outcome              orchestrator side effects                          synthesized FsmEvent
+  -----                  ---------------              -------------------------                          --------------------
+  InteractiveSpec        Settled(Spec, Clean)         §11.1 step 7 post-check: verify design.md /         Settled(Spec, Clean)
+                                                       manifest.json / pieces/*.md / decomposition.md     (FSM transitions to
+                                                       coherence; ≤2 corrective rounds on mismatch        DesignReviewing(1))
+  InteractiveSpec        Settled(Spec, AdapterError)  none                                                Settled(Spec, AdapterError) — pass through
+  DesignReviewing(_)     Settled(DesignRevision,      update design.md per §11.2 step 9-10                Settled(DesignRevision, Clean)
+   (post-revision)        Clean)                       (no PR exists at this point)                       (FSM loops to step 9 inside DesignReviewing)
+  DesignPrFeedback(_,_)  Settled(DesignRevision,      update design assets; snapshot tag; force-push-     Settled(DesignRevision, Clean)
+                          Clean)                       with-lease per §11.3 steps 3-5                     (FSM returns to DesignAwaitingMerge)
+  PieceImplementing(p)   Settled(Implement, Clean)    ChangeCollector classify (§10.1); on Allow:         PrOpened(p, prNumber)
+                                                       commit + push + createPr per §11.4 step 6;
+                                                       on Deny: emit HarnessError → NHI
+                                                       (ResolveLocalImplementationChanges)
+  PieceFixingUp(_,_,_)   Settled(Fixup, Clean)        ChangeCollector classify; on Allow: commit +        Settled(Fixup, Clean)
+                                                       push per §11.6; on Deny: emit HarnessError → NHI   (FSM transitions to PieceAwaitingCi)
+                                                       (RunAnotherFixup)
+  {any driver phase}     SettleTimeout                none — pass through                                 SettleTimeout(phase, _)
+  {any driver phase}     TurnBudgetBreached           none                                                TurnBudgetBreached(phase, _)
+  {any driver phase}     BudgetBreached               none                                                BudgetBreached(scope, _)
+  {any driver phase}     Settled(_, AdapterError)     none                                                Settled(phase, AdapterError(_))
+  ```
+
+  **Why the Implement case is structured this way.**
+  `Fsm.transition` deliberately leaves `Settled(Implement,
+  Clean)` in `PieceImplementing(p)` as a `_ => noop(feature)`
+  catch-all (see
+  `modules/forge-core/src/main/scala/io/forge/core/fsm/Fsm.scala:421`).
+  The state-transition trigger from `PieceImplementing(p)` →
+  `PieceAwaitingCi(p, prNumber)` is `PrOpened(piece,
+  prNumber)` (Fsm.scala:400), not the settle event itself.
+  This is the spec's atomicity guarantee: if Forge crashes
+  between `Settled(Implement, Clean)` and `PrOpened`, the
+  next `forge resume` reads the FSM state as still
+  `PieceImplementing(p)`, sees no live session in the action
+  log, infers "post-settle work was in flight", and replays
+  the post-settle synthesis (ChangeCollector + commit +
+  push + createPr — `createPr` is idempotent via
+  `gh pr list --head <branch>` check before re-creating).
+  Fixup uses the inverse approach (FSM transitions on
+  `Settled(Fixup, Clean)` directly; commit+push happens
+  *before* the orchestrator submits the `Settled` event to
+  the FSM) because the PR already exists and there's no
+  `createPr` step to crash through. Both are valid §11
+  encodings of "side effects bracket the FSM transition";
+  PR-J documents the asymmetry in `Orchestrator`'s scaladoc.
+
+  The synthesized event from sub-phase III feeds back into
+  `Fsm.transition` within the same loop iteration without
+  re-entering source-racing. If side effects raise (commit
+  fails, push rejected, createPr fails, ChangeCollector
+  Deny on Implement / Fixup), the orchestrator synthesizes
+  `HarnessError(reason)` with the failure context; the FSM
+  routes via `defaultResumeHintForState` (Fsm.scala:971) so
+  every failure mode lands in `NeedsHumanIntervention` with
+  a phase-appropriate hint. The state-vs-phase ambiguity
+  carried by `HarnessError(reason: String)` doesn't matter
+  here because the source-driven session-clear rule already
+  ran when `MonitorOutcome.Settled` arrived from
+  `SessionMonitor`.
 
   **Source descriptions:**
-  - `SessionMonitor(session, phase)` — produces
-    `FsmEvent.Settled(phase, outcome) /
-    SettleTimeout(phase, _) /
-    TurnBudgetBreached(phase, _) /
-    BudgetBreached(scope, _)` per Slice-3 `MonitorOutcome`
-    mapping; the orchestrator clears
-    `currentDriverSession` on consuming any of these.
+  - `SessionMonitor(session, phase)` — produces a
+    `MonitorOutcome` over the active `AgentSession.events`
+    stream. The orchestrator converts every `MonitorOutcome`
+    into the corresponding `FsmEvent` per the post-settle
+    recipe table above and clears `currentDriverSession`
+    in the source-driven lifecycle step. `MonitorOutcome`
+    arrival is the **only** trigger for session-clear; no
+    other source touches `currentDriverSession`.
   - `PRWatcher(prNumber)` — produces
     `DesignPrSnapshotUpdated(snapshot)` for the design PR,
     `PrSnapshotUpdated(piece, snapshot) /
@@ -944,64 +1105,152 @@ The heart of Slice 4B. Wires Slices 1–3 together through
     PR + every piece PR). Add a
     `ForgePaths.pollBaselineFile(featureId)` accessor in
     PR-J (one-line addition; matches the Slice-2
-    `stateFile` shape). **This is a non-trivial layout
-    decision** — flagged as carry-forward **S4-1** in §4 /
-    `design-rationale.md`. Alternative considered + rejected:
-    widen `Manifest.designPr` and `Piece` to carry the
-    baseline inline — rejected because the manifest is
-    the committed source of truth (§4) and `PollBaseline`
-    is local-only state that mutates on every poll;
-    committing it would generate noise on every gh
-    round-trip.
+    `stateFile` shape). Flagged as carry-forward **S4-1**
+    in §4 / `design-rationale.md`. Alternative considered
+    + rejected: widen `Manifest.designPr` and `Piece` to
+    carry the baseline inline — rejected because the
+    manifest is the committed source of truth (§4) and
+    `PollBaseline` is local-only state that mutates on
+    every poll; committing it would generate noise on
+    every gh round-trip.
   - `ReviewerCall.designReview / prReview / refine` —
     one-shot blocking IO. Maps orchestrator-side:
     `ReviewerOutcome.Settled(review)` →
     `FsmEvent.DesignReviewReceived / CodeReviewVerdict /
     RefineOutcome`; `Timeout` →
     `FsmEvent.SettleTimeout(SessionPhase.{DesignReview,
-    CodeReview, Refine}, _)` per **S2-8** option (a)
-    (PR-L) or `FsmEvent.HarnessError(...)` per option (b);
+    CodeReview, Refine}, _)` per **S2-8** option (a) (PR-L)
+    or `FsmEvent.HarnessError(...)` per option (b);
     `AdapterFailure(err)` → either retried (if
     `ReviewerProcessFailure` and retry budget remains) or
-    routed to `FsmEvent.HarnessError(...)` per §7.5 /
-    §7.6. The reviewer wrapper does **not** synthesize
-    `FsmEvent`s — that conversion lives in the
-    orchestrator.
-  - User commands — `UserCommandReceived(cmd:
-    UserCommand)` fired from `Main`'s top-level dispatch.
-    The headless `forge run` produces no further user
-    commands after entry; `forge spec` (PR-M REPL) feeds
-    REPL input through this channel.
+    routed to `FsmEvent.HarnessError(...)` per §7.5 / §7.6.
+    The reviewer wrapper does **not** synthesize `FsmEvent`s
+    — that conversion lives in the orchestrator.
+  - User commands — `UserCommandReceived(cmd: UserCommand)`
+    fired from `Main`'s top-level dispatch and the
+    `forge spec` REPL.
 
-  **Session lifecycle (the bracket logic missing from
-  state-only race):** after each `Fsm.transition`, the
-  orchestrator runs a small post-step:
-  1. If the consumed event was a driver-phase session-ender
-     (`Settled / SettleTimeout / TurnBudgetBreached /
-     BudgetBreached / HarnessError` with `SessionPhase ∈
-     {Spec, DesignRevision, Implement, Fixup}`) **and**
-     the new state still keeps `currentDriverSession`
-     live (e.g. `DesignReviewing(round)` after a
-     completed revision settle keeps the session id in
-     `feature.designSessionId` per §11.2 step 12, but the
-     `StreamingSession` instance itself is closed) →
-     clear `currentDriverSession`.
-  2. If the new state requires a fresh driver session
-     (`DesignReviewing(round)` after a `request_changes`
-     verdict; `DesignPrFeedback(prNumber, round)` entry;
-     `PieceImplementing(p)` entry; `PieceFixingUp(...)`
-     entry) → spawn via the appropriate `connector.*`
-     call, store the new `StreamingSession` in
-     `currentDriverSession`, log `<actor>.spawn` or
-     `<actor>.resume`.
-  3. Otherwise — leave `currentDriverSession` unchanged.
+  **Restart recovery (process-crash handling).**
+  `currentDriverSession` starts at `None` on every process
+  start — a prior subprocess does not survive Forge process
+  death, regardless of whether Claude / Codex preserve the
+  session id under `--resume`. **PR-J extends
+  `RebuildState.run` with an additional projection:**
+  ```scala
+  final case class InFlightSession(
+    phase: SessionPhase,        // Spec | DesignRevision | Implement | Fixup
+    sessionId: String,          // the spawn/resume id from the log
+    piece: Option[PieceId]      // None for design phases; Some(p) for implement/fixup
+  )
 
-  PR-J's unit test surface includes
-  `OrchestratorSourceSelectionSuite` — a table-driven
-  test asserting every `(FsmState, hasDriverSession)`
-  pair from the table above selects the documented
-  sources (and that the illegal combinations raise an
-  `IllegalStateException` so a future bug is loud).
+  // Extended return shape (Slice 2 returned only Feature; PR-J widens to:)
+  final case class RebuildResult(
+    feature: Feature,
+    inFlightSessions: Vector[InFlightSession]
+  )
+  ```
+  An `InFlightSession` is detected when the action log
+  contains a `<actor>.spawn` or `<actor>.resume` for phase
+  `P` (and piece `p` for driver phases) without a
+  subsequent `Settled` / `SettleTimeout` /
+  `TurnBudgetBreached` / `BudgetBreached` action for the
+  same `(phase, piece)` key. This projection is computed by
+  walking the log tail; it does NOT change the canonical
+  `Feature` shape (so the Slice-2 invariants stay
+  unchanged).
+
+  Before entering the main loop, the orchestrator
+  processes each `InFlightSession` as a synthetic
+  `HarnessError` event and routes it through
+  `Fsm.transition` so the FSM lands in
+  `NeedsHumanIntervention` with a phase-appropriate hint
+  before any source-racing begins:
+
+  ```
+  inFlight phase  + FSM state                              synthetic HarnessError →
+  --------------  ----------                              ------------------------
+  Spec            InteractiveSpec                          NHI("spec session interrupted by process restart", AbortOrAbandon)
+  DesignRevision  DesignReviewing(round)                   NHI("design revision interrupted by process restart", ReopenDesign(None))
+  DesignRevision  DesignPrFeedback(prNumber, round)        NHI("design PR feedback session interrupted", ReopenDesign(Some(prNumber)))
+  Implement       PieceImplementing(p)                     NHI("implementation interrupted; worktree may have uncommitted changes",
+                                                                ResolveLocalImplementationChanges(p, branch))
+  Fixup           PieceFixingUp(p, prNumber, attempt)      NHI("fix-up interrupted; worktree may have uncommitted changes",
+                                                                RunAnotherFixup(p, prNumber))
+  ```
+
+  Each lands via `Fsm.transition`'s `HarnessError`
+  catch-all (Fsm.scala:101) and uses
+  `defaultResumeHintForState` (Fsm.scala:971) to pick the
+  hint — the orchestrator's mapping table above mirrors
+  what `defaultResumeHintForState` already produces, so
+  the contract is: the orchestrator passes the typed
+  `HarnessError(reason)` and trusts the FSM's default-hint
+  table. No transparent resume is attempted because:
+  - Streaming sessions: Forge doesn't have the original
+    in-flight message — `resumeStreamingSpec` needs a
+    message to spawn with, and re-issuing a stale message
+    risks confusing the model. The user runs
+    `forge resume --<hint>` (typically `ReopenDesign` →
+    re-spawns from scratch) to recover.
+  - Headless sessions: the worktree may carry partial
+    uncommitted changes — re-spawning would lose them.
+    `ResolveLocalImplementationChanges` /
+    `RunAnotherFixup` lets the human decide between
+    committing the partial work or discarding it.
+
+  **Post-transition session lifecycle (the bracket
+  logic).** After each `Fsm.transition`, the orchestrator
+  runs a small post-step:
+  1. **If the source was `SessionMonitor`** — clear
+     `currentDriverSession` unconditionally (the
+     underlying subprocess is gone). Source-driven, not
+     event-payload-driven, because
+     `FsmEvent.HarnessError(reason: String)` carries no
+     `SessionPhase`.
+  2. **If the new state requires a fresh driver session
+     by §11** (`DesignReviewing(round)` after a
+     `request_changes` verdict; `DesignPrFeedback(prNumber,
+     round)` entry; `PieceImplementing(p)` entry from
+     `DesignReady` or from a prior piece advance;
+     `PieceFixingUp(...)` entry from `PieceCiFailed` /
+     `PieceReviewFailed`) — spawn via the appropriate
+     `connector.*` call, store the new `ActiveSession`,
+     log `<actor>.spawn` (or `<actor>.resume` for the
+     design-revision case).
+  3. **If the consumed event triggered post-settle
+     synthesis** (sub-phase III above) — run the side
+     effects, synthesize the next `FsmEvent`, re-apply
+     `Fsm.transition` immediately. The session was already
+     cleared by step 1; the synthesized event may itself
+     trigger step 2's spawn on the new state.
+  4. **Otherwise** — leave `currentDriverSession`
+     unchanged and re-enter the source race.
+
+  PR-J's unit test surface includes:
+  - `OrchestratorSourceSelectionSuite` — table-driven
+    assertion that every `(FsmState, activeSession)` row
+    in the table above selects the documented sources;
+    raises `IllegalStateException` on unreachable
+    combinations (e.g. `PieceAwaitingCi` with
+    `Some(Implement, _)`) so a future lifecycle bug is
+    loud.
+  - `OrchestratorPostSettleSynthesisSuite` — pins each
+    post-settle recipe row: feed a `MonitorOutcome`,
+    assert the side-effect calls (against a fake
+    `SpecStore` + fake `BranchManager`), assert the
+    synthesized `FsmEvent`.
+  - `OrchestratorRestartSuite` — pins `InFlightSession`
+    detection from a synthetic log + `Feature` pair, and
+    the per-phase synthetic `HarnessError` routing
+    through `Fsm.transition`.
+
+  **`RebuildState.run` signature change carried forward.**
+  Widening to return `RebuildResult(feature,
+  inFlightSessions)` is the Slice-4 closure of a gap that
+  was implicit in Slice 2 (`Feature.foldEvents` returns
+  `observedTransitions` and `observedPieceMerges` but no
+  in-flight bookkeeping). Filed as new carry-forward
+  **S4-4** in §4.
 - [ ] **J3.** Connector lifetime — `Connector` is
   constructed once at orchestrator start per `Mode`
   (Claude or Codex). `runStreamingSpec /
@@ -1366,6 +1615,42 @@ ticks off only after PR-Q lands.
   filed: **S4-1** (poll-baseline file), **S4-2**
   (`replay` cut), **S4-3** (reviewer cost / kill
   diagnostics deferred).
+- 2026-05-28 — plan-review round 4 landed before PR-A.
+  Four findings against PR-J's orchestrator model. (a)
+  `(PieceImplementing, hasDriver=false)` wasn't an
+  illegal combination — it's the transient post-settle
+  window between `Settled(Implement, Clean)` (which
+  `Fsm.transition` deliberately leaves as a no-op per
+  Fsm.scala:421) and the orchestrator-synthesized
+  `PrOpened`. Introduced a third orchestrator sub-phase
+  ("post-settle synthesis") with explicit per-phase
+  recipes covering Spec post-check, DesignRevision
+  asset-update / force-push-with-lease, Implement
+  ChangeCollector + commit + push + createPr →
+  `PrOpened`, and Fixup ChangeCollector + commit +
+  push. (b) Typed `currentDriverSession` as
+  `Option[ActiveSession]` carrying `(phase: SessionPhase,
+  session: AgentSession)` — base trait, not
+  `StreamingSession` — because
+  `runHeadlessImplementation` / `runFixup` return the
+  headless trait; REPL code downcasts via pattern match.
+  (c) Restart recovery: the live session object cannot be
+  reconstructed from log entries on process restart;
+  added an explicit `InFlightSession` projection on
+  `RebuildState.run` and a synthetic-`HarnessError`
+  routing rule per in-flight phase × FSM state, surfacing
+  every restart-with-active-session as
+  `NeedsHumanIntervention` with a phase-appropriate hint.
+  Filed `RebuildState.run` signature widening as new
+  carry-forward **S4-4**. (d) Session-clear is now
+  source-driven, not event-payload-driven (the
+  `FsmEvent.HarnessError(reason: String)` payload carries
+  no `SessionPhase`); the orchestrator tags each iteration
+  with its source and clears `currentDriverSession`
+  unconditionally when source = `SessionMonitor`. PR-J's
+  test surface grew by two suites
+  (`OrchestratorPostSettleSynthesisSuite`,
+  `OrchestratorRestartSuite`).
 
 ## 4. Carry-forward (inherited + new)
 
@@ -1505,6 +1790,32 @@ expected-vs-actual.
   item into Slice 4B; PR-Q evaluates whether MVP-run cost
   data warrants closure inside Phase 1 or whether it rolls
   into v1.3.
+- **S4-4 — `RebuildState.run` widened to return
+  `RebuildResult(feature, inFlightSessions)` for restart
+  recovery.** Surfaced at plan-review pre-PR-J. The
+  Slice-2 `RebuildState.run` returns just `Feature`; Slice
+  4B's orchestrator needs an `inFlightSessions:
+  Vector[InFlightSession]` projection (sessions whose
+  `<actor>.spawn` / `<actor>.resume` action has no
+  subsequent `Settled` / `SettleTimeout` /
+  `TurnBudgetBreached` for the same `(phase, piece)` key)
+  so it can synthesize `HarnessError` per phase and route
+  the FSM to `NeedsHumanIntervention` before any
+  source-racing begins on a fresh process start. Without
+  this, a Forge process crash mid-session leaves the FSM
+  state pointing at e.g. `PieceImplementing(p)` with
+  `currentDriverSession = None` on restart — a combination
+  the source-selection table treats as transitory
+  post-settle synthesis, but with no settle outcome to
+  process. v1.3 impact: §11.0 step 4 (cache-vs-log
+  verification) gains an in-flight scan step;
+  `Feature.foldEvents` either grows a sibling projection
+  or `RebuildState.run` adds it post-fold. Filed at PR-J
+  close in `design-rationale.md`; the rebuild signature
+  change is contained to `forge-core` and `forge-app` /
+  `forge-app/main` (no Slice-2 caller change because
+  Slice 2 had no orchestrator caller). Stays open through
+  Slice 4B; closure at PR-J landing.
 
 ## 5. Cross-references
 
