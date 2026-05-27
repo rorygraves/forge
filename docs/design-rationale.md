@@ -613,10 +613,12 @@
 **Rejected:** Unbounded polling that burns through the 5000/hour secondary limit.
 **In v1.1:** §8.1, §18 (`rateLimitBackoffMs`), §19 (`harness.rate_limited`).
 
-### RL2. "New comments since last seen" requires persisted IDs
-**Decision:** Poll state carries `lastSeenCommentId`, `lastSeenReviewId`, `lastSeenCheckRunIds`. Stored at PR creation so old comments aren't treated as new.
-**Rejected:** Detecting new comments without persistence.
-**In v1.1:** §11.4 step 6 (baseline IDs), §11.5 comment-detection rules.
+### RL2. "New comments since last seen" requires a persisted baseline
+**Decision:** Poll state carries a persisted baseline so old comments aren't treated as new on the next poll. Captured at PR creation per §11.4 step 6.
+**Cursor type — see [S3-7](#s3-7-pollbaseline-uses-instant-cursors-createdat--submittedat-not-databaseid-long-slice-3-pr-b-review-round-1):** the baseline carries `Instant` timestamps (`lastSeenCommentAt`, `lastSeenReviewAt`) plus a `Set[String]` of GraphQL check-run ids (`lastSeenCheckRunIds`, semantics deferred to Slice 4). The original v1.1 wording named `lastSeenCommentId` / `lastSeenReviewId` (`databaseId: Long`), but `gh pr view --json comments,reviews` does not expose `databaseId`; the empirically-supported wire surface is the GraphQL `id` String plus `createdAt` / `submittedAt`. Slice 3 PR-B switched to the timestamp cursor; v1.3 RL2 pins the change.
+**Empty-body filter (S3-7):** the decoder also drops entries with empty `body` so plain approval submissions don't surface as `unseenComments` (the FSM reads that field as a human-override signal). Blocking review state flows through `reviewDecision` regardless.
+**Rejected:** Detecting new comments without persistence; using GraphQL global `id` strings as the cursor (not order-comparable).
+**In v1.1:** §11.4 step 6 (baseline), §11.5 comment-detection rules (with the v1.3 type update per S3-7).
 
 ---
 
