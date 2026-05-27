@@ -671,12 +671,12 @@ The §9 / §15 / §11.3 step 5 logic. Pure when given fake `GhClient` /
       cleanly (5–8 tests).
   Suite target: 35–50 tests across PR-C.
 
-### 1.4 PR D — `PRWatcher` (polling + rate-limit + baseline) — ⏳ pending
+### 1.4 PR D — `PRWatcher` (polling + rate-limit + baseline) — ✅ landed
 
 `fs2.Stream`-shaped poller against the `GhClient` from PR-A and the
 `PrSnapshotDecoder` from PR-B.
 
-- [ ] **D1.** `io.forge.git.watcher.PRWatcher` trait per v1.2 §9. Two
+- [x] **D1.** `io.forge.git.watcher.PRWatcher` trait per v1.2 §9. Two
   factory methods:
     - `watch(pr: PrNumber, baseline: Ref[IO, PollBaseline]):
       Stream[IO, PollResult]` — continuous polling. The `Ref` exists
@@ -707,7 +707,7 @@ The §9 / §15 / §11.3 step 5 logic. Pure when given fake `GhClient` /
       surfaces and continues; the orchestrator decides whether to
       keep watching or escalate to `HarnessError`. Baseline unchanged
       for the same reason.
-- [ ] **D2.** `RealPRWatcher(gh: GhClient, decoder: PrSnapshotDecoder,
+- [x] **D2.** `RealPRWatcher(gh: GhClient, decoder: PrSnapshotDecoder,
   config: PRWatcherConfig, clock: Clock[IO])`. The polling loop reads
   the current baseline, calls `pollOnce`, and writes back
   `decoded.nextBaseline` on the `Snapshot` variant only:
@@ -723,7 +723,7 @@ The §9 / §15 / §11.3 step 5 logic. Pure when given fake `GhClient` /
   d.getOrElse(default); case _ => pollInterval }`. Both fragments are
   sketch; PR-D settles the exact `Stream` shape from the call-site
   test fixtures.
-- [ ] **D3.** Rate-limit recovery semantics (RL1 / §18
+- [x] **D3.** Rate-limit recovery semantics (RL1 / §18
   `rateLimitBackoffMs`):
     - `RateLimited(retryAfter: Some(d))` → sleep `d`, then continue.
     - `RateLimited(retryAfter: None)` → sleep
@@ -736,7 +736,7 @@ The §9 / §15 / §11.3 step 5 logic. Pure when given fake `GhClient` /
   Per RL1, the orchestrator's log writer (Slice 4) emits
   `harness.rate_limited` actions when it sees `PollResult.RateLimited`
   — PR-D doesn't write to the log itself.
-- [ ] **D4.** `PRWatcherConfig` (case class with defaults, no on-disk
+- [x] **D4.** `PRWatcherConfig` (case class with defaults, no on-disk
   binding in Slice 3):
   ```scala
   final case class PRWatcherConfig(
@@ -751,7 +751,7 @@ The §9 / §15 / §11.3 step 5 logic. Pure when given fake `GhClient` /
   v1.2 §9: `state, statusCheckRollup, reviews, reviewDecision,
   mergeable, mergeStateStatus, comments, commits, mergedAt,
   mergeCommit`.
-- [ ] **D5.** Unit suites under
+- [x] **D5.** Unit suites under
   `modules/forge-git/src/test/scala/io/forge/git/watcher/`:
     - `PRWatcherBasicSuite` — fake `GhClient` returns a fixed
       `prView` sequence; assert the resulting `Stream` emits one
@@ -1319,6 +1319,26 @@ after PR-H lands.
   `forge-it` 11 baselines unchanged; `scalafmtCheckAll` clean;
   `ForgePathsSuite` `os.walk` sweep still green over the new sources.
   PR-D (`PRWatcher` polling + rate-limit) is the next entry point.
+- 2026-05-27 — PR-D landed. `io.forge.git.watcher` now ships `PRWatcher`
+  trait + `PollResult` ADT (`Snapshot(decoded)` / `RateLimited(retryAfter)`
+  / `Failed(GhError)`), `PRWatcherConfig` (defaults mirror v1.2 §18:
+  30s poll interval, 60s rate-limit backoff, 3 consecutive rate-limits
+  before escalating, `forge-bot` bot login, the §9 pinned 11-field
+  `DefaultFields` set), and `RealPRWatcher` implementing both `pollOnce`
+  (single round-trip + decode) and `watch(pr, baselineRef)` as an
+  `fs2.Stream[IO, PollResult]`. The streaming loop advances the
+  baseline `Ref` on `Snapshot` only (S3-7 round-2 contract), resets a
+  per-watch consecutive-rate-limit counter on any non-rate-limit
+  result, and promotes the Nth rate-limit into `Failed(GhError.RateLimited)`
+  per D3 / carry-forward **S3-4**. Test scope: `forge-git` 135 → 151
+  (PRWatcherBasicSuite +5, PRWatcherRateLimitSuite +5,
+  PRWatcherBaselineSuite +3, PRWatcherMergedDetectionSuite +3 — the
+  CI6 trap pinned at watcher level via the `merged-stale-mergestate.json`
+  fixture). `forge-core` 358 / `forge-agents` 181 baselines unchanged;
+  `scalafmtCheckAll` clean. Pre-existing flaky `forge-it`
+  `ClaudeStreamingSpecSuite.B3` (Claude CLI didn't emit AskUserQuestion
+  within 90s) is unrelated. PR-E (`forge-app` skeleton + `ProcessLock`)
+  is the next entry point.
 
 ## 4. Carry-forward to v1.3
 
