@@ -18,6 +18,8 @@ final class FakeGitClient private (
     tagFn: (String, Sha) => IO[Either[GitError, Unit]],
     pushTagFn: String => IO[Either[GitError, Unit]],
     deleteRemoteTagFn: String => IO[Either[GitError, Unit]],
+    deleteLocalTagFn: String => IO[Either[GitError, Unit]],
+    listTagsFn: Option[String] => IO[Either[GitError, Vector[String]]],
     isWorktreeCleanFn: IO[Either[GitError, Boolean]],
     branchExistsLocalFn: BranchName => IO[Either[GitError, Boolean]],
     branchExistsRemoteFn: BranchName => IO[Either[GitError, Boolean]]
@@ -35,6 +37,8 @@ final class FakeGitClient private (
   override def tag(name: String, sha: Sha): IO[Either[GitError, Unit]] = tagFn(name, sha)
   override def pushTag(name: String): IO[Either[GitError, Unit]] = pushTagFn(name)
   override def deleteRemoteTag(name: String): IO[Either[GitError, Unit]] = deleteRemoteTagFn(name)
+  override def deleteLocalTag(name: String): IO[Either[GitError, Unit]] = deleteLocalTagFn(name)
+  override def listTags(pattern: Option[String]): IO[Either[GitError, Vector[String]]] = listTagsFn(pattern)
   override def isWorktreeClean: IO[Either[GitError, Boolean]] = isWorktreeCleanFn
   override def branchExistsLocal(name: BranchName): IO[Either[GitError, Boolean]] = branchExistsLocalFn(name)
   override def branchExistsRemote(name: BranchName): IO[Either[GitError, Boolean]] = branchExistsRemoteFn(name)
@@ -58,6 +62,10 @@ object FakeGitClient:
       private val pushTagFn: String => IO[Either[GitError, Unit]] = (_: String) => notConfigured("pushTag"),
       private val deleteRemoteTagFn: String => IO[Either[GitError, Unit]] = (_: String) =>
         notConfigured("deleteRemoteTag"),
+      private val deleteLocalTagFn: String => IO[Either[GitError, Unit]] = (_: String) =>
+        notConfigured("deleteLocalTag"),
+      private val listTagsFn: Option[String] => IO[Either[GitError, Vector[String]]] = (_: Option[String]) =>
+        notConfigured("listTags"),
       private val isWorktreeCleanFn: IO[Either[GitError, Boolean]] = notConfigured("isWorktreeClean"),
       private val branchExistsLocalFn: BranchName => IO[Either[GitError, Boolean]] = (_: BranchName) =>
         notConfigured("branchExistsLocal"),
@@ -101,6 +109,14 @@ object FakeGitClient:
     def deleteRemoteTag(response: Either[GitError, Unit]): Builder = deleteRemoteTag(_ => IO.pure(response))
     def deleteRemoteTagOk: Builder = deleteRemoteTag(Right(()))
 
+    def deleteLocalTag(fn: String => IO[Either[GitError, Unit]]): Builder = copy(deleteLocalTagFn = fn)
+    def deleteLocalTag(response: Either[GitError, Unit]): Builder = deleteLocalTag(_ => IO.pure(response))
+    def deleteLocalTagOk: Builder = deleteLocalTag(Right(()))
+
+    def listTags(fn: Option[String] => IO[Either[GitError, Vector[String]]]): Builder = copy(listTagsFn = fn)
+    def listTags(response: Either[GitError, Vector[String]]): Builder = listTags(_ => IO.pure(response))
+    def listTags(tags: Vector[String]): Builder = listTags(Right(tags))
+
     def isWorktreeClean(response: Either[GitError, Boolean]): Builder = copy(isWorktreeCleanFn = IO.pure(response))
     def isWorktreeClean(clean: Boolean): Builder = isWorktreeClean(Right(clean))
 
@@ -124,6 +140,8 @@ object FakeGitClient:
       tagFn,
       pushTagFn,
       deleteRemoteTagFn,
+      deleteLocalTagFn,
+      listTagsFn,
       isWorktreeCleanFn,
       branchExistsLocalFn,
       branchExistsRemoteFn

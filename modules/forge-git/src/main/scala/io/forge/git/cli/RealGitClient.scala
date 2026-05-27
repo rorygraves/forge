@@ -119,6 +119,15 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
   override def deleteRemoteTag(name: String): IO[Either[GitError, Unit]] =
     run(Vector("git", "push", "origin", s":refs/tags/$name")).map(_.map(_ => ()))
 
+  override def deleteLocalTag(name: String): IO[Either[GitError, Unit]] =
+    run(Vector("git", "tag", "-d", name)).map(_.map(_ => ()))
+
+  override def listTags(pattern: Option[String]): IO[Either[GitError, Vector[String]]] =
+    val argv = Vector("git", "tag", "--list") ++ pattern.toVector
+    run(argv).map(_.map { out =>
+      out.linesIterator.map(_.trim).filter(_.nonEmpty).toVector
+    })
+
   override def isWorktreeClean: IO[Either[GitError, Boolean]] =
     run(Vector("git", "status", "--porcelain")).map(_.map(_.isEmpty))
 

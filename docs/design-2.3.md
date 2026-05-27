@@ -505,12 +505,12 @@ PR-B is the *decode-only* PR. Pure functions from `ujson.Value` →
   Slice-3 component sits on top of the decoded `PrSnapshot`, so
   getting the decoder taut here pays out through PR-C/D/G.
 
-### 1.3 PR C — `BranchManager` + `BranchProtectionCache` — ⏳ pending
+### 1.3 PR C — `BranchManager` + `BranchProtectionCache` — ✅ landed
 
 The §9 / §15 / §11.3 step 5 logic. Pure when given fake `GhClient` /
 `GitClient` (no `IO`-shaped side-effects of its own).
 
-- [ ] **C1.** `io.forge.git.branch.ForgeCommand` — sealed trait with one
+- [x] **C1.** `io.forge.git.branch.ForgeCommand` — sealed trait with one
   case per §15 row:
     - `New(featureId)`, `Spec(featureId)`, `Run(featureId)`,
       `ResumeAfterHumanPush(featureId, pieceId)`,
@@ -520,13 +520,13 @@ The §9 / §15 / §11.3 step 5 logic. Pure when given fake `GhClient` /
       `UnlockForce`, `Abandon(featureId)`.
   Slice 3 owns only the BranchManager-relevant subset; Slice 4's CLI
   builds the rest from this enum.
-- [ ] **C2.** `PreflightReport` case class with the §15 checks expressed
+- [x] **C2.** `PreflightReport` case class with the §15 checks expressed
   as `Vector[PreflightCheck]` where each `PreflightCheck` is `Passed`
   or `Failed(reason, escapableViaForce: Boolean)`. Per BM3 / §15,
   `--force` available everywhere; usage logged as
   `harness.preflight_bypassed` by the orchestrator (Slice 4 — PR-C
   surfaces the bypassable bit on each check).
-- [ ] **C3.** `BranchManager` trait per v1.2 §9. Method-by-method
+- [x] **C3.** `BranchManager` trait per v1.2 §9. Method-by-method
   implementation sketch (each gets a unit suite under C7):
     - `preflight(command: ForgeCommand): IO[PreflightReport]` —
       consults `GitClient.isWorktreeClean`,
@@ -594,7 +594,7 @@ The §9 / §15 / §11.3 step 5 logic. Pure when given fake `GhClient` /
     - `pushTag(name: String): IO[Either[BranchError, Unit]]` and
       `deleteRemoteTag(name: String): IO[Either[BranchError, Unit]]`
       — thin wrappers per §11.3 step 4 push-and-prune.
-- [ ] **C4.** Branch-name derivation per BM7 in
+- [x] **C4.** Branch-name derivation per BM7 in
   `io.forge.git.branch.BranchNaming`:
     - `designBranch(prefix: String, feature: FeatureId): BranchName`
       → `<prefix>/<feature>/design`.
@@ -604,7 +604,7 @@ The §9 / §15 / §11.3 step 5 logic. Pure when given fake `GhClient` /
       round: Int): String` → `<prefix>/_snapshots/<feature>/<kind>-r<round>`.
   Pure helpers; no `IO`. Slice-4 audit-snapshot wiring uses the same
   helpers.
-- [ ] **C5.** `BranchProtectionCache` trait in
+- [x] **C5.** `BranchProtectionCache` trait in
   `io.forge.git.branch.protection`:
   ```scala
   final case class CacheKey(feature: FeatureId, base: BranchName,
@@ -631,7 +631,7 @@ The §9 / §15 / §11.3 step 5 logic. Pure when given fake `GhClient` /
     returns `None`.
   Slice-3 scope: the cache type + impl. Slice 4 wires the epoch bump
   into `forge resume` and `forge refresh-cache`.
-- [ ] **C6.** `BranchManager.requiredChecksOverlay(feature: FeatureId,
+- [x] **C6.** `BranchManager.requiredChecksOverlay(feature: FeatureId,
   base: BranchName, epoch: Long): IO[Either[BranchError,
   RequiredChecksOverlay]]` — cache `get` → on miss, call
   `gh.apiBranchProtection(base)`, parse the returned JSON (None →
@@ -644,7 +644,7 @@ The §9 / §15 / §11.3 step 5 logic. Pure when given fake `GhClient` /
   the BranchManager's POV; PR-C documents this as a deliberate
   pragmatic choice (Slice 4 audit log records the
   unauthorized-fallback as `harness.protection_unauthorized`).
-- [ ] **C7.** Unit suites under
+- [x] **C7.** Unit suites under
   `modules/forge-git/src/test/scala/io/forge/git/branch/`:
     - `BranchNamingSuite` — pure helpers (5–8 tests).
     - `BranchManagerPreflightSuite` — every §15 row + the BM6
@@ -1300,6 +1300,25 @@ after PR-H lands.
   +8: BaselineCursor tie-breaker, `advance` cursor cases including
   same-second accumulation; PrSnapshotDecoderSuite +1: same-second
   fixture); all other module baselines unchanged.
+- 2026-05-27 — PR-C landed. `io.forge.git.branch` now ships `ForgeCommand`
+  (§15 sealed ADT), `PreflightReport` + `PreflightCheck`
+  (escapable-via-force bit), `BranchNaming` BM7 helpers
+  (design/piece/snapshot derivation + foreign-tag parser),
+  `BranchProtectionCache` + `InMemoryBranchProtectionCache`
+  (`(feature, base, epoch)` keying + TTL eviction), `BranchError` ADT
+  (BaseDiverged / ForceLeaseRejected / ParseFailure / RateLimited /
+  Gh/GitFailure wrappers), `BranchManager` + `RealBranchManager` covering
+  the full §9 surface plus the §11.3 step 4 `pruneSnapshotTags` retention
+  helper, and the C6 `requiredChecksOverlay` cache-first wiring with the
+  Unauthorized-empty-overlay fallback. Two `GitClient` additions
+  (`listTags`, `deleteLocalTag`) cover the snapshot prune path. Test scope:
+  `forge-git` 81 → 135 (BranchNamingSuite +9, BranchManagerPreflightSuite
+  +14, SyncBaseSuite +4, CreatePieceBranchSuite +3, BaseFreshnessSuite +4,
+  ForcePushSuite +3, CreatePrSuite +3, SnapshotTagSuite +5,
+  BranchProtectionCacheSuite +9). `forge-core` 358 / `forge-agents` 181 /
+  `forge-it` 11 baselines unchanged; `scalafmtCheckAll` clean;
+  `ForgePathsSuite` `os.walk` sweep still green over the new sources.
+  PR-D (`PRWatcher` polling + rate-limit) is the next entry point.
 
 ## 4. Carry-forward to v1.3
 

@@ -68,6 +68,16 @@ trait GitClient:
   /** `git push origin :refs/tags/<name>` — pairs with [[pushTag]] for the §11.3 step 4 prune-on-rotate path. */
   def deleteRemoteTag(name: String): IO[Either[GitError, Unit]]
 
+  /** `git tag -d <name>` — local-only delete, used by [[io.forge.git.branch.BranchManager.pruneSnapshotTags]] when
+    * §11.3 step 4 retention rotates an old snapshot.
+    */
+  def deleteLocalTag(name: String): IO[Either[GitError, Unit]]
+
+  /** `git tag --list [pattern]` — returns tag names (one per line, sorted by `git` defaults). Used by
+    * [[io.forge.git.branch.BranchManager.pruneSnapshotTags]] to enumerate the snapshot-tag namespace.
+    */
+  def listTags(pattern: Option[String] = None): IO[Either[GitError, Vector[String]]]
+
   /** `git status --porcelain` empty (clean) vs non-empty (dirty). */
   def isWorktreeClean: IO[Either[GitError, Boolean]]
 
