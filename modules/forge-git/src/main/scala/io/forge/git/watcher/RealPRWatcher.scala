@@ -9,13 +9,18 @@ import scala.concurrent.duration.FiniteDuration
 
 /** Concrete [[PRWatcher]] over a [[GhClient]] + [[PrSnapshotDecoder]].
   *
-  * The polling loop is a `fs2.Stream` that:
+  * The polling loop is a `fs2.Stream` that, per iteration:
   *
   *   1. reads the current `baseline` from the `Ref`;
   *   1. calls [[pollOnce]] (one `gh pr view --json …` round-trip + decode);
   *   1. on [[PollResult.Snapshot]], writes `decoded.nextBaseline` back to the `Ref`;
-  *   1. sleeps for an interval determined by the result (see [[sleepFor]]);
-  *   1. emits the [[PollResult]] downstream.
+  *   1. **emits the [[PollResult]] downstream first**;
+  *   1. then sleeps for an interval determined by that result (see [[sleepFor]]) before the next poll.
+  *
+  * The emit-then-sleep ordering matters: it means the orchestrator sees each result without waiting for the next
+  * inter-poll back-off, and the first poll is surfaced immediately. (Earlier drafts used `evalTap(IO.sleep(...))`,
+  * which holds the element until the sleep completes — so even the very first poll incurred the full `pollInterval` of
+  * latency before the orchestrator could log or react.)
   *
   * **Rate-limit recovery (RL1, D3).** Successive [[PollResult.RateLimited]] results increment an internal counter held
   * in a fresh `Ref` per `watch` call. When the counter reaches [[PRWatcherConfig.consecutiveRateLimitsBeforeFailing]],
@@ -44,8 +49,11 @@ final class RealPRWatcher(
 
   override def watch(pr: PrNumber, baseline: Ref[IO, PollBaseline]): Stream[IO, PollResult] =
     Stream.eval(Ref.of[IO, Int](0)).flatMap { consecutiveRateLimits =>
-      Stream.repeatEval(stepOnce(pr, baseline, consecutiveRateLimits)).evalTap { result =>
-        IO.sleep(sleepFor(result))
+      // `repeatEval` evaluates `stepOnce` per element; `flatMap` interleaves emit-then-sleep so each result reaches
+      // the consumer before the next inter-poll back-off runs. `Stream.exec` runs the sleep without producing an
+      // element, so the consumer's `.take(n)` still sees exactly n results.
+      Stream.repeatEval(stepOnce(pr, baseline, consecutiveRateLimits)).flatMap { result =>
+        Stream.emit(result) ++ Stream.exec(IO.sleep(sleepFor(result)))
       }
     }
 

@@ -19,6 +19,16 @@ class BranchProtectionCacheSuite extends CatsEffectSuite:
   private val base = BranchName("main")
   private val now = Instant.parse("2026-05-27T09:00:00Z")
 
+  /** Cache pinned at `now` via [[FakeClockSuite.fromRef]]. The put/get/invalidate tests construct overlays with
+    * `fetchedAt = now`; pinning the cache's clock to the same instant keeps the entries within TTL regardless of how
+    * long after `now` the suite happens to run on CI.
+    */
+  private def cacheAtNow: IO[InMemoryBranchProtectionCache] =
+    for
+      tick <- Ref.of[IO, Instant](now)
+      cache <- InMemoryBranchProtectionCache(clock = FakeClockSuite.fromRef(tick))
+    yield cache
+
   test("get on miss returns None"):
     for
       cache <- InMemoryBranchProtectionCache()
@@ -29,7 +39,7 @@ class BranchProtectionCacheSuite extends CatsEffectSuite:
     val overlay = RequiredChecksOverlay(Set("ci/build"), now)
     val key = CacheKey(feature, base, 1L)
     for
-      cache <- InMemoryBranchProtectionCache()
+      cache <- cacheAtNow
       _ <- cache.put(key, overlay)
       r <- cache.get(key)
     yield assertEquals(r, Some(overlay))
@@ -37,7 +47,7 @@ class BranchProtectionCacheSuite extends CatsEffectSuite:
   test("different epoch → miss (caller bumps epoch on forge resume)"):
     val overlay = RequiredChecksOverlay(Set("ci/build"), now)
     for
-      cache <- InMemoryBranchProtectionCache()
+      cache <- cacheAtNow
       _ <- cache.put(CacheKey(feature, base, 0L), overlay)
       r <- cache.get(CacheKey(feature, base, 1L))
     yield assertEquals(r, None)
@@ -45,7 +55,7 @@ class BranchProtectionCacheSuite extends CatsEffectSuite:
   test("invalidateEpoch drops entries below the given epoch"):
     val overlay = RequiredChecksOverlay(Set("ci/build"), now)
     for
-      cache <- InMemoryBranchProtectionCache()
+      cache <- cacheAtNow
       _ <- cache.put(CacheKey(feature, base, 0L), overlay)
       _ <- cache.put(CacheKey(feature, base, 1L), overlay)
       _ <- cache.invalidateEpoch(feature, base, belowEpoch = 1L)

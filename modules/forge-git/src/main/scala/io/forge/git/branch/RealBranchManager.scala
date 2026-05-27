@@ -24,10 +24,10 @@ final class RealBranchManager(
   override def preflight(command: ForgeCommand, manifest: Option[Manifest]): IO[PreflightReport] =
     command match
       case ForgeCommand.New(_) => preflightCleanOnly("new")
-      case ForgeCommand.Spec(_) => preflightCleanOnly("spec")
+      case ForgeCommand.Spec(feature) => preflightSpec(feature, manifest)
       case ForgeCommand.Run(_) => preflightCleanOnly("run")
-      case ForgeCommand.ResumeAfterHumanPush(_, _) => preflightCleanOnly("resume:after-human-push")
-      case ForgeCommand.ResumeRunFixup(_, _) => preflightCleanOnly("resume:run-fixup")
+      case ForgeCommand.ResumeAfterHumanPush(feature, piece) => preflightAfterHumanPush(feature, piece, manifest)
+      case ForgeCommand.ResumeRunFixup(feature, piece) => preflightRunFixup(feature, piece, manifest)
       case ForgeCommand.ResumeCommitHumanFix(feature, piece) => preflightCommitHumanFix(feature, piece, manifest)
       case ForgeCommand.Reconcile(_) => IO.pure(PreflightReport(Vector.empty))
       case ForgeCommand.RefreshCache(_) => IO.pure(PreflightReport(Vector.empty))
@@ -49,7 +49,10 @@ final class RealBranchManager(
       base: BaseSnapshot
   ): IO[Either[BranchError, BranchName]] =
     val branch = BranchNaming.designBranch(branchPrefix, feature)
-    git.checkout(branch, Some(base.base)).map(_.left.map(BranchError.GitFailure(_)).map(_ => branch))
+    // Cut from the captured `BaseSnapshot.sha`, not `base.base`. The base ref may have moved between syncBase
+    // (which read the SHA) and this checkout; cutting from the SHA pins the new branch to the commit syncBase
+    // returned, matching the trait's BM7 contract.
+    git.checkout(branch, Some(base.sha.value)).map(_.left.map(BranchError.GitFailure(_)).map(_ => branch))
 
   override def createPieceBranch(
       feature: FeatureId,
@@ -58,7 +61,10 @@ final class RealBranchManager(
       base: BaseSnapshot
   ): IO[Either[BranchError, (BranchName, Sha)]] =
     val branch = BranchNaming.pieceBranch(branchPrefix, feature, piece)
-    git.checkout(branch, Some(base.base)).map(_.left.map(BranchError.GitFailure(_)).map(_ => (branch, base.sha)))
+    // See `createDesignBranch` — cutting from `base.sha` guarantees the returned `baseSha` matches the commit the
+    // branch was actually created from, so the Slice-4 orchestrator's `manifest.pieces[i].baseSha` persistence
+    // (carry-forward S2-5) is consistent with the on-disk branch.
+    git.checkout(branch, Some(base.sha.value)).map(_.left.map(BranchError.GitFailure(_)).map(_ => (branch, base.sha)))
 
   override def baseFreshness(
       pr: PrNumber,
@@ -72,12 +78,27 @@ final class RealBranchManager(
           case Left(detail) => IO.pure(Left(BranchError.ParseFailure("baseFreshness.baseRefOid", detail)))
           case Right(observed) =>
             if observed == expectedBaseSha then IO.pure(Right(BaseFreshness.UpToDate))
-            else if autoUpdate then
-              gh.prUpdateBranch(pr).map {
-                case Right(_) => Right(BaseFreshness.Updated)
-                case Left(err) => Left(promoteGhError(err))
-              }
+            else if autoUpdate then runUpdateBranchAndReread(pr)
             else IO.pure(Right(BaseFreshness.Behind(expectedBaseSha, observed)))
+    }
+
+  /** After `gh pr update-branch`, the PR's `baseRefOid` advances; we re-read it so [[BaseFreshness.Updated]] can carry
+    * the new value. Surfacing the post-update SHA lets the Slice-4 orchestrator persist `manifest.pieces[i].baseSha`
+    * (S2-5) — otherwise the next readiness pass compares the same stale `expectedBaseSha` and re-triggers
+    * `update-branch` on every poll.
+    */
+  private def runUpdateBranchAndReread(pr: PrNumber): IO[Either[BranchError, BaseFreshness]] =
+    gh.prUpdateBranch(pr).flatMap {
+      case Left(err) => IO.pure(Left(promoteGhError(err)))
+      case Right(_) =>
+        gh.prView(pr, Vector("baseRefOid")).map {
+          case Left(err) => Left(promoteGhError(err))
+          case Right(json) =>
+            parseBaseRefOid(json) match
+              case Left(detail) =>
+                Left(BranchError.ParseFailure("baseFreshness.baseRefOid.post-update", detail))
+              case Right(newSha) => Right(BaseFreshness.Updated(newSha))
+        }
     }
 
   override def pushCurrentBranch(forceWithLease: Boolean): IO[Either[BranchError, Unit]] =
@@ -167,50 +188,65 @@ final class RealBranchManager(
   // --- preflight helpers ----------------------------------------------------
 
   private def preflightCleanOnly(name: String): IO[PreflightReport] =
-    git.isWorktreeClean.map {
-      case Right(true) => PreflightReport(Vector(PreflightCheck.Passed("worktree.clean")))
-      case Right(false) =>
-        PreflightReport(
-          Vector(
-            PreflightCheck.Failed(
-              id = "worktree.clean",
-              reason = s"`forge $name` requires a clean worktree (`git status --porcelain` non-empty)",
-              escapableViaForce = true
-            )
-          )
-        )
-      case Left(err) =>
-        PreflightReport(
-          Vector(
-            PreflightCheck.Failed(
-              id = "worktree.clean",
-              reason = s"unable to read worktree status: ${err.message}",
-              escapableViaForce = false
-            )
-          )
-        )
-    }
+    worktreeCleanCheck(name).map(c => PreflightReport(Vector(c)))
+
+  private def preflightSpec(feature: FeatureId, manifest: Option[Manifest]): IO[PreflightReport] =
+    // §15: clean worktree + on the design branch.
+    manifest match
+      case None => IO.pure(PreflightReport(Vector(missingManifestFailure("spec"))))
+      case Some(m) =>
+        val expected = BranchNaming.designBranch(m.branchPrefix, feature)
+        for
+          clean <- worktreeCleanCheck("spec")
+          onBranch <- onExpectedBranchCheck(expected, label = "design")
+        yield PreflightReport(Vector(clean, onBranch))
+
+  private def preflightRunFixup(
+      feature: FeatureId,
+      piece: PieceId,
+      manifest: Option[Manifest]
+  ): IO[PreflightReport] =
+    // §15: clean worktree + on the piece branch.
+    manifest match
+      case None => IO.pure(PreflightReport(Vector(missingManifestFailure("resume:run-fixup"))))
+      case Some(m) =>
+        val expected = BranchNaming.pieceBranch(m.branchPrefix, feature, piece)
+        for
+          clean <- worktreeCleanCheck("resume:run-fixup")
+          onBranch <- onExpectedBranchCheck(expected, label = "piece")
+        yield PreflightReport(Vector(clean, onBranch))
+
+  private def preflightAfterHumanPush(
+      feature: FeatureId,
+      piece: PieceId,
+      manifest: Option[Manifest]
+  ): IO[PreflightReport] =
+    // §15: clean worktree + on the piece branch + PR head == local HEAD. The piece must already have a PR
+    // recorded (the after-human-push flow only makes sense after a piece's PR exists), so a missing
+    // `prNumber` is a hard failure.
+    manifest match
+      case None => IO.pure(PreflightReport(Vector(missingManifestFailure("resume:after-human-push"))))
+      case Some(m) =>
+        val expectedBranch = BranchNaming.pieceBranch(m.branchPrefix, feature, piece)
+        val prOpt = m.pieces.find(_.id == piece).flatMap(_.prNumber)
+        for
+          clean <- worktreeCleanCheck("resume:after-human-push")
+          onBranch <- onExpectedBranchCheck(expectedBranch, label = "piece")
+          headCheck <- prOpt match
+            case None => IO.pure(missingPrFailure(piece))
+            case Some(pr) => prHeadMatchesLocalHeadCheck(pr)
+        yield PreflightReport(Vector(clean, onBranch, headCheck))
 
   private def preflightCommitHumanFix(
       feature: FeatureId,
       piece: PieceId,
       manifest: Option[Manifest]
   ): IO[PreflightReport] =
-    // BM6: current branch must match the derived piece branch. Worktree dirtiness is allowed (the human's
-    // unstaged fix IS the input to this command).
+    // BM6 / §15: current branch must match the derived piece branch. Worktree dirtiness is allowed (the human's
+    // unstaged fix IS the input to this command), so no `worktree.clean` check.
     manifest match
       case None =>
-        IO.pure(
-          PreflightReport(
-            Vector(
-              PreflightCheck.Failed(
-                id = "manifest.present",
-                reason = "`forge resume --commit-human-fix` requires a loaded manifest",
-                escapableViaForce = false
-              )
-            )
-          )
-        )
+        IO.pure(PreflightReport(Vector(missingManifestFailure("resume:commit-human-fix"))))
       case Some(m) =>
         val expected = BranchNaming.pieceBranch(m.branchPrefix, feature, piece)
         git.currentBranch.map {
@@ -239,15 +275,123 @@ final class RealBranchManager(
             )
         }
 
+  // --- preflight check building blocks ----------------------------------
+
+  private def worktreeCleanCheck(commandName: String): IO[PreflightCheck] =
+    git.isWorktreeClean.map {
+      case Right(true) => PreflightCheck.Passed("worktree.clean")
+      case Right(false) =>
+        PreflightCheck.Failed(
+          id = "worktree.clean",
+          reason = s"`forge $commandName` requires a clean worktree (`git status --porcelain` non-empty)",
+          escapableViaForce = true
+        )
+      case Left(err) =>
+        PreflightCheck.Failed(
+          id = "worktree.clean",
+          reason = s"unable to read worktree status: ${err.message}",
+          escapableViaForce = false
+        )
+    }
+
+  /** "Current branch matches expected" check. `label` is the suffix on the check id (`branch.matches-design`,
+    * `branch.matches-piece`) and the human-readable noun in the failure message ("the active design branch is …"). Not
+    * escapable via `--force` — being on the wrong branch corrupts the operation entirely, mirroring the BM6 precedent
+    * for `resume --commit-human-fix`.
+    */
+  private def onExpectedBranchCheck(expected: BranchName, label: String): IO[PreflightCheck] =
+    git.currentBranch.map {
+      case Right(current) if current == expected =>
+        PreflightCheck.Passed(s"branch.matches-$label")
+      case Right(current) =>
+        PreflightCheck.Failed(
+          id = s"branch.matches-$label",
+          reason = s"You are on '${current.value}', the active $label branch is '${expected.value}'. " +
+            s"Switch branches and retry.",
+          escapableViaForce = false
+        )
+      case Left(err) =>
+        PreflightCheck.Failed(
+          id = s"branch.matches-$label",
+          reason = s"unable to read current branch: ${err.message}",
+          escapableViaForce = false
+        )
+    }
+
+  /** §15 after-human-push: PR head SHA from `gh pr view --json headRefOid` must equal `git rev-parse HEAD`. Both gh and
+    * git errors degrade to a failed check rather than escaping as a [[BranchError]] — preflight is a reporting surface,
+    * not an FSM action.
+    */
+  private def prHeadMatchesLocalHeadCheck(pr: PrNumber): IO[PreflightCheck] =
+    gh.prView(pr, Vector("headRefOid")).flatMap {
+      case Left(err) =>
+        IO.pure(
+          PreflightCheck.Failed(
+            id = "pr.head-matches-local",
+            reason = s"unable to read PR #${pr.value} head SHA: ${err.message}",
+            escapableViaForce = false
+          )
+        )
+      case Right(json) =>
+        parseHeadRefOid(json) match
+          case Left(detail) =>
+            IO.pure(
+              PreflightCheck.Failed(
+                id = "pr.head-matches-local",
+                reason = s"unable to parse PR #${pr.value} headRefOid: $detail",
+                escapableViaForce = false
+              )
+            )
+          case Right(prHead) =>
+            git.currentSha.map {
+              case Right(localHead) if localHead == prHead =>
+                PreflightCheck.Passed("pr.head-matches-local")
+              case Right(localHead) =>
+                PreflightCheck.Failed(
+                  id = "pr.head-matches-local",
+                  reason = s"PR #${pr.value} head (${prHead.value}) does not match local HEAD (${localHead.value}). " +
+                    "Push the local commits before retrying with `--after-human-push`.",
+                  escapableViaForce = false
+                )
+              case Left(err) =>
+                PreflightCheck.Failed(
+                  id = "pr.head-matches-local",
+                  reason = s"unable to read local HEAD: ${err.message}",
+                  escapableViaForce = false
+                )
+            }
+    }
+
+  private def missingManifestFailure(commandName: String): PreflightCheck.Failed =
+    PreflightCheck.Failed(
+      id = "manifest.present",
+      reason = s"`forge $commandName` requires a loaded manifest",
+      escapableViaForce = false
+    )
+
+  private def missingPrFailure(piece: PieceId): PreflightCheck.Failed =
+    PreflightCheck.Failed(
+      id = "pr.recorded",
+      reason = s"piece '${piece.value}' has no PR recorded in the manifest — " +
+        "`--after-human-push` requires a piece whose PR was already created",
+      escapableViaForce = false
+    )
+
   // --- ujson plumbing -------------------------------------------------------
 
   private def parseBaseRefOid(json: ujson.Value): Either[String, Sha] =
+    parseOidField(json, "baseRefOid")
+
+  private def parseHeadRefOid(json: ujson.Value): Either[String, Sha] =
+    parseOidField(json, "headRefOid")
+
+  private def parseOidField(json: ujson.Value, field: String): Either[String, Sha] =
     try
-      json.obj.get("baseRefOid") match
-        case Some(ujson.Str(s)) => Sha.fromString(s).left.map(msg => s"baseRefOid not a SHA: $msg")
-        case Some(other) => Left(s"baseRefOid expected String, got $other")
-        case None => Left("baseRefOid missing")
-    catch case e: Throwable => Left(s"baseRefOid parse: ${e.getMessage}")
+      json.obj.get(field) match
+        case Some(ujson.Str(s)) => Sha.fromString(s).left.map(msg => s"$field not a SHA: $msg")
+        case Some(other) => Left(s"$field expected String, got $other")
+        case None => Left(s"$field missing")
+    catch case e: Throwable => Left(s"$field parse: ${e.getMessage}")
 
   /** Parse a branch-protection JSON payload into the required-check name set.
     *

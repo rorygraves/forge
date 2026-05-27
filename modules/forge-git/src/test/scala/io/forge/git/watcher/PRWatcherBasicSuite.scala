@@ -80,6 +80,25 @@ class PRWatcherBasicSuite extends CatsEffectSuite:
         case other => fail(s"post-exhaust events should be Failed, got $other")
       }
 
+  test("watch — first Snapshot is emitted before the inter-poll sleep elapses"):
+    // Regression for the evalTap(IO.sleep(...)) ordering bug: with a long pollInterval, take(1) must complete in
+    // well under that interval. Earlier code waited for `sleepFor(result)` before emitting the very first element.
+    val slowCfg = PRWatcherConfig(pollInterval = 5.seconds, rateLimitBackoff = 5.seconds)
+    val gh = FakeGhClient.builder.prView(loadFixture("open-no-checks.json")).build
+    val watcher = new RealPRWatcher(gh, slowCfg)
+    for
+      baseline <- Ref.of[IO, PollBaseline](PollBaseline.empty)
+      start <- IO.monotonic
+      events <- watcher.watch(pr, baseline).take(1).compile.toVector
+      end <- IO.monotonic
+    yield
+      assertEquals(events.size, 1)
+      val elapsed = end - start
+      assert(
+        elapsed < 1.second,
+        s"first Snapshot took ${elapsed.toMillis}ms — should be ≪ pollInterval (${slowCfg.pollInterval})"
+      )
+
   test("DefaultFields matches the v1.2 §9 pinned set"):
     assertEquals(
       PRWatcher.DefaultFields,

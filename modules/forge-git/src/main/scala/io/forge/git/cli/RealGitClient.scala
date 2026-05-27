@@ -90,9 +90,9 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
 
     flow.value
 
-  override def checkout(branch: BranchName, createFrom: Option[BranchName]): IO[Either[GitError, Unit]] =
-    val argv = createFrom match
-      case Some(from) => Vector("git", "checkout", "-B", branch.value, from.value)
+  override def checkout(branch: BranchName, startPoint: Option[String]): IO[Either[GitError, Unit]] =
+    val argv = startPoint match
+      case Some(from) => Vector("git", "checkout", "-B", branch.value, from)
       case None => Vector("git", "checkout", "-B", branch.value)
     run(argv).map(_.map(_ => ()))
 

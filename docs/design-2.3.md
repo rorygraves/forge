@@ -566,8 +566,13 @@ The §9 / §15 / §11.3 step 5 logic. Pure when given fake `GhClient` /
       `expectedBaseSha`. Returns
       `BaseFreshness.UpToDate | Behind(expected, observed)`.
       The `autoUpdate: true` branch (§9 / BM2) calls
-      `gh.prUpdateBranch(pr)` and *returns* `Updated` so the
-      orchestrator can re-enter `PieceAwaitingCi`; `autoUpdate:
+      `gh.prUpdateBranch(pr)`, **re-reads `baseRefOid` after the
+      update**, and returns `Updated(newBaseSha)` carrying the
+      post-update SHA so the orchestrator can persist
+      `manifest.pieces[i].baseSha` before re-entering
+      `PieceAwaitingCi`. Without that re-read the next readiness
+      pass would compare against the stale `expectedBaseSha` and
+      re-trigger `update-branch` on every poll. `autoUpdate:
       false` returns `Behind` and lets the orchestrator surface
       `NeedsHumanIntervention("piece <p> PR is behind base",
       ResumeAfterHumanPush(...))`. BranchManager does **not** itself
@@ -1339,6 +1344,39 @@ after PR-H lands.
   `ClaudeStreamingSpecSuite.B3` (Claude CLI didn't emit AskUserQuestion
   within 90s) is unrelated. PR-E (`forge-app` skeleton + `ProcessLock`)
   is the next entry point.
+- 2026-05-27 — PR-C / PR-D review round 1. Four findings addressed in
+  a single fix pass: (P1) `RealBranchManager.preflight` was routing
+  `Spec`, `ResumeAfterHumanPush`, and `ResumeRunFixup` through the
+  worktree-clean-only path; rebuilt around two small check builders
+  (`worktreeCleanCheck`, `onExpectedBranchCheck`) plus a new
+  `prHeadMatchesLocalHeadCheck` for after-human-push so the §15 table
+  is fully covered, including the PR-head-vs-local-HEAD invariant.
+  (P1) `BaseFreshness.Updated` carried no SHA, so the orchestrator
+  couldn't persist `manifest.pieces[i].baseSha` after `gh pr
+  update-branch`; the case class now carries `newBaseSha: Sha`,
+  obtained by a second `gh pr view --json baseRefOid` after the
+  update — without it the next readiness pass would re-trigger the
+  auto-update on every poll. (P2) `RealPRWatcher.watch` delayed the
+  first poll result by `pollInterval` because `evalTap(IO.sleep)`
+  sleeps before emitting; rebuilt as
+  `Stream.repeatEval(stepOnce).flatMap(r => Stream.emit(r) ++
+  Stream.exec(IO.sleep(sleepFor(r))))` so each result reaches the
+  consumer before the next inter-poll back-off — added a regression
+  test that times the first emission against a 5s `pollInterval`.
+  (P2) `createDesignBranch` / `createPieceBranch` passed the
+  mutable base ref name to `git.checkout`; widened
+  `GitClient.checkout`'s second arg from `Option[BranchName]` to
+  `Option[String]` (git accepts any commit-ish) and threaded the
+  captured `BaseSnapshot.sha.value` through, so the returned
+  `baseSha` matches the commit the branch was actually cut from
+  even if the base ref moves between `syncBase` and `checkout`.
+  Test scope: `forge-git` 151 → 162 — `BranchManagerPreflightSuite`
+  +9 (new spec / after-human-push / run-fixup rows plus
+  manifest-missing failures), `BranchManagerBaseFreshnessSuite` +1
+  (post-update parse failure), `PRWatcherBasicSuite` +1
+  (emit-before-sleep regression); two pre-existing
+  `BranchProtectionCacheSuite` time-handling failures on clean
+  HEAD are unrelated. `scalafmtAll` re-ran clean.
 
 ## 4. Carry-forward to v1.3
 

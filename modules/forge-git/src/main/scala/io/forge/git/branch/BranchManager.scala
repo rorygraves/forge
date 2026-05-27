@@ -12,7 +12,10 @@ final case class BaseSnapshot(base: BranchName, sha: Sha)
   *
   *   - [[BaseFreshness.UpToDate]] — PR head's base matches `expectedBaseSha`. Caller proceeds to CI/merge.
   *   - [[BaseFreshness.Updated]] — caller was configured with `baseFreshness.autoUpdate: true` (v1.2 §9) and
-  *     `BranchManager` already issued `gh pr update-branch`. Caller re-enters `PieceAwaitingCi`.
+  *     `BranchManager` already issued `gh pr update-branch`. The carried `newBaseSha` is the post-update value of the
+  *     PR's `baseRefOid` (re-read after `gh pr update-branch`), which the orchestrator persists into
+  *     `manifest.pieces[i].baseSha` before re-entering `PieceAwaitingCi`. Without this SHA the next readiness pass
+  *     would compare against the stale `expectedBaseSha` and re-trigger the auto-update on every poll.
   *   - [[BaseFreshness.Behind]] — PR is behind base and auto-update was off (or the PR isn't auto-updateable). Caller
   *     routes into `NeedsHumanIntervention("piece <p> PR is behind base", ResumeAfterHumanPush(...))`.
   */
@@ -20,7 +23,7 @@ sealed trait BaseFreshness extends Product with Serializable
 
 object BaseFreshness:
   case object UpToDate extends BaseFreshness
-  case object Updated extends BaseFreshness
+  final case class Updated(newBaseSha: Sha) extends BaseFreshness
   final case class Behind(expected: Sha, observed: Sha) extends BaseFreshness
 
 /** PR-C C3 — the §9 branch / PR orchestration surface. Pure when given a fake [[io.forge.git.cli.GitClient]] /
@@ -78,7 +81,10 @@ trait BranchManager:
   /** §9 — read the PR's current `baseRefOid` via `gh pr view`. If it matches `expectedBaseSha`, returns
     * [[BaseFreshness.UpToDate]]. Otherwise:
     *
-    *   - `autoUpdate = true` → call `gh pr update-branch` and return [[BaseFreshness.Updated]].
+    *   - `autoUpdate = true` → call `gh pr update-branch`, then re-read `baseRefOid` and return
+    *     [[BaseFreshness.Updated]] carrying the new base SHA so the orchestrator can persist
+    *     `manifest.pieces[i].baseSha` (otherwise the next readiness pass sees the same stale `expectedBaseSha` and
+    *     loops on the auto-update).
     *   - `autoUpdate = false` → return [[BaseFreshness.Behind]] and let the orchestrator surface
     *     `NeedsHumanIntervention("piece <p> PR is behind base", ResumeAfterHumanPush(...))`.
     */

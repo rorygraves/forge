@@ -51,14 +51,14 @@ class FakeGitClientSuite extends CatsEffectSuite:
     }
 
   test("checkout — captures arguments via function variant"):
-    val seen = scala.collection.mutable.ArrayBuffer.empty[(BranchName, Option[BranchName])]
-    val git = FakeGitClient.builder.checkout { (branch, from) =>
-      seen += ((branch, from))
+    val seen = scala.collection.mutable.ArrayBuffer.empty[(BranchName, Option[String])]
+    val git = FakeGitClient.builder.checkout { (branch, startPoint) =>
+      seen += ((branch, startPoint))
       IO.pure(Right(()))
     }.build
     git
-      .checkout(BranchName("forge/feat/p1"), Some(BranchName("main")))
+      .checkout(BranchName("forge/feat/p1"), Some("abc1234"))
       .map { r =>
         assertEquals(r, Right(()))
-        assertEquals(seen.toList, List((BranchName("forge/feat/p1"), Some(BranchName("main")))))
+        assertEquals(seen.toList, List((BranchName("forge/feat/p1"), Some("abc1234"))))
       }

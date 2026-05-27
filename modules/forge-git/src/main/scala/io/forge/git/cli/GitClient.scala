@@ -51,8 +51,14 @@ trait GitClient:
     */
   def fastForwardBase(base: BranchName): IO[Either[GitError, FastForwardResult]]
 
-  /** `git checkout -B <branch> <createFrom?>` — creates the branch from `createFrom` if given, otherwise from HEAD. */
-  def checkout(branch: BranchName, createFrom: Option[BranchName]): IO[Either[GitError, Unit]]
+  /** `git checkout -B <branch> <startPoint?>` — creates the branch from `startPoint` if given, otherwise from HEAD.
+    *
+    * `startPoint` is any git "commit-ish" expression: a branch name, a SHA, a tag, `HEAD~N`, etc. The caller decides
+    * which is appropriate. `BranchManager.createDesignBranch` / `createPieceBranch` pass the resolved
+    * `BaseSnapshot.sha` so the new branch is cut from the exact commit captured by `syncBase`, immune to base-ref
+    * movement between `syncBase` and `checkout`.
+    */
+  def checkout(branch: BranchName, startPoint: Option[String]): IO[Either[GitError, Unit]]
 
   /** `git push origin <branch> [--force-with-lease]`. Per §11.3 step 5, `forceWithLease = true` is the design-revision
     * path; a `non-fast-forward` reply maps to [[GitError.ForceLeaseRejected]].

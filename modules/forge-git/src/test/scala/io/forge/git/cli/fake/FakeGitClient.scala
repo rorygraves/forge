@@ -13,7 +13,7 @@ final class FakeGitClient private (
     currentShaFn: IO[Either[GitError, Sha]],
     fetchFn: String => IO[Either[GitError, Unit]],
     fastForwardBaseFn: BranchName => IO[Either[GitError, FastForwardResult]],
-    checkoutFn: (BranchName, Option[BranchName]) => IO[Either[GitError, Unit]],
+    checkoutFn: (BranchName, Option[String]) => IO[Either[GitError, Unit]],
     pushFn: (BranchName, Boolean, Boolean) => IO[Either[GitError, Unit]],
     tagFn: (String, Sha) => IO[Either[GitError, Unit]],
     pushTagFn: String => IO[Either[GitError, Unit]],
@@ -30,8 +30,8 @@ final class FakeGitClient private (
   override def fetch(remote: String): IO[Either[GitError, Unit]] = fetchFn(remote)
   override def fastForwardBase(base: BranchName): IO[Either[GitError, FastForwardResult]] =
     fastForwardBaseFn(base)
-  override def checkout(branch: BranchName, createFrom: Option[BranchName]): IO[Either[GitError, Unit]] =
-    checkoutFn(branch, createFrom)
+  override def checkout(branch: BranchName, startPoint: Option[String]): IO[Either[GitError, Unit]] =
+    checkoutFn(branch, startPoint)
   override def push(branch: BranchName, force: Boolean, forceWithLease: Boolean): IO[Either[GitError, Unit]] =
     pushFn(branch, force, forceWithLease)
   override def tag(name: String, sha: Sha): IO[Either[GitError, Unit]] = tagFn(name, sha)
@@ -54,8 +54,8 @@ object FakeGitClient:
       private val fetchFn: String => IO[Either[GitError, Unit]] = (_: String) => notConfigured("fetch"),
       private val fastForwardBaseFn: BranchName => IO[Either[GitError, FastForwardResult]] = (_: BranchName) =>
         notConfigured("fastForwardBase"),
-      private val checkoutFn: (BranchName, Option[BranchName]) => IO[Either[GitError, Unit]] =
-        (_: BranchName, _: Option[BranchName]) => notConfigured("checkout"),
+      private val checkoutFn: (BranchName, Option[String]) => IO[Either[GitError, Unit]] =
+        (_: BranchName, _: Option[String]) => notConfigured("checkout"),
       private val pushFn: (BranchName, Boolean, Boolean) => IO[Either[GitError, Unit]] =
         (_: BranchName, _: Boolean, _: Boolean) => notConfigured("push"),
       private val tagFn: (String, Sha) => IO[Either[GitError, Unit]] = (_: String, _: Sha) => notConfigured("tag"),
@@ -88,7 +88,7 @@ object FakeGitClient:
       fastForwardBase(_ => IO.pure(response))
     def fastForwardBase(result: FastForwardResult): Builder = fastForwardBase(Right(result))
 
-    def checkout(fn: (BranchName, Option[BranchName]) => IO[Either[GitError, Unit]]): Builder =
+    def checkout(fn: (BranchName, Option[String]) => IO[Either[GitError, Unit]]): Builder =
       copy(checkoutFn = fn)
     def checkout(response: Either[GitError, Unit]): Builder = checkout((_, _) => IO.pure(response))
     def checkoutOk: Builder = checkout(Right(()))

@@ -16,8 +16,8 @@ class BranchManagerCreatePieceBranchSuite extends CatsEffectSuite:
   private val piece = PieceId("p1")
   private val base = BaseSnapshot(BranchName("main"), Sha("abc1234"))
 
-  test("createPieceBranch — derives `<prefix>/<feature>/<piece>` and returns baseSha verbatim"):
-    val seen = scala.collection.mutable.ArrayBuffer.empty[(BranchName, Option[BranchName])]
+  test("createPieceBranch — derives `<prefix>/<feature>/<piece>`, cuts from base.sha, returns baseSha verbatim"):
+    val seen = scala.collection.mutable.ArrayBuffer.empty[(BranchName, Option[String])]
     val git = FakeGitClient.builder.checkout { (b, f) =>
       seen += ((b, f))
       cats.effect.IO.pure(Right(()))
@@ -28,7 +28,7 @@ class BranchManagerCreatePieceBranchSuite extends CatsEffectSuite:
       r <- bm.createPieceBranch(feature, piece, "forge", base)
     yield
       assertEquals(r, Right((BranchName("forge/stripe-webhook/p1"), base.sha)))
-      assertEquals(seen.toList, List((BranchName("forge/stripe-webhook/p1"), Some(BranchName("main")))))
+      assertEquals(seen.toList, List((BranchName("forge/stripe-webhook/p1"), Some(base.sha.value))))
 
   test("createPieceBranch — git checkout failure surfaces as BranchError.GitFailure"):
     val git = FakeGitClient.builder
@@ -42,10 +42,10 @@ class BranchManagerCreatePieceBranchSuite extends CatsEffectSuite:
       case Left(BranchError.GitFailure(_: GitError.Transient)) => ()
       case other => fail(s"expected GitFailure(Transient), got $other")
 
-  test("createDesignBranch — derives `<prefix>/<feature>/design`"):
-    val seen = scala.collection.mutable.ArrayBuffer.empty[BranchName]
-    val git = FakeGitClient.builder.checkout { (b, _) =>
-      seen += b
+  test("createDesignBranch — derives `<prefix>/<feature>/design` and cuts from base.sha"):
+    val seen = scala.collection.mutable.ArrayBuffer.empty[(BranchName, Option[String])]
+    val git = FakeGitClient.builder.checkout { (b, sp) =>
+      seen += ((b, sp))
       cats.effect.IO.pure(Right(()))
     }.build
     for
@@ -54,4 +54,4 @@ class BranchManagerCreatePieceBranchSuite extends CatsEffectSuite:
       r <- bm.createDesignBranch(feature, "forge", base)
     yield
       assertEquals(r, Right(BranchName("forge/stripe-webhook/design")))
-      assertEquals(seen.toList, List(BranchName("forge/stripe-webhook/design")))
+      assertEquals(seen.toList, List((BranchName("forge/stripe-webhook/design"), Some(base.sha.value))))
