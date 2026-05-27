@@ -16,6 +16,15 @@ import upickle.default.{read => upickleRead, write => upickleWrite}
   * Resource scope exit the metadata is removed alongside the lock release; on a hard crash the metadata survives so the
   * next start-up sees `Stale(_)` and can recover (BM4 / BM5).
   *
+  * **Same-JVM re-acquire is reference-counted on the instance.** Every [[acquire]] call on the same `FileProcessLock`
+  * shares the underlying OS lock; the lock is released only when the last outstanding Resource scope exits, regardless
+  * of release order. This avoids the lexical-nesting trap where an inner "idempotent re-acquire" Resource could outlive
+  * the outer one (e.g. via `.allocated`, fiber-based release, or non-nested scopes), see its `Acquired` outcome, and
+  * operate as if the lock were held — while the OS lock had already been dropped by the outer scope. Cross-instance
+  * same-JVM contention (two distinct `FileProcessLock` instances on the same paths) still surfaces as `Held(_)`:
+  * instances do not share refcount state and `FileChannel.tryLock`'s `OverlappingFileLockException` is what catches the
+  * collision in that case.
+  *
   * @param paths
   *   [[ForgePaths]] supplying the lock file and metadata file paths. Parent directory is created on first acquire.
   */
@@ -26,32 +35,64 @@ final class FileProcessLock(paths: ForgePaths) extends ProcessLock:
   private val lockPath: os.Path = paths.lockFile
   private val metadataPath: os.Path = paths.lockMetadataFile
 
+  // `holder` is guarded by `monitor`. All acquire / release / forceRelease paths take the monitor before touching
+  // OS lock state or metadata so the ref count and the channel/lock pair move atomically.
+  private val monitor: AnyRef = new Object
+  private var holder: Option[Holder] = None
+
   override def acquire(metadata: LockMetadata, acceptStale: Boolean): Resource[IO, LockAcquireResult] =
-    Resource.make(acquireOnce(metadata, acceptStale))(release).map(_.result)
+    Resource
+      .make(acquireOnce(metadata, acceptStale)) {
+        case Acquisition.Refcounted(_) => decrementRef
+        case Acquisition.Inert(_) => IO.unit
+      }
+      .map(_.result)
 
   override def forceRelease: IO[ForceReleaseResult] = IO.blocking {
-    val metadataPresent = os.exists(metadataPath)
-    val lockPresent = os.exists(lockPath)
-    if !metadataPresent && !lockPresent then ForceReleaseResult.NoLockPresent
-    else
-      ensureParentDir()
-      val channel = openChannel()
-      try
-        val lock =
-          try channel.tryLock()
-          catch case _: OverlappingFileLockException => null
-        if lock == null then ForceReleaseResult.LiveHolderRefused(readMetadataSilent())
+    monitor.synchronized {
+      if holder.isDefined then
+        // This same instance currently holds the lock — `forge unlock --force` doesn't yank a live in-process
+        // holder. Surfacing the on-disk metadata gives the operator the same diagnostic the cross-process refusal
+        // path produces.
+        ForceReleaseResult.LiveHolderRefused(readMetadataSilent())
+      else
+        val metadataPresent = os.exists(metadataPath)
+        val lockPresent = os.exists(lockPath)
+        if !metadataPresent && !lockPresent then ForceReleaseResult.NoLockPresent
         else
+          ensureParentDir()
+          val channel = openChannel()
           try
-            if metadataPresent then
-              val _ = os.remove(metadataPath, checkExists = false)
-              ForceReleaseResult.Released
-            else ForceReleaseResult.NoLockPresent
-          finally lock.release()
-      finally channel.close()
+            val lock =
+              try channel.tryLock()
+              catch case _: OverlappingFileLockException => null
+            if lock == null then ForceReleaseResult.LiveHolderRefused(readMetadataSilent())
+            else
+              try
+                if metadataPresent then
+                  val _ = os.remove(metadataPath, checkExists = false)
+                  ForceReleaseResult.Released
+                else ForceReleaseResult.NoLockPresent
+              finally lock.release()
+          finally channel.close()
+    }
   }
 
   private def acquireOnce(metadata: LockMetadata, acceptStale: Boolean): IO[Acquisition] = IO.blocking {
+    monitor.synchronized {
+      holder match
+        case Some(h) =>
+          // Same instance already owns the OS lock — share it via ref count. The new Resource scope's release will
+          // decrement; the OS lock drops only when the last reference goes away (regardless of release order).
+          holder = Some(h.copy(refCount = h.refCount + 1))
+          Acquisition.Refcounted(LockAcquireResult.Acquired)
+        case None =>
+          tryFreshAcquireLocked(metadata, acceptStale)
+    }
+  }
+
+  /** PRECONDITION: caller holds `monitor` and `holder` is `None`. */
+  private def tryFreshAcquireLocked(metadata: LockMetadata, acceptStale: Boolean): Acquisition =
     ensureParentDir()
     val channel = openChannel()
     try
@@ -59,67 +100,72 @@ final class FileProcessLock(paths: ForgePaths) extends ProcessLock:
         try channel.tryLock()
         catch case _: OverlappingFileLockException => null
       if lock == null then
-        // Either another process holds the OS lock (tryLock returned null) or the same JVM already locked the
-        // channel (OFLE caught above). Both surface as `Held` with whatever metadata is on disk; an idempotent
-        // re-acquire from the same scope reads its own metadata back through PID-match below only when the OS
-        // lock was actually granted, so co-located scopes still need to fall through here for safety.
-        val existing = readMetadataSilent()
-        val sameJvm = existing.exists(_.pid == OurPid)
-        if sameJvm then
-          // The outer Resource scope owns the channel + cleanup; the nested scope does no I/O on release.
-          closeQuietly(channel)
-          Acquisition(LockAcquireResult.Acquired, cleanup = None)
-        else
-          closeQuietly(channel)
-          Acquisition(LockAcquireResult.Held(existing), cleanup = None)
-      else handleAcquired(channel, lock, metadata, acceptStale)
+        // OS lock held by another process OR by a different `FileProcessLock` instance in this JVM (same-JVM
+        // contention manifests as `OverlappingFileLockException`, caught above). Both surface as `Held` — the
+        // caller doesn't need to distinguish.
+        closeQuietly(channel)
+        Acquisition.Inert(LockAcquireResult.Held(readMetadataSilent()))
+      else handleAcquiredLocked(channel, lock, metadata, acceptStale)
     catch
       case t: Throwable =>
         closeQuietly(channel)
         throw t
-  }
 
-  private def handleAcquired(
+  /** PRECONDITION: caller holds `monitor`, `holder` is `None`, and `lock` is a freshly-acquired OS lock on `channel`.
+    */
+  private def handleAcquiredLocked(
       channel: FileChannel,
       lock: FileLock,
       metadata: LockMetadata,
       acceptStale: Boolean
   ): Acquisition =
-    val existing = readMetadataSilent()
-    existing match
+    readMetadataSilent() match
       case None =>
         writeMetadata(metadata)
-        Acquisition(LockAcquireResult.Acquired, Some(Cleanup(channel, lock, removeMetadata = true)))
+        holder = Some(Holder(channel, lock, refCount = 1))
+        Acquisition.Refcounted(LockAcquireResult.Acquired)
 
       case Some(m) if m.pid == OurPid =>
-        // We just won the OS lock fresh (the idempotent-same-scope path is handled in `acquireOnce`), so a
-        // matching-PID metadata file means our PID was reused after a prior crash. Refresh the metadata and
-        // proceed — there is no live holder to defer to.
+        // We just won the OS lock fresh (the same-instance re-acquire path is handled above in `acquireOnce` via
+        // the `holder = Some(_)` branch), so matching-PID metadata on disk means our PID was reused after a prior
+        // crashed run. Refresh the metadata and proceed — there is no live holder to defer to.
         writeMetadata(metadata)
-        Acquisition(LockAcquireResult.Acquired, Some(Cleanup(channel, lock, removeMetadata = true)))
+        holder = Some(Holder(channel, lock, refCount = 1))
+        Acquisition.Refcounted(LockAcquireResult.Acquired)
 
       case Some(stale) =>
         if acceptStale then
           writeMetadata(metadata)
-          Acquisition(LockAcquireResult.Acquired, Some(Cleanup(channel, lock, removeMetadata = true)))
+          holder = Some(Holder(channel, lock, refCount = 1))
+          Acquisition.Refcounted(LockAcquireResult.Acquired)
         else
           // Surface Stale for the caller to prompt; release the OS lock so a subsequent
           // `acquire(_, acceptStale = true)` (or a `forge unlock --force`) can re-enter cleanly.
           releaseQuietly(lock)
           closeQuietly(channel)
-          Acquisition(LockAcquireResult.Stale(stale), cleanup = None)
+          Acquisition.Inert(LockAcquireResult.Stale(stale))
 
-  private def release(acquisition: Acquisition): IO[Unit] = acquisition.cleanup match
-    case None => IO.unit
-    case Some(c) =>
-      IO.blocking {
-        try
-          if c.removeMetadata then
-            val _ = os.remove(metadataPath, checkExists = false)
-        finally
-          releaseQuietly(c.lock)
-          closeQuietly(c.channel)
-      }.handleErrorWith(_ => IO.unit)
+  private def decrementRef: IO[Unit] = IO
+    .blocking {
+      monitor.synchronized {
+        holder match
+          case Some(h) if h.refCount > 1 =>
+            holder = Some(h.copy(refCount = h.refCount - 1))
+          case Some(h) =>
+            // Last outstanding reference — release OS lock and remove our own metadata.
+            try
+              val _ = os.remove(metadataPath, checkExists = false)
+            finally
+              releaseQuietly(h.lock)
+              closeQuietly(h.channel)
+              holder = None
+          case None =>
+            // Shouldn't happen: a `Refcounted` Acquisition is only handed out when `holder` is (or becomes) Some.
+            // Defensive no-op — never throw from a release.
+            ()
+      }
+    }
+    .handleErrorWith(_ => IO.unit)
 
   private def ensureParentDir(): Unit =
     os.makeDir.all(lockPath / os.up)
@@ -154,20 +200,22 @@ final class FileProcessLock(paths: ForgePaths) extends ProcessLock:
 
 object FileProcessLock:
 
-  /** PID of the running JVM — used to discriminate idempotent re-acquires (matching PID → silent `Acquired`) from
-    * stale-metadata-from-a-different-process scenarios (mismatched PID → `Stale(_)` unless `acceptStale = true`).
+  /** PID of the running JVM — used to detect PID-reuse-after-crash on a fresh OS-lock acquire (matching PID metadata on
+    * disk while we just won the lock means a prior process from this PID-slot crashed without cleanup).
     */
   private val OurPid: Long = ProcessHandle.current().pid()
 
-  /** Internal pair returned from the acquire step: the public result variant and an optional cleanup descriptor.
-    * `cleanup = None` covers two no-op-release scenarios: (a) `Held(_)` / `Stale(_)` — we never acquired the OS lock so
-    * there is nothing to release; (b) idempotent re-acquire where the outer Resource scope owns the channel and will
-    * clean up on its own scope exit.
-    */
-  private final case class Acquisition(result: LockAcquireResult, cleanup: Option[Cleanup])
+  /** Per-instance OS-lock holder + reference count. Guarded by `FileProcessLock.monitor`. */
+  private final case class Holder(channel: FileChannel, lock: FileLock, refCount: Int)
 
-  /** Held by [[Acquisition]] for clean-release paths. `removeMetadata` is `true` for the cases where this Resource
-    * scope owns the on-disk `.lock.json`; `false` when we entered as an idempotent re-acquire whose outer scope already
-    * owns the metadata.
+  /** Internal acquire-step outcome that the Resource finalizer dispatches on:
+    *   - `Refcounted` — the caller's release decrements the ref count and drops the OS lock when it reaches zero.
+    *   - `Inert` — release is a no-op (this scope never participated in OS-lock ownership: `Held(_)` and `Stale(_)`
+    *     outcomes).
     */
-  private final case class Cleanup(channel: FileChannel, lock: FileLock, removeMetadata: Boolean)
+  private sealed trait Acquisition:
+    def result: LockAcquireResult
+
+  private object Acquisition:
+    final case class Refcounted(result: LockAcquireResult) extends Acquisition
+    final case class Inert(result: LockAcquireResult) extends Acquisition

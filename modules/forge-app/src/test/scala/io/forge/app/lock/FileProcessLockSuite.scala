@@ -65,7 +65,7 @@ class FileProcessLockSuite extends CatsEffectSuite:
         assertEquals(reacquired, LockAcquireResult.Acquired)
     }
 
-  test("idempotent re-acquire — nested scope sees Acquired via PID match, outer scope still cleans up"):
+  test("ref-counted re-acquire — nested scope shares the OS lock; metadata only removed once all refs released"):
     withTempPaths { paths =>
       val lock = new FileProcessLock(paths)
       val meta = sampleMetadata()
@@ -79,6 +79,83 @@ class FileProcessLockSuite extends CatsEffectSuite:
         }
       } *> IO.blocking {
         assert(!os.exists(paths.lockMetadataFile), "metadata should be removed once outer scope exits")
+      }
+    }
+
+  test("non-lexical re-acquire — OS lock held until ALL refs released (PR-E review round 1 P1)"):
+    // Regression for the P1 finding: an inner scope that outlives its outer must NOT silently lose the OS lock.
+    // We use `Resource.allocated` to release the outer Resource explicitly BEFORE the inner — the lexical-nesting
+    // assumption no longer holds. Per-instance refcounting on `FileProcessLock` keeps the OS lock alive until the
+    // inner ref is also released; a second `FileProcessLock` instance on the same paths still sees `Held(_)` in
+    // between.
+    withTempPaths { paths =>
+      val lock = new FileProcessLock(paths)
+      val observer = new FileProcessLock(paths)
+      for
+        outerPair <- lock.acquire(sampleMetadata(), acceptStale = false).allocated
+        (outerResult, outerFinalize) = outerPair
+        _ = assertEquals(outerResult, LockAcquireResult.Acquired)
+        innerPair <- lock.acquire(sampleMetadata(), acceptStale = false).allocated
+        (innerResult, innerFinalize) = innerPair
+        _ = assertEquals(innerResult, LockAcquireResult.Acquired)
+        // Drop outer first. Inner still holds a ref; the OS lock and metadata must persist.
+        _ <- outerFinalize
+        midState <- IO.blocking {
+          assert(os.exists(paths.lockMetadataFile), "metadata must still exist while inner ref is alive")
+        }
+        _ = midState
+        // A second `FileProcessLock` instance proves the OS lock is still effective — same-JVM contention surfaces
+        // as `Held(_)` via `OverlappingFileLockException`.
+        midObserved <- observer.acquire(sampleMetadata(pid = 999L), acceptStale = false).use(IO.pure)
+        _ = midObserved match
+          case LockAcquireResult.Held(_) => ()
+          case unexpected => fail(s"expected Held while inner ref alive, got $unexpected")
+        // Now drop inner — OS lock truly releases.
+        _ <- innerFinalize
+        gone <- IO.blocking(!os.exists(paths.lockMetadataFile))
+        _ = assert(gone, "metadata should be removed once the last ref releases")
+        // Observer can now acquire fresh.
+        finalGrab <- observer.acquire(sampleMetadata(), acceptStale = false).use(IO.pure)
+      yield assertEquals(finalGrab, LockAcquireResult.Acquired)
+    }
+
+  test("cross-instance same-JVM — second FileProcessLock on the same path sees Held while first holds"):
+    withTempPaths { paths =>
+      val instance1 = new FileProcessLock(paths)
+      val instance2 = new FileProcessLock(paths)
+      instance1.acquire(sampleMetadata(), acceptStale = false).use { _ =>
+        instance2.acquire(sampleMetadata(pid = 999L), acceptStale = false).use {
+          case LockAcquireResult.Held(meta) =>
+            IO {
+              assert(
+                meta.exists(_.pid == ProcessHandle.current().pid()),
+                s"expected Held to carry instance1's metadata, got $meta"
+              )
+            }
+          case other => IO(fail(s"expected Held, got $other"))
+        }
+      }
+    }
+
+  test("forceRelease — same-instance holder → LiveHolderRefused, OS lock and metadata preserved"):
+    // forceRelease must not yank the lock out from under an in-process holder on the same instance. The §13 spec
+    // is "live OS lock by another process → refuses"; same-JVM-same-instance is the strictest interpretation —
+    // the operator can let the holder finish or send a real signal.
+    withTempPaths { paths =>
+      val lock = new FileProcessLock(paths)
+      lock.acquire(sampleMetadata(), acceptStale = false).use { _ =>
+        for
+          result <- lock.forceRelease
+          stillThere <- IO.blocking(os.exists(paths.lockMetadataFile))
+        yield
+          result match
+            case ForceReleaseResult.LiveHolderRefused(meta) =>
+              assert(
+                meta.exists(_.pid == ProcessHandle.current().pid()),
+                s"expected refusal to carry our metadata, got $meta"
+              )
+            case other => fail(s"expected LiveHolderRefused, got $other")
+          assert(stillThere, "metadata must not be removed by a refused forceRelease")
       }
     }
 

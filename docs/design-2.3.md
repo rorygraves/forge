@@ -1409,6 +1409,31 @@ after PR-H lands.
   forge-app sources (no `.forge` literals introduced — the lock
   paths flow through `ForgePaths`). PR-F (`SessionMonitor`) is the
   next entry point.
+- 2026-05-27 — PR-E review round 1. One finding (P1, blocking):
+  the original "same-JVM + matching-PID → return Acquired with
+  cleanup = None" branch in `FileProcessLock.acquireOnce` was
+  only safe under strict lexical nesting; with `.allocated` or
+  fiber-based release the inner scope could outlive the outer,
+  observe `Acquired`, and operate without the OS lock (which the
+  outer's release had already dropped). Reworked
+  `FileProcessLock` around per-instance reference counting:
+  `monitor`-guarded `Option[Holder(channel, lock, refCount)]`;
+  every `acquire` on the same instance bumps the count and
+  shares the OS lock; the lock and metadata only drop when the
+  count reaches zero (release order no longer matters).
+  Cross-instance same-JVM contention still surfaces as `Held(_)`
+  via `OverlappingFileLockException`. `forceRelease` now refuses
+  when the same instance holds (`LiveHolderRefused` with our
+  own metadata) — `forge unlock --force` cannot yank an
+  in-process holder. Acquisition collapsed to two variants
+  (`Refcounted` / `Inert`) so the Resource finalizer dispatches
+  unambiguously. Three new regression tests pin the contract:
+  the non-lexical P1 scenario (outer released before inner —
+  observer instance still sees `Held` and the OS lock survives),
+  cross-instance same-JVM `Held` with the other instance's
+  metadata, and `forceRelease` refusing while we hold it.
+  forge-app 11 → 14; baselines elsewhere unchanged;
+  `scalafmtCheckAll` clean.
 
 ## 4. Carry-forward to v1.3
 
