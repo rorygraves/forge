@@ -914,20 +914,30 @@ The cost-cap / settle-timeout enforcer per §12 / §7.9. Lives in
                               outcome: SettleOutcome)
       extends MonitorOutcome
 
-    /** → FsmEvent.SettleTimeout(phase, reason) verbatim. */
+    /** → FsmEvent.SettleTimeout(phase, reason) verbatim.
+      * `killError` carries the Throwable.getMessage when the
+      * timer's session.kill() raised (review round 2 P2);
+      * None on the happy path. Slice-4 surfaces a Some(_) into
+      * the §19 harness.session_killed audit-log message. */
     final case class SettleTimeout(phase: SessionPhase,
-                                    reason: String)
+                                    reason: String,
+                                    killError: Option[String] = None)
       extends MonitorOutcome
 
     /** → FsmEvent.TurnBudgetBreached(phase, message). Slice-4
-      * formats `turnUsd` + `capUsd` into the message string. */
+      * formats `turnUsd` + `capUsd` into the message string.
+      * `killError` mirrors SettleTimeout's semantics (review
+      * round 2 P2). */
     final case class TurnBudgetBreached(phase: SessionPhase,
                                          turnUsd: BigDecimal,
-                                         capUsd: BigDecimal)
+                                         capUsd: BigDecimal,
+                                         killError: Option[String] = None)
       extends MonitorOutcome
 
     /** → FsmEvent.BudgetBreached(scope, message). Slice-4
-      * formats `totals` + `capUsd` into the message string. */
+      * formats `totals` + `capUsd` into the message string.
+      * No killError — feature/piece breach does NOT invoke
+      * session.kill() per §12 check 2. */
     final case class BudgetBreached(scope: BudgetScope,
                                      totals: CostTotals,
                                      capUsd: BigDecimal)
@@ -940,6 +950,12 @@ The cost-cap / settle-timeout enforcer per §12 / §7.9. Lives in
   **Number type is `BigDecimal`**, not `Double`, matching
   `Cost.usd` / `CostTotals.*` in
   `modules/forge-core/src/main/scala/io/forge/core/cost/Cost.scala`.
+  **`killError: Option[String]` is round-2 carry** —
+  `StreamingSession.kill()` is not infallible (real
+  `StreamingDriver` propagates `Subprocess.kill` failures); the
+  monitor runs the kill under `.attempt` and threads the failure's
+  `Throwable.getMessage` onto the outcome instead of dropping it,
+  so foreground `result.get` cannot hang on a raising kill.
 - [x] **F2.** `SessionMonitor` trait:
   ```scala
   final case class SessionLimits(
