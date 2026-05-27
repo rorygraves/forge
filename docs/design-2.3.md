@@ -776,16 +776,16 @@ The §9 / §15 / §11.3 step 5 logic. Pure when given fake `GhClient` /
       `forge-core.FsmEvent.Merged` ingredients without ever consulting
       `mergeStateStatus` (CI6) (3–5 tests).
 
-### 1.5 PR E — `forge-app` skeleton + `ProcessLock` — ⏳ pending
+### 1.5 PR E — `forge-app` skeleton + `ProcessLock` — ✅ landed
 
 `forge-app` currently has zero sources too. PR-E lays its skeleton
 and ships the file-channel lock per §13.
 
-- [ ] **E1.** Module skeleton under
+- [x] **E1.** Module skeleton under
   `modules/forge-app/src/main/scala/io/forge/app/`. No `main` entry
   point yet — that's Slice 4. PR-E just creates the package
   structure (`io.forge.app.lock`, `io.forge.app.monitor`).
-- [ ] **E2.** `ProcessLock` trait in `io.forge.app.lock`:
+- [x] **E2.** `ProcessLock` trait in `io.forge.app.lock`:
   ```scala
   final case class LockMetadata(
     pid: Long,
@@ -819,7 +819,7 @@ and ships the file-channel lock per §13.
   surfaced and the CLI prompts (TUI: BM5). The `Held` case includes
   `otherMetadata: Option[LockMetadata]` because `.lock.json` may be
   absent or unparseable while the OS lock is held.
-- [ ] **E3.** `FileProcessLock(paths: ForgePaths)` implementation:
+- [x] **E3.** `FileProcessLock(paths: ForgePaths)` implementation:
     - On `acquire`:
       1. Ensure `paths.lockFile.parent` exists (`os.makeDir.all`).
       2. Open `paths.lockFile` via `FileChannel.open(... CREATE,
@@ -847,7 +847,7 @@ and ships the file-channel lock per §13.
       metadata, return `Released`. No metadata + no live lock →
       `NoLockPresent`.
   Spec: v1.2 §13, design-rationale BM4 / BM5.
-- [ ] **E4.** `FileProcessLockSuite` under
+- [x] **E4.** `FileProcessLockSuite` under
   `modules/forge-app/src/test/scala/io/forge/app/lock/` — **same-JVM
   unit cases only**. Live cross-process contention (which exercises
   the OS-level `FileChannel` lock semantics that no fake / no
@@ -1377,6 +1377,38 @@ after PR-H lands.
   (emit-before-sleep regression); two pre-existing
   `BranchProtectionCacheSuite` time-handling failures on clean
   HEAD are unrelated. `scalafmtAll` re-ran clean.
+- 2026-05-27 — PR-E landed. `forge-app` module skeleton now exists
+  under `io.forge.app.lock`: `LockMetadata` (PID/host/startedAt/
+  command/feature with a `LockMetadata.Unknown` sentinel for
+  unparseable `.lock.json`), `LockAcquireResult`
+  (`Acquired | Stale(meta) | Held(otherMeta)`),
+  `ForceReleaseResult` (`Released | LiveHolderRefused(meta) |
+  NoLockPresent`), the `ProcessLock` trait, and `FileProcessLock`
+  — `FileChannel.tryLock` on `paths.lockFile` paired with
+  upickle-encoded sibling `paths.lockMetadataFile`. The acquire
+  flow distinguishes (a) idempotent same-JVM re-acquire (PID match
+  → outer scope owns cleanup), (b) PID-reuse-after-crash
+  (matching-PID metadata on a fresh OS lock — rewrite + Acquired),
+  and (c) foreign-PID stale (Stale unless `acceptStale = true`).
+  `Resource.release` drops the OS lock and removes our own metadata
+  only on clean shutdown; a JVM crash leaves the metadata so the
+  next start-up can recover via Stale. `forceRelease` opens a
+  fresh channel and refuses if a live holder still has the OS lock.
+  Test scope: `forge-app` 0 → 11 — `FileProcessLockSuite` covers
+  metadata round-trip, first acquire, clean release + re-acquire,
+  idempotent nested scope (PID match), stale + acceptStale=false,
+  stale + acceptStale=true, unparseable JSON → Stale(Unknown),
+  parent-dir auto-creation, and three `forceRelease` paths
+  (no-lock, stale-only Released, lock-file-but-no-metadata
+  NoLockPresent). Cross-JVM `Held(_)` / `forceRelease`
+  live-refusal / sibling-crash scenarios are scoped to PR-G G3
+  per the I/O-contracts-need-integration-tests feedback memory.
+  Baselines: `forge-core` 358 / `forge-agents` 181 / `forge-git`
+  162 / `forge-it` 11 unchanged. `scalafmtCheckAll` clean.
+  `ForgePathsSuite` `os.walk` sweep still green over the new
+  forge-app sources (no `.forge` literals introduced — the lock
+  paths flow through `ForgePaths`). PR-F (`SessionMonitor`) is the
+  next entry point.
 
 ## 4. Carry-forward to v1.3
 
