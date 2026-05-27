@@ -24,8 +24,15 @@ import io.forge.core.fsm.{BudgetScope, SessionPhase, SettleOutcome}
   * complete; the surrounding `Resource.background` then cancels the timer/processor fiber. To stop that cancellation
   * from interrupting `session.kill()` (which has its own SIGTERM → 5s grace → SIGKILL state machine and would orphan a
   * runaway subprocess if cut short), the winner runs its side effects first and **only then** publishes the outcome,
-  * all inside `IO.uncancelable`. The atomic claim (`winner.modify(_ => (true, !_))`) ensures exactly one fiber goes
-  * through that path — losers find the claim already set and become no-ops.
+  * all inside `IO.uncancelable`. The atomic claim (`winnerClaimed.modify(_ => (true, !_))`) ensures exactly one fiber
+  * goes through that path — losers find the claim already set and become no-ops.
+  *
+  * **Kill-failure resilience (PR-F review round 2 P2).** [[io.forge.agents.StreamingSession.kill]] is not infallible;
+  * the real `StreamingDriver` propagates `Subprocess.kill` failures. If the kill raises, the winner must still publish
+  * the outcome or `result.get` hangs forever (the loser fibers see `winnerClaimed = true` and become no-ops, so no
+  * other path can publish). `finishWithKill` therefore runs the kill under `attempt`, decorates the outcome with the
+  * `Throwable.getMessage` on failure, and always completes the Deferred. Outcomes that don't perform a side effect
+  * route through `finish` (`sideEffect = IO.unit`, never throws, `killError` always `None`).
   *
   * The monitor reads `runningTotals` via `updateAndGet` but **does not reset** `CostTotals.turn` on turn boundaries —
   * that is the orchestrator's responsibility per the contract docstring on [[SessionMonitor]]. The per-turn cap is
@@ -54,24 +61,36 @@ final class RealSessionMonitor extends SessionMonitor:
         winnerClaimed <- Ref.of[IO, Boolean](false)
         pendingBreach <- Ref.of[IO, Option[MonitorOutcome.BudgetBreached]](None)
 
-        // Claim the right to publish, run side effects, then publish — atomically with respect to cancellation. Losers
-        // (concurrent producers, or anyone after the winner) become no-ops because `winnerClaimed` is already true.
-        finishAsWinner = (outcome: MonitorOutcome, sideEffect: IO[Unit]) =>
+        // Claim the right to publish, run the kill under `attempt` (a kill failure must NOT orphan the monitor —
+        // see round 2 P2 in the class docstring), then publish the outcome. The outcome is built from the captured
+        // kill failure (None on success) so the diagnostic isn't dropped. All uncancelable so the surrounding
+        // Resource.background cannot cut a partial kill short (round 1 P1).
+        finishWithKill = (mkOutcome: Option[String] => MonitorOutcome, kill: IO[Unit]) =>
           IO.uncancelable { _ =>
             winnerClaimed.modify(c => (true, !c)).flatMap { won =>
-              if won then sideEffect *> result.complete(outcome).void
+              if won then
+                kill.attempt.flatMap { res =>
+                  val killError = res.fold(t => Some(Option(t.getMessage).getOrElse(t.toString)), _ => None)
+                  result.complete(mkOutcome(killError)).void
+                }
               else IO.unit
             }
           }
 
+        // Helper for outcomes that don't perform any side effect. `IO.unit` cannot fail, so `killError` is always
+        // `None` here; the through-`finishWithKill` plumbing keeps the claim + uncancelable + always-publish
+        // discipline in one place.
+        finish = (outcome: MonitorOutcome) => finishWithKill(_ => outcome, IO.unit)
+
         timer = IO.sleep(limits.settleTimeout).flatMap { _ =>
-          val outcome =
-            MonitorOutcome.SettleTimeout(phase, s"settle timeout ${limits.settleTimeout} expired")
-          finishAsWinner(outcome, session.kill())
+          val reason = s"settle timeout ${limits.settleTimeout} expired"
+          finishWithKill(killErr => MonitorOutcome.SettleTimeout(phase, reason, killErr), session.kill())
         }
 
         processor = events
-          .evalMap(handleEvent(phase, piece, session, limits, runningTotals, pendingBreach, finishAsWinner))
+          .evalMap(
+            handleEvent(phase, piece, session, limits, runningTotals, pendingBreach, finish, finishWithKill)
+          )
           .compile
           .drain
           .flatMap { _ =>
@@ -79,15 +98,12 @@ final class RealSessionMonitor extends SessionMonitor:
             // leave the field open for the timer to fire (the stream-without-Result case is itself anomalous and
             // SettleTimeout is the right backstop).
             pendingBreach.get.flatMap {
-              case Some(b) => finishAsWinner(b, IO.unit)
+              case Some(b) => finish(b)
               case None => IO.unit
             }
           }
           .handleErrorWith { err =>
-            finishAsWinner(
-              MonitorOutcome.Settled(phase, SettleOutcome.AdapterError(err.toString)),
-              IO.unit
-            )
+            finish(MonitorOutcome.Settled(phase, SettleOutcome.AdapterError(err.toString)))
           }
 
         outcome <- (timer.background, processor.background).tupled.use(_ => result.get)
@@ -100,7 +116,8 @@ final class RealSessionMonitor extends SessionMonitor:
       limits: SessionLimits,
       runningTotals: Ref[IO, CostTotals],
       pendingBreach: Ref[IO, Option[MonitorOutcome.BudgetBreached]],
-      finishAsWinner: (MonitorOutcome, IO[Unit]) => IO[Unit]
+      finish: MonitorOutcome => IO[Unit],
+      finishWithKill: (Option[String] => MonitorOutcome, IO[Unit]) => IO[Unit]
   )(event: AgentEvent): IO[Unit] =
     event match
       case AgentEvent.CostUpdate(cost) =>
@@ -112,19 +129,19 @@ final class RealSessionMonitor extends SessionMonitor:
               turn = old.turn + cost.usd
             )
           }
-          .flatMap(applyCaps(phase, piece, session, limits, pendingBreach, finishAsWinner))
+          .flatMap(applyCaps(phase, piece, session, limits, pendingBreach, finish, finishWithKill))
 
       case AgentEvent.Result(success, _) =>
         // End-of-turn boundary: a pending feature/piece breach beats Settled (§12 check 2 — current turn was
         // allowed to complete, now we surface the breach so the orchestrator refuses the next spawn).
         pendingBreach.get.flatMap {
-          case Some(b) => finishAsWinner(b, IO.unit)
+          case Some(b) => finish(b)
           case None =>
             val outcome = MonitorOutcome.Settled(
               phase,
               if success then SettleOutcome.Clean else SettleOutcome.AdapterError("non-zero result")
             )
-            finishAsWinner(outcome, IO.unit)
+            finish(outcome)
         }
 
       case _ => IO.unit
@@ -135,12 +152,15 @@ final class RealSessionMonitor extends SessionMonitor:
       session: StreamingSession,
       limits: SessionLimits,
       pendingBreach: Ref[IO, Option[MonitorOutcome.BudgetBreached]],
-      finishAsWinner: (MonitorOutcome, IO[Unit]) => IO[Unit]
+      finish: MonitorOutcome => IO[Unit],
+      finishWithKill: (Option[String] => MonitorOutcome, IO[Unit]) => IO[Unit]
   )(totals: CostTotals): IO[Unit] =
     if totals.turn > limits.maxTurnCostUsd then
       // Per-turn breach: kill immediately (§12 check 3) and publish.
-      val outcome = MonitorOutcome.TurnBudgetBreached(phase, totals.turn, limits.maxTurnCostUsd)
-      finishAsWinner(outcome, session.kill())
+      finishWithKill(
+        killErr => MonitorOutcome.TurnBudgetBreached(phase, totals.turn, limits.maxTurnCostUsd, killErr),
+        session.kill()
+      )
     else
       // Feature/piece breach: record once and let the current turn complete (§12 check 2). Use `orElse` so a
       // subsequent CostUpdate that also breaches doesn't overwrite the first detected breach.

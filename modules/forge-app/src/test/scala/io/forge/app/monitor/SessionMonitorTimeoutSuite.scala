@@ -42,9 +42,10 @@ class SessionMonitorTimeoutSuite extends CatsEffectSuite:
   test("Stream.never → settle timeout fires, kill() invoked, outcome is SettleTimeout"):
     runMonitor(SessionPhase.Spec, Stream.never[IO]).map { case (outcome, kills) =>
       outcome match
-        case MonitorOutcome.SettleTimeout(phase, reason) =>
+        case MonitorOutcome.SettleTimeout(phase, reason, killError) =>
           assertEquals(phase, SessionPhase.Spec)
           assert(reason.contains(settleTimeout.toString), s"reason should reference the timeout: $reason")
+          assertEquals(killError, None, "no kill failure on the happy path")
         case other => fail(s"expected SettleTimeout, got $other")
       assertEquals(kills, 1)
     }
@@ -58,8 +59,8 @@ class SessionMonitorTimeoutSuite extends CatsEffectSuite:
     ) ++ Stream.never[IO]
     runMonitor(SessionPhase.Implement, events).map { case (outcome, kills) =>
       outcome match
-        case MonitorOutcome.SettleTimeout(SessionPhase.Implement, _) => ()
-        case other => fail(s"expected SettleTimeout(Implement, _), got $other")
+        case MonitorOutcome.SettleTimeout(SessionPhase.Implement, _, None) => ()
+        case other => fail(s"expected SettleTimeout(Implement, _, None), got $other")
       assertEquals(kills, 1)
     }
 

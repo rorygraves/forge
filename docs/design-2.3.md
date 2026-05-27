@@ -1500,6 +1500,32 @@ after PR-H lands.
   trailing `Result` so they exercise the canonical end-of-turn flush
   path rather than the defensive stream-end backstop. Baselines
   elsewhere unchanged; `scalafmtCheckAll` clean.
+- 2026-05-27 — PR-F review round 2. One P2 finding addressed.
+  `RealSessionMonitor.finishAsWinner` ran `session.kill()` bare under
+  `IO.uncancelable`: a raising kill (e.g. `Subprocess.kill` propagating
+  a SIGKILL refusal, or a generic `RuntimeException` from a wrapped
+  driver) would kill the background fiber, leave `winnerClaimed = true`,
+  and the foreground `result.get` would hang forever because every
+  loser fiber sees the claim already set and becomes a no-op.
+  `StreamingSession.kill()` is not documented as infallible and the real
+  `StreamingDriver` propagates `sp.kill()` failures. Reworked the winner
+  path: `finishWithKill(mkOutcome: Option[String] => MonitorOutcome,
+  kill: IO[Unit])` runs the kill under `.attempt`, captures the failure's
+  `Throwable.getMessage` (falling back to `t.toString` when the message
+  is null — defensive against custom exceptions), and always completes
+  the Deferred via `mkOutcome(killError)`. Added a non-killing helper
+  `finish(outcome)` that routes through the same plumbing with `IO.unit`
+  as the side effect so the claim / uncancelable / always-publish
+  discipline lives in one place. `MonitorOutcome.SettleTimeout` and
+  `MonitorOutcome.TurnBudgetBreached` gain a `killError: Option[String]`
+  field (default `None`) so the Slice-4 orchestrator can surface the
+  failed-kill diagnostic into the §19 `harness.session_killed` audit
+  entry without losing the underlying SettleTimeout / TurnBudgetBreached
+  signal. forge-app 43 → 46 — new `SessionMonitorReviewRound2Suite` pins
+  three regressions: settle-timeout-with-failing-kill,
+  turn-budget-with-failing-kill, and the null-message Throwable
+  defensive fallback. Three existing test pattern matches
+  (`SettleTimeout`) widened for the new field; `scalafmtCheckAll` clean.
 
 ## 4. Carry-forward to v1.3
 

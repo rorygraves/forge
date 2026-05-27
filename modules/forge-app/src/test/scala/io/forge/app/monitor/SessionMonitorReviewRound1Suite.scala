@@ -179,7 +179,7 @@ class SessionMonitorReviewRound1Suite extends CatsEffectSuite:
       yield (outcome, kills)
     TestControl.executeEmbed(program).map { case (outcome, kills) =>
       outcome match
-        case MonitorOutcome.SettleTimeout(SessionPhase.Implement, _) => ()
+        case MonitorOutcome.SettleTimeout(SessionPhase.Implement, _, None) => ()
         case other => fail(s"expected SettleTimeout, got $other")
       assertEquals(kills, 1, "settle timeout must kill even with a pending feature breach")
     }

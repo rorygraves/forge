@@ -33,16 +33,26 @@ object MonitorOutcome:
   final case class Settled(phase: SessionPhase, outcome: SettleOutcome) extends MonitorOutcome
 
   /** Wall-clock cap expired before the driver settled; the monitor invoked `session.kill()` before returning. Maps to
-    * [[io.forge.core.fsm.FsmEvent.SettleTimeout]] verbatim.
+    * [[io.forge.core.fsm.FsmEvent.SettleTimeout]] verbatim. `killError` carries the `Throwable.getMessage` when
+    * `session.kill()` raised (PR-F review round 2 P2 — monitor must publish even if kill fails so foreground doesn't
+    * hang); `None` when the kill ran cleanly. The Slice-4 orchestrator surfaces a non-`None` `killError` into the §19
+    * `harness.session_killed` audit-log message so operators see the failed-kill diagnostic without losing the
+    * underlying SettleTimeout signal.
     */
-  final case class SettleTimeout(phase: SessionPhase, reason: String) extends MonitorOutcome
+  final case class SettleTimeout(phase: SessionPhase, reason: String, killError: Option[String] = None)
+      extends MonitorOutcome
 
   /** Per-turn USD cap breached mid-turn (§12 check 3). The monitor invoked `session.kill()` before returning. Maps to
     * [[io.forge.core.fsm.FsmEvent.TurnBudgetBreached]]; Slice-4 formats `turnUsd` + `capUsd` into the FsmEvent message
-    * string (e.g. `s"turn cost \$$turnUsd exceeded cap \$$capUsd"`).
+    * string (e.g. `s"turn cost \$$turnUsd exceeded cap \$$capUsd"`). `killError` mirrors the SettleTimeout semantics
+    * above — populated when `session.kill()` raised.
     */
-  final case class TurnBudgetBreached(phase: SessionPhase, turnUsd: BigDecimal, capUsd: BigDecimal)
-      extends MonitorOutcome
+  final case class TurnBudgetBreached(
+      phase: SessionPhase,
+      turnUsd: BigDecimal,
+      capUsd: BigDecimal,
+      killError: Option[String] = None
+  ) extends MonitorOutcome
 
   /** Feature- or piece-scope USD cap breached (§12 check 2). The monitor does **not** call `session.kill()` — the
     * current turn completes and the orchestrator refuses the next spawn. Maps to
