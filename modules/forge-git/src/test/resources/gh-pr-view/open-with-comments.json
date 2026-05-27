@@ -9,25 +9,25 @@
   "statusCheckRollup": [],
   "comments": [
     {
-      "databaseId": 99,
-      "body": "old comment, baseline expected to filter",
+      "id": "IC_kwDOAB000001",
+      "body": "first comment from alice",
       "createdAt": "2026-05-26T09:00:00Z",
       "author": { "login": "alice" }
     },
     {
-      "databaseId": 100,
-      "body": "boundary comment — baseline filter must use Long, not String, ordering",
+      "id": "IC_kwDOAB000002",
+      "body": "second comment from alice",
       "createdAt": "2026-05-26T09:30:00Z",
       "author": { "login": "alice" }
     },
     {
-      "databaseId": 101,
-      "body": "new comment — visible past baseline 100",
+      "id": "IC_kwDOAB000003",
+      "body": "new comment from bob",
       "createdAt": "2026-05-26T10:00:00Z",
       "author": { "login": "bob" }
     },
     {
-      "databaseId": 110,
+      "id": "IC_kwDOAB000004",
       "body": "forge-bot historical comment — should be filtered",
       "createdAt": "2026-05-26T10:30:00Z",
       "author": { "login": "forge-bot" }

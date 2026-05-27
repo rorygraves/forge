@@ -127,35 +127,52 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
         assertEquals(snap.mergeCommit, Some(Sha("7777777777777777777777777777777777777777")))
       case other => fail(s"expected Right, got $other")
 
-  // --- baseline + bot filtering (RL2) ----------------------------------------
+  // --- baseline + bot filtering (RL2 / S3-7) ---------------------------------
 
-  test("open-with-comments at baseline=None, botLogin=forge-bot: 99/100/101 visible, forge-bot dropped"):
+  test("open-with-comments at baseline=None, botLogin=forge-bot: alice + bob visible, forge-bot dropped"):
     decodeFixture("open-with-comments.json") match
       case Right(DecodedSnapshot(snap, _)) =>
         val authors = snap.unseenComments.map(_.author)
         val ids = snap.unseenComments.map(_.id).toSet
         assert(!authors.contains("forge-bot"), s"bot author leaked: $authors")
-        assertEquals(ids, Set("99", "100", "101"))
+        assertEquals(
+          ids,
+          Set("IC_kwDOAB000001", "IC_kwDOAB000002", "IC_kwDOAB000003")
+        )
       case other => fail(s"expected Right, got $other")
 
-  test("open-with-comments at baseline=Some(100): only id 101 survives the > filter"):
-    val baseline = PollBaseline(lastSeenCommentId = Some(100L), lastSeenReviewId = None, Set.empty)
+  test("open-with-comments at baseline=Some(09:30): only the 10:00 entry from bob survives"):
+    val baseline = PollBaseline(
+      lastSeenCommentAt = Some(Instant.parse("2026-05-26T09:30:00Z")),
+      lastSeenReviewAt = None,
+      Set.empty
+    )
     decodeFixture("open-with-comments.json", baseline = baseline) match
       case Right(DecodedSnapshot(snap, _)) =>
-        assertEquals(snap.unseenComments.map(_.id), Vector("101"))
+        assertEquals(snap.unseenComments.map(_.id), Vector("IC_kwDOAB000003"))
+        assertEquals(snap.unseenComments.map(_.author), Vector("bob"))
       case other => fail(s"expected Right, got $other")
 
-  test("open-with-comments at baseline=Some(99): 100 and 101 both survive (regression on Long ordering)"):
-    val baseline = PollBaseline(lastSeenCommentId = Some(99L), lastSeenReviewId = None, Set.empty)
+  test("open-with-comments at baseline=Some(09:00): two later alice comments + bob's survive"):
+    val baseline = PollBaseline(
+      lastSeenCommentAt = Some(Instant.parse("2026-05-26T09:00:00Z")),
+      lastSeenReviewAt = None,
+      Set.empty
+    )
     decodeFixture("open-with-comments.json", baseline = baseline) match
       case Right(DecodedSnapshot(snap, _)) =>
-        // This is the fixture-level expression of the lexicographic-vs-Long ordering trap. If the decoder ever
-        // stringifies the id for comparison, this assertion flips.
-        assertEquals(snap.unseenComments.map(_.id), Vector("100", "101"))
+        assertEquals(
+          snap.unseenComments.map(_.id),
+          Vector("IC_kwDOAB000002", "IC_kwDOAB000003")
+        )
       case other => fail(s"expected Right, got $other")
 
-  test("open-with-comments at baseline=Some(101): empty unseen comments"):
-    val baseline = PollBaseline(lastSeenCommentId = Some(101L), lastSeenReviewId = None, Set.empty)
+  test("open-with-comments at baseline=Some(10:00): equality excluded → bob's also dropped"):
+    val baseline = PollBaseline(
+      lastSeenCommentAt = Some(Instant.parse("2026-05-26T10:00:00Z")),
+      lastSeenReviewAt = None,
+      Set.empty
+    )
     decodeFixture("open-with-comments.json", baseline = baseline) match
       case Right(DecodedSnapshot(snap, _)) =>
         assertEquals(snap.unseenComments, Vector.empty[PrComment])
@@ -166,8 +183,49 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
       case Right(DecodedSnapshot(snap, _)) =>
         val authors = snap.unseenComments.map(_.author)
         assert(!authors.contains("alice"), s"alice should be filtered: $authors")
-        // bob (id 101) survives; forge-bot (id 110) is no longer special and surfaces
+        // bob survives; forge-bot (no longer the bot) surfaces
         assertEquals(snap.unseenComments.map(_.author).toSet, Set("bob", "forge-bot"))
+      case other => fail(s"expected Right, got $other")
+
+  // --- empty-body filter (review round 1) ------------------------------------
+
+  test("open-empty-approval: APPROVED review with empty body is filtered (no spurious unseen comment)"):
+    decodeFixture("open-empty-approval.json") match
+      case Right(DecodedSnapshot(snap, _)) =>
+        // The review IS empty-bodied + APPROVED. The FSM uses unseenComments.nonEmpty as a "human override" signal,
+        // so an empty approval must NOT surface. reviewDecision still carries the approval state.
+        assertEquals(snap.unseenComments, Vector.empty[PrComment])
+        assertEquals(snap.reviewDecision, Some(ReviewDecision.Approved))
+      case other => fail(s"expected Right, got $other")
+
+  test("inline empty-body comment is filtered too (robustness)"):
+    val json = ujson.read("""
+      {
+        "number": 1, "state": "OPEN", "mergedAt": null, "mergeCommit": null,
+        "mergeable": "MERGEABLE", "reviewDecision": null,
+        "statusCheckRollup": [],
+        "comments": [
+          {
+            "id": "IC_empty",
+            "body": "",
+            "createdAt": "2026-05-26T10:00:00Z",
+            "author": { "login": "alice" }
+          },
+          {
+            "id": "IC_filled",
+            "body": "this one carries signal",
+            "createdAt": "2026-05-26T10:05:00Z",
+            "author": { "login": "alice" }
+          }
+        ],
+        "reviews": [],
+        "commits": [{ "oid": "1111111111111111111111111111111111111111" }]
+      }
+    """)
+    PrSnapshotDecoder.decode(json, PollBaseline.empty, DefaultBot) match
+      case Right(DecodedSnapshot(snap, _)) =>
+        assertEquals(snap.unseenComments.size, 1)
+        assertEquals(snap.unseenComments.head.id, "IC_filled")
       case other => fail(s"expected Right, got $other")
 
   // --- negative cases ---------------------------------------------------------
@@ -291,28 +349,45 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
         )
       case other => fail(s"expected Right, got $other")
 
-  test("review entry with empty body still surfaces as a PrComment"):
+  test("comments[].id is required — missing id surfaces MissingField"):
     val json = ujson.read("""
       {
         "number": 1, "state": "OPEN", "mergedAt": null, "mergeCommit": null,
-        "mergeable": "MERGEABLE", "reviewDecision": "APPROVED",
+        "mergeable": "MERGEABLE", "reviewDecision": null,
         "statusCheckRollup": [],
-        "comments": [],
-        "reviews": [
+        "comments": [
           {
-            "databaseId": 5,
-            "submittedAt": "2026-05-26T10:00:00Z",
-            "state": "APPROVED",
-            "body": "",
+            "body": "no id",
+            "createdAt": "2026-05-26T10:00:00Z",
             "author": { "login": "alice" }
           }
         ],
+        "reviews": [],
         "commits": [{ "oid": "1111111111111111111111111111111111111111" }]
       }
     """)
     PrSnapshotDecoder.decode(json, PollBaseline.empty, DefaultBot) match
-      case Right(DecodedSnapshot(snap, _)) =>
-        assertEquals(snap.unseenComments.size, 1)
-        assertEquals(snap.unseenComments.head.body, "")
-        assertEquals(snap.unseenComments.head.id, "5")
-      case other => fail(s"expected Right, got $other")
+      case Left(DecodeError.MissingField("comments[0].id")) => ()
+      case other => fail(s"expected MissingField(comments[0].id), got $other")
+
+  test("malformed createdAt on a comment → MalformedShape with the path"):
+    val json = ujson.read("""
+      {
+        "number": 1, "state": "OPEN", "mergedAt": null, "mergeCommit": null,
+        "mergeable": "MERGEABLE", "reviewDecision": null,
+        "statusCheckRollup": [],
+        "comments": [
+          {
+            "id": "IC_kwDOAB1",
+            "body": "x",
+            "createdAt": "tomorrow",
+            "author": { "login": "alice" }
+          }
+        ],
+        "reviews": [],
+        "commits": [{ "oid": "1111111111111111111111111111111111111111" }]
+      }
+    """)
+    PrSnapshotDecoder.decode(json, PollBaseline.empty, DefaultBot) match
+      case Left(DecodeError.MalformedShape("comments[0].createdAt", "ISO instant", "tomorrow")) => ()
+      case other => fail(s"expected MalformedShape on comments[0].createdAt, got $other")

@@ -1,0 +1,23 @@
+{
+  "number": 111,
+  "state": "OPEN",
+  "mergedAt": null,
+  "mergeCommit": null,
+  "mergeable": "MERGEABLE",
+  "mergeStateStatus": "CLEAN",
+  "reviewDecision": "APPROVED",
+  "statusCheckRollup": [],
+  "comments": [],
+  "reviews": [
+    {
+      "id": "PRR_kwDOAB000123",
+      "body": "",
+      "submittedAt": "2026-05-26T11:00:00Z",
+      "state": "APPROVED",
+      "author": { "login": "alice" }
+    }
+  ],
+  "commits": [
+    { "oid": "dddddddddddddddddddddddddddddddddddddddd" }
+  ]
+}

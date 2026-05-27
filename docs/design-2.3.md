@@ -324,23 +324,25 @@ PR-B is the *decode-only* PR. Pure functions from `ujson.Value` →
   `io.forge.git.watcher`:
   ```scala
   final case class PollBaseline(
-    lastSeenCommentId: Option[Long],
-    lastSeenReviewId: Option[Long],
-    lastSeenCheckRunIds: Set[Long]
+    lastSeenCommentAt: Option[Instant],
+    lastSeenReviewAt: Option[Instant],
+    lastSeenCheckRunIds: Set[String]
   )
   ```
   Captured at PR creation per RL2 / §11.4 step 6. The orchestrator
   (Slice 4) owns persistence; Slice-3 stores the baseline alongside
   `Feature` (or in the manifest piece record — Slice 4 settles
   exactly where). The decoder consumes a baseline and filters
-  comments / reviews to those with numeric id `>
-  baseline.lastSeenCommentId`. **All GitHub id comparisons are
-  numeric (`Long`), not lexicographic on stringified ids** — GitHub
-  `databaseId` values are 64-bit integers and routinely cross the
-  decimal-digit-count boundary (e.g. `"100" < "99"` under string
-  compare). The wire JSON exposes `databaseId` as a JSON number;
-  the decoder reads it via `json("databaseId").num.toLong`. Stored
-  on disk as `Long` via uPickle's default codec.
+  comments / reviews to those with `createdAt.isAfter(...)` /
+  `submittedAt.isAfter(...)` against the cursor.
+  **Cursor type is `Instant`, not `Long` `databaseId` (review round
+  1 — see design-rationale S3-7).** The original B1 sketch keyed off
+  numeric `databaseId`, but `gh pr view --json comments,reviews`
+  doesn't expose `databaseId` — each entry carries a String `id`
+  (GraphQL global node id) plus an ISO-8601 timestamp (`createdAt`
+  for comments, `submittedAt` for reviews). Timestamps are well-typed
+  under `Instant.isAfter` and the original Long-via-Double precision
+  concern dissolves with the switch.
 - [x] **B2.** `PrSnapshotDecoder.decode(json: ujson.Value, baseline:
   PollBaseline, botLogin: String): Either[DecodeError,
   DecodedSnapshot]` — the canonical decoder entrypoint.
@@ -388,31 +390,40 @@ PR-B is the *decode-only* PR. Pure functions from `ujson.Value` →
       PR-B emits everything under `observed`, leaves `required` as
       `Vector.empty`. PR-C `BranchManager.snapshotWithRequiredOverlay`
       promotes the named subset.
-    - `comments` → filter to entries with `databaseId` (the monotonic
-      `Long` id) greater than `baseline.lastSeenCommentId`; convert
-      to `PrComment`. Skip Forge's own comments (`author.login ==
+    - `comments` → filter to entries with `createdAt` strictly after
+      `baseline.lastSeenCommentAt` via [[Comments.unseen]]; convert
+      to `PrComment` (id = the wire `id` string, the GraphQL global
+      node id). Skip Forge's own comments (`author.login ==
       config.github.botLogin`, default `"forge-bot"` — Slice 4 wires
       the actual login; PR-B accepts the login as a decoder arg).
-    - `latestReviews` / `reviews` → folded into the same
-      `unseenComments` vector for FSM purposes (the FSM cares about
-      "new human signal"; the distinction between issue-comment and
-      review-comment is audit-trail-only). Each review's `body` lands
-      as a `PrComment` with `path = None` / `line = None`.
+      **Also skip entries with empty `body`** (review round 1) — the
+      FSM uses `unseenComments.nonEmpty` as a human-override signal
+      and a literally-empty comment would spuriously trip it.
+    - `reviews` → folded into the same `unseenComments` vector for
+      FSM purposes; baseline cursor is `submittedAt` vs
+      `baseline.lastSeenReviewAt`. Each review's `body` lands as a
+      `PrComment` with `path = None` / `line = None`. **Empty-body
+      review submissions are dropped** (review round 1) so plain
+      approvals don't surface as override signal; blocking review
+      state still flows through `reviewDecision ==
+      CHANGES_REQUESTED`.
     - `commits[-1].oid` → populates `DecodedSnapshot.headSha`
       (alongside the `PrSnapshot` payload), so
       `BranchManager.baseFreshness` reads it without mutating the
       `forge-core` `PrSnapshot` ADT. Empty `commits` array →
       `DecodeError.MissingField("commits[-1].oid")`.
 - [x] **B4.** **Comment baseline filter is a pure function**
-  (`Comments.unseen(rawComments, baseline)`) tested independently
-  from `decode`. Three properties:
-    - Numeric (`Long`) id ordering — explicitly assert
-      `unseen(c"99", baseline = Some(100L)).isEmpty` and
-      `unseen(c"100", baseline = Some(99L)).nonEmpty` so a future
-      "let's stringify for serialization convenience" regression
-      can't reintroduce the lexicographic ordering bug.
-    - Empty baseline → every comment is unseen.
-    - Baseline equal to last comment → empty unseen set.
+  (`Comments.unseen(entries, baseline)`) tested independently from
+  `decode`. Updated post review round 1 to take `(Instant, A)` pairs
+  + `Option[Instant]` baseline (S3-7). Three properties:
+    - Strictly-greater comparison via `Instant.isAfter` — `at ==
+      baseline` is excluded. Pinned with a dedicated "equality
+      boundary" test so a future "let's use `compareTo >= 0`"
+      regression can't slip through.
+    - Empty baseline → every entry is unseen.
+    - Baseline equal to the latest entry's timestamp → empty unseen
+      set. Plus an ordering-preservation test (decoder relies on
+      input order being preserved by the helper).
 - [x] **B5.** Decoder test suite under
   `modules/forge-git/src/test/scala/io/forge/git/watcher/`. Fixture
   JSON files under
@@ -438,17 +449,23 @@ PR-B is the *decode-only* PR. Pure functions from `ujson.Value` →
       *and* a malformed `mergeStateStatus: MERGED` fixture (which
       should still decode to `state.Merged = true` — that's the
       whole point of CI6).
-    - `rate-limit-error.json` — not a `pr view` payload but an error
-      shape `gh` emits when rate-limited (used by A2's classifier,
-      cross-tested here).
+    - `open-empty-approval.json` — `reviewDecision: APPROVED` with a
+      review whose `body` is `""`. Asserts the review round 1
+      empty-body filter: `unseenComments` is empty (so the FSM doesn't
+      see a spurious override) while `reviewDecision` still reflects
+      Approved.
+    - `open-with-comments.json` — exercises the timestamp baseline
+      across three real authors plus a `forge-bot` author for the
+      bot filter.
     - Negative cases: `malformed-missing-state.json`,
       `malformed-unknown-check-state.json`,
       `malformed-shape.json` — each asserts a specific `DecodeError`
       variant.
-  Suite target: 20–25 tests. This is roadmap §2.3's "fake-gh unit
-  coverage" core; every other Slice-3 component sits on top of the
-  decoded `PrSnapshot`, so getting the decoder taut here pays out
-  through PR-C/D/G.
+  Suite target: 25–30 tests (rework round 1 expanded the set to
+  cover the empty-body filter and the comments[].id requirement).
+  This is roadmap §2.3's "fake-gh unit coverage" core; every other
+  Slice-3 component sits on top of the decoded `PrSnapshot`, so
+  getting the decoder taut here pays out through PR-C/D/G.
 
 ### 1.3 PR C — `BranchManager` + `BranchProtectionCache` — ⏳ pending
 
@@ -1186,6 +1203,29 @@ after PR-H lands.
   11 baselines unchanged; `scalafmtCheckAll` clean.
   PR-C (`BranchManager` + `BranchProtectionCache`) is the next entry
   point.
+- 2026-05-27 — PR-B review round 1. Three findings:
+  (1) blocking — `gh pr view --json comments,reviews` does not
+  expose `databaseId`; `PollBaseline` switched from
+  `(lastSeenCommentId: Option[Long], lastSeenReviewId: Option[Long],
+  lastSeenCheckRunIds: Set[Long])` to
+  `(lastSeenCommentAt: Option[Instant], lastSeenReviewAt:
+  Option[Instant], lastSeenCheckRunIds: Set[String])`;
+  `Comments.unseen` now takes `(Instant, A)` pairs and uses
+  `Instant.isAfter`. Filed as design-rationale **S3-7** (includes
+  the empty-body filter — see (2)).
+  (2) high — empty-body review submissions (plain approvals) were
+  surfacing as `unseenComments`, which the FSM treats as a human
+  override; the decoder now drops empty-body entries at decode time
+  and the approval state continues to flow through `reviewDecision`.
+  (3) medium — the original `databaseId` Long-via-Double precision
+  concern is moot now that timestamps replace numeric ids.
+  `open-with-comments.json` rewritten (id strings + `createdAt`
+  spread); `open-changes-requested.json` rewritten (drop
+  `databaseId`); new fixture `open-empty-approval.json` pins the
+  empty-body filter at fixture level. Test count 70 → 73 (added
+  empty-body filter cases + missing `id` field case + malformed
+  `createdAt`; removed the "empty body still surfaces" inline test).
+  All other module baselines unchanged.
 
 ## 4. Carry-forward to v1.3
 
@@ -1297,6 +1337,29 @@ materialize get pruned; new ones surfaced by code review get added).
   `gh pr create … && gh pr view <url> --json number -q .number`
   for use behind a feature flag, though Slice 3 doesn't ship the
   fallback).
+- **S3-7 — `PollBaseline` cursors are `Instant` (`createdAt` /
+  `submittedAt`), not `databaseId: Long`; empty-body posts are
+  dropped at decode time** (PR-B review round 1, filed in
+  `design-rationale.md` S3-7). Two coupled deviations from the
+  v1.2 reading of design-rationale RL2:
+    - **Cursor type.** `gh pr view --json comments,reviews` does
+      not expose `databaseId`; entries carry a String GraphQL `id`
+      plus a timestamp (`createdAt` for comments, `submittedAt` for
+      reviews). The original PR-B plan (`Long databaseId`) would
+      have made `PRWatcher.pollOnce` fail with
+      `MissingField("comments[0].databaseId")` on every real PR
+      with human feedback. Slice 3 ships `Option[Instant]` cursors
+      and `Instant.isAfter` ordering. Slice 4 inherits this without
+      change — no orchestrator-side resolution needed; v1.3 RL2
+      pins the cursor type.
+    - **Empty-body filter.** GitHub allows empty-bodied review
+      submissions (plain approvals); the FSM treats
+      `unseenComments.nonEmpty` as a human override signal, so an
+      empty approval would spuriously kick a piece back to
+      `PieceReviewFailed`. Slice 3 drops empty-body entries at
+      decode time and the approval state continues to flow through
+      `reviewDecision`. v1.3 §9 / RL2 inherits the filter as part
+      of the `PRWatcher.watch` contract.
 
 ## 5. Cross-references
 

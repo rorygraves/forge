@@ -1,74 +1,77 @@
 package io.forge.git.watcher
 
+import java.time.Instant
+
 /** PR-B B4 — pure-helper coverage for [[Comments.unseen]] independent of the [[PrSnapshotDecoder]].
   *
-  * The point of this file is to guard the **numeric `Long` ordering** invariant: GitHub `databaseId` values are 64-bit
-  * integers, and a "let's stringify the id for serialization convenience" regression would silently flip the ordering
-  * (`"100" < "99"` lexicographically). Three properties below pin the contract:
+  * The cursor is `Instant` (review round 1, design-rationale S3-7): `gh pr view --json comments,reviews` doesn't expose
+  * `databaseId`, so the original `Long` cursor plan was unviable. The contract pinned here is:
   *
-  *   1. Numeric ordering at the digit-count boundary (99 vs 100). 2. Empty baseline → every entry is unseen. 3.
-  *      Baseline equal to the highest seen id → empty unseen set.
+  *   1. Strictly-greater comparison via [[Instant.isAfter]] — entries with `at == baseline` are excluded. 2. Empty
+  *      baseline → every entry is unseen. 3. Baseline equal to the most recent entry's timestamp → empty unseen set.
   */
 class CommentsSuite extends munit.FunSuite:
 
-  // --- numeric Long ordering at the digit-count boundary ---------------------
+  private val T0 = Instant.parse("2026-05-26T09:00:00Z")
+  private val T1 = Instant.parse("2026-05-26T09:30:00Z")
+  private val T2 = Instant.parse("2026-05-26T10:00:00Z")
+  private val T3 = Instant.parse("2026-05-26T10:30:00Z")
 
-  test("baseline = Some(100): id 99 is already seen (excluded)"):
-    val unseen = Comments.unseen(Vector((99L, "c99")), baseline = Some(100L))
+  // --- strictly-greater ordering ---------------------------------------------
+
+  test("baseline = Some(T1): entry at T0 (earlier) is excluded"):
+    val unseen = Comments.unseen(Vector((T0, "early")), baseline = Some(T1))
     assertEquals(unseen, Vector.empty[String])
 
-  test("baseline = Some(99): id 100 is unseen (Long ordering, NOT String)"):
-    val unseen = Comments.unseen(Vector((100L, "c100")), baseline = Some(99L))
-    assertEquals(unseen, Vector("c100"))
+  test("baseline = Some(T0): entry at T1 (strictly after) is unseen"):
+    val unseen = Comments.unseen(Vector((T1, "later")), baseline = Some(T0))
+    assertEquals(unseen, Vector("later"))
 
-  test("baseline = Some(99): both 99 and 100 evaluated; 100 unseen, 99 excluded"):
+  test("baseline = Some(T1): mixed input — only T2/T3 survive (strict > filter)"):
     val unseen = Comments.unseen(
-      Vector((99L, "c99"), (100L, "c100")),
-      baseline = Some(99L)
+      Vector((T0, "a"), (T1, "b"), (T2, "c"), (T3, "d")),
+      baseline = Some(T1)
     )
-    assertEquals(unseen, Vector("c100"))
+    assertEquals(unseen, Vector("c", "d"))
+
+  test("baseline = Some(t): equality is excluded (isAfter is strict)"):
+    val unseen = Comments.unseen(Vector((T1, "boundary")), baseline = Some(T1))
+    assertEquals(unseen, Vector.empty[String])
 
   // --- empty baseline ---------------------------------------------------------
 
   test("baseline = None: every entry is unseen"):
     val unseen = Comments.unseen(
-      Vector((1L, "a"), (2L, "b"), (3L, "c")),
+      Vector((T0, "a"), (T1, "b"), (T2, "c")),
       baseline = None
     )
     assertEquals(unseen, Vector("a", "b", "c"))
 
   test("baseline = None with empty input: empty output"):
-    val unseen = Comments.unseen(Vector.empty[(Long, String)], baseline = None)
+    val unseen = Comments.unseen(Vector.empty[(Instant, String)], baseline = None)
     assertEquals(unseen, Vector.empty[String])
 
-  // --- baseline equal to the highest seen id ---------------------------------
+  // --- baseline equal to the most recent entry's timestamp ------------------
 
-  test("baseline = Some(last): empty unseen set (filter is strictly greater)"):
+  test("baseline = Some(latestEntry.at): empty unseen set"):
     val unseen = Comments.unseen(
-      Vector((10L, "a"), (20L, "b"), (30L, "c")),
-      baseline = Some(30L)
+      Vector((T0, "a"), (T1, "b"), (T2, "c")),
+      baseline = Some(T2)
     )
     assertEquals(unseen, Vector.empty[String])
 
-  test("baseline strictly above all ids: empty unseen set"):
+  test("baseline strictly above every entry's timestamp: empty unseen set"):
     val unseen = Comments.unseen(
-      Vector((10L, "a"), (20L, "b"), (30L, "c")),
-      baseline = Some(100L)
+      Vector((T0, "a"), (T1, "b"), (T2, "c")),
+      baseline = Some(T3)
     )
     assertEquals(unseen, Vector.empty[String])
 
-  // --- Long.MaxValue boundary (regression catch for accidental Int truncation) ---
+  // --- ordering preservation -------------------------------------------------
 
-  test("baseline near Long.MaxValue: id Long.MaxValue is excluded by equal baseline"):
+  test("output preserves input order; no reordering"):
     val unseen = Comments.unseen(
-      Vector((Long.MaxValue, "max")),
-      baseline = Some(Long.MaxValue)
+      Vector((T3, "third"), (T1, "first"), (T2, "second")),
+      baseline = None
     )
-    assertEquals(unseen, Vector.empty[String])
-
-  test("baseline near Long.MaxValue: id Long.MaxValue - 1 is excluded"):
-    val unseen = Comments.unseen(
-      Vector((Long.MaxValue - 1L, "max-minus-one")),
-      baseline = Some(Long.MaxValue)
-    )
-    assertEquals(unseen, Vector.empty[String])
+    assertEquals(unseen, Vector("third", "first", "second"))

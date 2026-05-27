@@ -23,9 +23,13 @@ import scala.util.Try
   *     non-null `mergedAt`. `mergeStateStatus` is **dropped on the floor** — the field never returns `"MERGED"` even
   *     after the PR has merged, and any "fix this omission" instinct is wrong. The B5 fixture suite asserts the trap
   *     with a `merged-stale-mergestate.json` payload.
-  *   - **Comment baseline filter (design-rationale RL2).** Comments and reviews with `databaseId` strictly greater than
-  *     `baseline.lastSeenCommentId` / `lastSeenReviewId` survive into `unseenComments`. The numeric ordering is
-  *     enforced — see [[Comments.unseen]] — to avoid the `"100" < "99"` lexicographic regression.
+  *   - **Comment baseline filter (design-rationale RL2 / S3-7).** Comments and reviews with `createdAt` / `submittedAt`
+  *     strictly after `baseline.lastSeenCommentAt` / `lastSeenReviewAt` survive into `unseenComments`. Cursor is
+  *     `Instant`, not `Long` — see [[PollBaseline]] for the wire-shape rationale.
+  *   - **Empty-body filter (review round 1).** Posts with an empty `body` are dropped at decode time. GitHub allows
+  *     empty-bodied review submissions (e.g. plain approvals), but the FSM treats `unseenComments.nonEmpty` as a human
+  *     override signal — an empty approval would spuriously kick a piece back to `PieceReviewFailed`. Blocking review
+  *     state still propagates via `reviewDecision == CHANGES_REQUESTED`.
   *   - **Bot-author filter.** Entries authored by `botLogin` (default `forge-bot`, Slice 4 wires the config value) are
   *     dropped at decode time so the FSM never sees its own historical posts as "new human signal".
   *   - **Required-checks overlay is not computed here.** Every `statusCheckRollup` entry lands under
@@ -60,8 +64,8 @@ object PrSnapshotDecoder:
           commentEntries <- decodeComments(root)
           reviewEntries <- decodeReviews(root)
         yield
-          val newComments = filterUnseen(commentEntries, baseline.lastSeenCommentId, botLogin)
-          val newReviews = filterUnseen(reviewEntries, baseline.lastSeenReviewId, botLogin)
+          val newComments = filterUnseen(commentEntries, baseline.lastSeenCommentAt, botLogin)
+          val newReviews = filterUnseen(reviewEntries, baseline.lastSeenReviewAt, botLogin)
           val snapshot = PrSnapshot(
             number = number,
             state = state,
@@ -273,8 +277,10 @@ object PrSnapshotDecoder:
               decodePostEntry(entry, s"reviews[$i]", timestampField = "submittedAt")
             )
 
-  /** Shared decoder for `comments[]` and `reviews[]` entries. Both shapes carry `author.login`, `body` (possibly
-    * empty), `databaseId`, and a timestamp field — `createdAt` for comments, `submittedAt` for reviews.
+  /** Shared decoder for `comments[]` and `reviews[]` entries. Both shapes carry `id` (a String GraphQL global node id;
+    * `gh pr view --json comments,reviews` does **not** expose `databaseId` — see design-rationale S3-7),
+    * `author.login`, `body` (possibly empty for reviews — see the FSM-impact comment in the object-level docstring),
+    * and a timestamp field — `createdAt` for comments, `submittedAt` for reviews.
     */
   private def decodePostEntry(
       entry: Value,
@@ -285,25 +291,28 @@ object PrSnapshotDecoder:
       case None => Left(DecodeError.MalformedShape(path, "object", shapeName(entry)))
       case Some(o) =>
         for
-          dbId <- nonNullField(o, "databaseId") match
-            case None => Left(DecodeError.MissingField(s"$path.databaseId"))
-            case Some(v) =>
-              v.numOpt match
-                case None => Left(DecodeError.MalformedShape(s"$path.databaseId", "number", shapeName(v)))
-                case Some(n) => Right(n.toLong)
+          id <- decodeId(o, path)
           login <- decodeAuthorLogin(o, path)
           body = nonNullField(o, "body").flatMap(_.strOpt).getOrElse("")
-          createdAt <- decodeTimestamp(o, path, timestampField)
+          at <- decodeTimestamp(o, path, timestampField)
         yield
           val comment = PrComment(
-            id = dbId.toString,
+            id = id,
             author = login,
             body = body,
-            createdAt = createdAt,
+            createdAt = at,
             path = None,
             line = None
           )
-          CommentEntry(dbId, login, comment)
+          CommentEntry(at, login, comment)
+
+  private def decodeId(o: Obj, path: String): Either[DecodeError, String] =
+    nonNullField(o, "id") match
+      case None => Left(DecodeError.MissingField(s"$path.id"))
+      case Some(v) =>
+        v.strOpt match
+          case Some(s) => Right(s)
+          case None => Left(DecodeError.MalformedShape(s"$path.id", "string", shapeName(v)))
 
   private def decodeAuthorLogin(o: Obj, path: String): Either[DecodeError, String] =
     nonNullField(o, "author") match
@@ -356,18 +365,20 @@ object PrSnapshotDecoder:
       case (Right(acc), (v, i)) => fn(v, i).map(acc :+ _)
     }
 
-  /** Apply the bot-author filter and the [[Comments.unseen]] baseline filter in one step. */
+  /** Apply (a) the bot-author filter, (b) the empty-body filter (review round 1 — avoid spurious human-override signal
+    * from plain approval submissions), and (c) the [[Comments.unseen]] timestamp baseline filter in one step.
+    */
   private def filterUnseen(
       entries: Vector[CommentEntry],
-      baseline: Option[Long],
+      baseline: Option[Instant],
       botLogin: String
   ): Vector[PrComment] =
-    val nonBot = entries.collect {
-      case CommentEntry(id, login, c) if login != botLogin => (id, c)
+    val signal = entries.collect {
+      case CommentEntry(at, login, c) if login != botLogin && c.body.nonEmpty => (at, c)
     }
-    Comments.unseen(nonBot, baseline)
+    Comments.unseen(signal, baseline)
 
-  /** Decoder-local intermediate carrying `databaseId` + `login` alongside the public `PrComment`. The id flows into
-    * [[Comments.unseen]] for the RL2 baseline filter; the login flows into the bot-author filter.
+  /** Decoder-local intermediate carrying the entry's timestamp + login alongside the public `PrComment`. The timestamp
+    * flows into [[Comments.unseen]] for the baseline filter; the login flows into the bot-author filter.
     */
-  private final case class CommentEntry(databaseId: Long, login: String, comment: PrComment)
+  private final case class CommentEntry(at: Instant, login: String, comment: PrComment)
