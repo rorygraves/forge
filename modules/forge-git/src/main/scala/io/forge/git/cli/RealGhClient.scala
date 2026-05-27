@@ -66,6 +66,20 @@ final class RealGhClient(repoRoot: os.Path, env: Map[String, String] = Map.empty
       case Right(stdout) => parseJson("branch-protection", stdout).map(Some(_))
     }
 
+  /** **IT-ONLY.** `gh pr merge <pr> --<mode>` — drives a sacrificial-repo merge from the integration test in `forge-it`
+    * (`BranchManagerIntegrationSuite`). Not on [[GhClient]] by design: v1.2 §11 keeps "piece PRs are merged by the
+    * human", so the production orchestrator never merges PRs itself. This helper exists solely so `forge-it`'s
+    * end-to-end test (clone → branch → push → PR → poll → merge → poll) can complete the lifecycle without manual
+    * intervention.
+    *
+    * @param pr
+    *   the PR number to merge.
+    * @param mode
+    *   merge strategy passed to `gh pr merge` as a `--<mode>` flag. One of `"merge"`, `"squash"`, `"rebase"`.
+    */
+  def prMerge(pr: PrNumber, mode: String = "merge"): IO[Either[GhError, Unit]] =
+    invoke(Vector("gh", "pr", "merge", pr.value.toString, s"--$mode")).map(_.map(_ => ()))
+
   private def invoke(argv: Vector[String]): IO[Either[GhError, String]] =
     IO.blocking {
       val res = os.proc(argv).call(cwd = repoRoot, env = env, check = false, stderr = os.Pipe)

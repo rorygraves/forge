@@ -1084,17 +1084,17 @@ The cost-cap / settle-timeout enforcer per §12 / §7.9. Lives in
   reviewer flags a contract drift, the consumer list anchors the
   audit.
 
-### 1.7 PR G — Sacrificial-repo integration test — ⏳ pending
+### 1.7 PR G — Sacrificial-repo integration test — ✅ landed
 
 One end-to-end integration test in `forge-it` per roadmap §2.3, opt-in
 via env var.
 
-- [ ] **G1.** `FORGE_IT_GH_REPO` env var — `<owner>/<repo>` pointing
+- [x] **G1.** `FORGE_IT_GH_REPO` env var — `<owner>/<repo>` pointing
   at a throw-away repo the maintainer has push/PR rights on. README
   / `forge-it/README` documents the setup (a `.github` template the
   maintainer can fork into their personal namespace). PR-G suite
   skips with `assume(...)` when unset.
-- [ ] **G2.** `BranchManagerIntegrationSuite` in `forge-it`. Single
+- [x] **G2.** `BranchManagerIntegrationSuite` in `forge-it`. Single
   test, per roadmap §2.3's "branch, push, PR, observe watcher →
   merge transitions":
     1. Lock a unique branch name (`forge-it/slice3/<uuid>/<piece>`)
@@ -1130,7 +1130,7 @@ via env var.
        pruned out-of-band).
   Test target: <2min run time on a warm `gh` cache. Opt-in keeps it
   out of the default `sbt "project forge-it" test` cadence.
-- [ ] **G3.** `ProcessLockMultiJvmSuite` in `forge-it` — **the sole
+- [x] **G3.** `ProcessLockMultiJvmSuite` in `forge-it` — **the sole
   home for live-cross-process `FileProcessLock` coverage** (PR-E E4
   is same-JVM-only). Opt-in via `FORGE_IT_RUN_PROCLOCK=1`; PR-G
   settles whether the env var stays separate or folds into
@@ -1542,6 +1542,37 @@ after PR-H lands.
   turn-budget-with-failing-kill, and the null-message Throwable
   defensive fallback. Three existing test pattern matches
   (`SettleTimeout`) widened for the new field; `scalafmtCheckAll` clean.
+- 2026-05-27 — PR-G landed. `forge-it` now ships the sacrificial-repo
+  end-to-end stack: `BranchManagerIntegrationSuite` (G2) drives clone
+  → bootstrap-main → syncBase → createPieceBranch → commit → push →
+  createPr → pollOnce(Open) → prMerge → pollOnce(Merged) against a
+  real `gh` + `git` against `$FORGE_IT_GH_REPO`; passes in ~15s on a
+  warm `gh` cache. `ProcessLockMultiJvmSuite` (G3) covers the three
+  cross-JVM `FileProcessLock` scenarios (live `Held`, crash-stale
+  recovery, `forceRelease` live-refusal) by spawning sibling JVMs
+  running `LockHolderMain`; all 3 pass in ~1.5s opt-in via
+  `FORGE_IT_RUN_PROCLOCK=1`. `RealGhClient.prMerge` lands as an
+  IT-only public method (not on the `GhClient` trait — §11 keeps
+  "piece PRs are merged by the human" for the production
+  orchestrator). `modules/forge-it/README.md` documents the env-var
+  setup (`FORGE_IT_GH_REPO`, `FORGE_IT_RUN_PROCLOCK`) including the
+  one-time `gh auth login` / `gh auth setup-git` flow and the
+  branch-cleanup snippet for the sacrificial repo. **IT surfaced a
+  PR-B decoder bug:** `gh pr view --json reviewDecision` returns the
+  literal `""` (not `null`) on brand-new PRs with no reviews — the
+  PR-B fixture suite only covered the `null` case. Decoder fix:
+  `PrSnapshotDecoder.decodeReviewDecision` now treats `""` identically
+  to `null`/missing (one-line `case Some("") => Right(None)`), pinned
+  by fixture `open-fresh-no-reviews.json` + a new
+  `PrSnapshotDecoderSuite` test; filed as carry-forward **S3-8** in
+  `design-rationale.md`. Also filed: **S3-6** (`gh pr create` has no
+  `--json` flag — design-rationale BM8 named one that doesn't exist;
+  Slice 3 ships the stdout-URL parse with a pinned regex). Test
+  scope: `forge-git` 162 → 163 (PrSnapshotDecoderSuite +1); `forge-it`
+  default-on baseline 11 → 11 (the four new tests are all opt-in via
+  env var). `forge-core` 358 / `forge-agents` 181 / `forge-app` 46
+  unchanged; `scalafmtCheckAll` clean. PR-H (close-out) is the next
+  entry point.
 
 ## 4. Carry-forward to v1.3
 
@@ -1643,16 +1674,17 @@ materialize get pruned; new ones surfaced by code review get added).
   PR (Slice 4A). Filing S3-5 closes the loop alongside S2-8 so
   Slice 4 has both pieces in plain sight.
 - **S3-6 — `gh pr create` has no `--json` flag; URL parse is the
-  contract** (PR-A A2). `design-rationale.md` BM8 names
+  contract** (PR-A A2, filed in `design-rationale.md` at PR-G
+  close). `design-rationale.md` BM8 names
   `gh pr create --json url -q .url` as the PR-number-capture
   pattern. The flag doesn't exist on any released `gh` (`gh pr
   create` writes the PR URL to stdout; `gh pr view` is the JSON
-  one). Slice 3 ships the stdout-URL parse with a pinned regex.
-  v1.3 rationale BM8 should be corrected to name the URL-parse
-  contract (and optionally name the fallback two-call form
-  `gh pr create … && gh pr view <url> --json number -q .number`
-  for use behind a feature flag, though Slice 3 doesn't ship the
-  fallback).
+  one). Slice 3 ships the stdout-URL parse with a pinned regex
+  (`RealGhClient.PrUrlPattern`). v1.3 rationale BM8 should be
+  corrected to name the URL-parse contract (and optionally name
+  the fallback two-call form `gh pr create … && gh pr view <url>
+  --json number -q .number` for use behind a feature flag, though
+  Slice 3 doesn't ship the fallback).
 - **S3-7 — `PollBaseline` cursors are
   `BaselineCursor(at: Instant, seenIds: Set[String])`, not
   `databaseId: Long`; empty-body posts are dropped at decode time**
@@ -1685,6 +1717,20 @@ materialize get pruned; new ones surfaced by code review get added).
       decode time and the approval state continues to flow through
       `reviewDecision`. v1.3 §9 / RL2 inherits the filter as part
       of the `PRWatcher.watch` contract.
+- **S3-8 — `reviewDecision: ""` decodes as `None`; `gh` flattens
+  GraphQL null to empty string for this field** (PR-G IT-surfaced,
+  PR-B decoder fix, filed in `design-rationale.md` S3-8).
+  `PrSnapshotDecoder.decodeReviewDecision` now treats `""`
+  identically to `null` / missing. The PR-B fixture suite covered
+  the `null` case (`open-no-checks.json`) but missed the empty-string
+  case — the PR-G sacrificial-repo IT surfaced it on the very first
+  `pollOnce` against a freshly-opened PR (`UnknownEnumValue("reviewDecision",
+  "", _)`). Pinned by `open-fresh-no-reviews.json` + new
+  `PrSnapshotDecoderSuite` test. The fix is `reviewDecision`-scoped
+  (the only nullable enum on the `gh pr view --json …` surface);
+  broadening to other enums would mask future contract drift on
+  the non-nullable fields. v1.3 §9 should note the `gh`
+  null-flattening quirk alongside the field listing.
 
 ## 5. Cross-references
 

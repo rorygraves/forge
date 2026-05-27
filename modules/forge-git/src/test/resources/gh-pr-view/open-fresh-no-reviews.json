@@ -1,0 +1,15 @@
+{
+  "number": 4291,
+  "state": "OPEN",
+  "mergedAt": null,
+  "mergeCommit": null,
+  "mergeable": "MERGEABLE",
+  "mergeStateStatus": "CLEAN",
+  "reviewDecision": "",
+  "statusCheckRollup": [],
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    { "oid": "abc1234567890abc1234567890abc1234567890a" }
+  ]
+}

@@ -178,12 +178,23 @@ object PrSnapshotDecoder:
           case Some("UNKNOWN") => Right(None)
           case Some(other) => Left(DecodeError.UnknownEnumValue("mergeable", other, MergeableKnown))
 
+  /** `gh pr view --json reviewDecision` returns:
+    *   - `null` (or omitted) on a PR with no associated review-decision context;
+    *   - the empty string `""` on a brand-new PR with no reviews yet (the GraphQL `reviewDecision` field is nullable on
+    *     the server but `gh` flattens the `null` to `""` in JSON output — surfaced by the PR-G sacrificial-repo IT
+    *     against a freshly-opened PR);
+    *   - one of `"APPROVED"` / `"CHANGES_REQUESTED"` / `"REVIEW_REQUIRED"` otherwise.
+    *
+    * Both `null` and the empty string decode as `None` (no review state). Any other string is an `UnknownEnumValue`, so
+    * a future GitHub addition surfaces diagnosably.
+    */
   private def decodeReviewDecision(root: Obj): Either[DecodeError, Option[ReviewDecision]] =
     nonNullField(root, "reviewDecision") match
       case None => Right(None)
       case Some(v) =>
         v.strOpt match
           case None => Left(DecodeError.MalformedShape("reviewDecision", "string", shapeName(v)))
+          case Some("") => Right(None)
           case Some(s) =>
             ReviewDecision
               .fromString(s)

@@ -46,6 +46,18 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
         assertEquals(next, PollBaseline.empty)
       case other => fail(s"expected Right, got $other")
 
+  test("open-fresh-no-reviews: reviewDecision='' (empty string) decodes as None (PR-G IT finding)"):
+    // Real `gh pr view --json reviewDecision` returns `""` (not null) on brand-new PRs with no reviews — surfaced
+    // by `BranchManagerIntegrationSuite` in PR-G against the sacrificial test repo. The decoder treats empty string
+    // identically to null so the orchestrator's first poll on a freshly-opened piece PR doesn't fail with
+    // `UnknownEnumValue(reviewDecision, "")`.
+    decodeFixture("open-fresh-no-reviews.json") match
+      case Right(DecodedSnapshot(snap, _, _)) =>
+        assertEquals(snap.reviewDecision, None)
+        assertEquals(snap.state, PrState.Open)
+        assertEquals(snap.mergeable, Some(true))
+      case other => fail(s"expected Right, got $other")
+
   test("open-checks-running: in-progress checks land under observed, no conclusions"):
     decodeFixture("open-checks-running.json") match
       case Right(DecodedSnapshot(snap, _, _)) =>
