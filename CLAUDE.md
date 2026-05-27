@@ -48,10 +48,11 @@ that first; everything below is Claude-Code-specific.
 ## Build / test / format
 
 ```bash
-sbt compile
-sbt test                                              # unit tests
+sbt compile                                           # unit modules (forge-it excluded — see AGENTS.md "Building")
+sbt test                                              # unit tests (forge-it excluded)
 sbt scalafmtAll                                       # format
 sbt scalafmtCheckAll                                  # check
+sbt "project forge-it" compile                        # rebuild forge-it after a refactor
 sbt "project forge-it" test                           # IT (require claude, codex, gh on PATH)
 sbt "testOnly *ClaudeStreamingSpecSuite"              # one unit suite
 sbt "project forge-it" "testOnly *CodexStreaming*"    # one IT suite

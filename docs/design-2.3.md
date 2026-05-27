@@ -1574,6 +1574,38 @@ after PR-H lands.
   env var). `forge-core` 358 / `forge-agents` 181 / `forge-app` 46
   unchanged; `scalafmtCheckAll` clean. PR-H (close-out) is the next
   entry point.
+- 2026-05-27 — PR-H review round 1. Two findings, both addressed in a
+  single fix pass. (P1) `RealGhClient.apiBranchProtection` had been
+  mapping both `Left(GhError.NotFound)` AND `Left(GhError.Unauthorized)`
+  to `Right(None)`, which made the C6 Unauthorized branch on
+  `RealBranchManager.requiredChecksOverlay` unreachable in production
+  and erased Slice 4's ability to emit
+  `harness.protection_unauthorized` only when the pragmatic fallback
+  actually fires. Reworked the mapping into a companion-level
+  `RealGhClient.mapApiBranchProtection` helper that flattens 404 to
+  `Right(None)` only (every other `GhError` passes through as
+  `Left`). `RequiredChecksOverlay` grew a `source: OverlaySource`
+  field (`Protected | Unprotected | Unauthorized`) so the Slice-4
+  audit-log writer can distinguish "no branch protection on `base`"
+  (404 / `Unprotected`) from "caller lacks `admin:repo`" (401/403 /
+  `Unauthorized`); both still surface as an empty required set, but
+  the source discriminator carries the signal Slice 4 needs.
+  Test scope: `forge-git` 163 → 168 — new
+  `BranchProtectionCacheSuite` regression rows pin every mapping
+  branch (`NotFound→Right(None)`, `Unauthorized→Left(_)`,
+  `RateLimited→Left(_)`, `Right(json)→Right(Some)`,
+  `Right(malformed)→Left(ParseFailure)`) plus the BranchManager-side
+  `source = Protected/Unprotected/Unauthorized` assertions. (P2)
+  `forge-it` was in root's `.aggregate(...)` list, so `sbt test`
+  spawned real `claude` / `codex` / `gh` subprocesses despite
+  `AGENTS.md` documenting `sbt test` as "unit tests across the
+  build". Removed `forge-it` from root aggregation; `sbt test` now
+  covers only the four unit modules (forge-core 358 + forge-agents
+  181 + forge-git 168 + forge-app 46 = 753), and IT suites run via
+  the documented `sbt "project forge-it" test`. Updated
+  `AGENTS.md` "Building and testing" and `CLAUDE.md` TL;DR commands
+  to spell out the new gate (including `sbt "project forge-it"
+  compile` for refactor-safety CI). `scalafmtCheckAll` clean.
 - 2026-05-27 — PR-H landed; Slice 3 closed. H1 section-level review
   walked the §9 / §13 / §15 / §11.3-step-5 spec rules, the decoder
   edge cases (CI6, RL1, RL2, branch-protection cache, mergeable

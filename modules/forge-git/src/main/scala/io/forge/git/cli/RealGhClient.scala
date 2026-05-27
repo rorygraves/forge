@@ -59,12 +59,7 @@ final class RealGhClient(repoRoot: os.Path, env: Map[String, String] = Map.empty
     invoke(Vector("gh", "pr", "diff", pr.value.toString))
 
   override def apiBranchProtection(base: BranchName): IO[Either[GhError, Option[ujson.Value]]] =
-    invoke(Vector("gh", "api", RealGhClient.branchProtectionApiPath(base))).map {
-      case Left(GhError.NotFound(_)) => Right(None)
-      case Left(GhError.Unauthorized(_)) => Right(None)
-      case Left(other) => Left(other)
-      case Right(stdout) => parseJson("branch-protection", stdout).map(Some(_))
-    }
+    invoke(Vector("gh", "api", RealGhClient.branchProtectionApiPath(base))).map(RealGhClient.mapApiBranchProtection)
 
   /** **IT-ONLY.** `gh pr merge <pr> --<mode>` — drives a sacrificial-repo merge from the integration test in `forge-it`
     * (`BranchManagerIntegrationSuite`). Not on [[GhClient]] by design: v1.2 §11 keeps "piece PRs are merged by the
@@ -86,9 +81,7 @@ final class RealGhClient(repoRoot: os.Path, env: Map[String, String] = Map.empty
       RealGhClient.classify(res.exitCode, res.out.text(), res.err.text())
     }
 
-  private def parseJson(stage: String, raw: String): Either[GhError, ujson.Value] =
-    try Right(ujson.read(raw))
-    catch case t: Throwable => Left(GhError.ParseFailure(stage, t, raw))
+  private def parseJson(stage: String, raw: String): Either[GhError, ujson.Value] = RealGhClient.parseJson(stage, raw)
 
   private def parsePrCreateUrl(raw: String): Either[GhError, PrNumber] =
     val trimmed = raw.trim
@@ -112,6 +105,32 @@ object RealGhClient:
     * silent truncation.
     */
   val PrUrlPattern: Regex = """^https?://[^/]+/[^/]+/[^/]+/pull/(\d+)\s*$""".r
+
+  /** §9 C6 / Slice-3 review fix: map a finished `gh api …/branch-protection/required_status_checks` call into the
+    * `apiBranchProtection` return shape.
+    *
+    *   - **404 (`NotFound`) ⇒ `Right(None)`** — no branch protection on this base. `RealBranchManager` collapses this
+    *     to an `OverlaySource.Unprotected`-tagged empty overlay.
+    *   - **Any other `Left(GhError)` ⇒ `Left(other)`**, including 401/403 (`Unauthorized`). Slice 4's audit-log writer
+    *     needs the distinction between "branch unprotected" (404 above) and "caller lacks `admin:repo`" (401/403); the
+    *     earlier version of this mapping flattened both to `Right(None)`, making the Slice-4 distinction impossible.
+    *     `RealBranchManager.requiredChecksOverlay` catches `Left(GhError.Unauthorized)` and produces an
+    *     `OverlaySource.Unauthorized`-tagged overlay; `harness.protection_unauthorized` is emitted off that variant.
+    *   - **`Right(stdout)` ⇒ parse JSON**, wrap as `Some`. Parse failure surfaces as `Left(ParseFailure)`.
+    *
+    * Visible for testing: `BranchProtectionCacheSuite` exercises every branch, in particular pinning the
+    * Unauthorized-stays-Left contract so a future change can't silently re-introduce the flattening.
+    */
+  def mapApiBranchProtection(result: Either[GhError, String]): Either[GhError, Option[ujson.Value]] =
+    result match
+      case Left(GhError.NotFound(_)) => Right(None)
+      case Left(other) => Left(other)
+      case Right(stdout) => parseJson("branch-protection", stdout).map(Some(_))
+
+  /** Pure JSON parse, lifted into the companion so [[mapApiBranchProtection]] doesn't need an instance to call. */
+  def parseJson(stage: String, raw: String): Either[GhError, ujson.Value] =
+    try Right(ujson.read(raw))
+    catch case t: Throwable => Left(GhError.ParseFailure(stage, t, raw))
 
   /** Build the `gh api` path for a branch's required-status-checks endpoint. The base name is URL-encoded so that
     * release-style names with `/` (e.g. `release/1.0`) map to a single path segment (`release%2F1.0`) and don't get

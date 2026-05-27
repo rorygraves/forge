@@ -84,7 +84,12 @@ lazy val `forge-app` = (project in file("modules/forge-app"))
     libraryDependencies ++= Seq(catsEffect, fs2Core, osLib, catsEffectTestkit)
   )
 
-// Integration tests against real claude/codex CLIs. Built last (Slice 1+).
+// Integration tests against real claude/codex/gh CLIs. Built last (Slice 1+). Intentionally NOT in root's
+// `.aggregate(...)` list below: the IT suites need real `claude`, `codex`, `gh` on PATH plus network access,
+// which CI and local dev environments often lack. Wire them up explicitly via `sbt "project forge-it" <task>`
+// (the project does have an `.dependsOn(`forge-app`)`, so `sbt "project forge-it" compile` still rebuilds
+// the upstream graph). `sbt forge-it/compile` is enough to catch a refactor that breaks the forge-it API
+// surface — drop it into CI alongside `sbt compile` if you want belt-and-braces.
 lazy val `forge-it` = (project in file("modules/forge-it"))
   .dependsOn(`forge-app`)
   .settings(commonSettings)
@@ -95,7 +100,8 @@ lazy val `forge-it` = (project in file("modules/forge-it"))
 lazy val root = (project in file("."))
   .aggregate(
     `forge-core`, `forge-agents`, `forge-git`, `forge-specs`,
-    `forge-tui`, `forge-app`, `forge-it`
+    `forge-tui`, `forge-app`
+    // forge-it intentionally excluded — see the comment on `forge-it` above for the rationale.
   )
   .settings(
     name := "forge",

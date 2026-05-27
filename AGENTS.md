@@ -269,20 +269,22 @@ Smell test: `match m: Mode` (or its destructuring equivalent) outside
 ## Building and testing
 
 ```bash
-sbt compile                       # all modules
-sbt test                          # unit tests across the build
+sbt compile                       # all aggregated modules (excludes forge-it)
+sbt test                          # unit tests across the build (excludes forge-it)
 sbt "project forge-core" test     # one module
 sbt scalafmtAll                   # format
 sbt scalafmtCheckAll              # CI-style format check
 ```
 
 Integration tests live in `forge-it` and require `claude`, `codex`, and
-`gh` on `PATH` with network access. They are *not* part of the default
-`sbt test` for `forge-core`/`forge-agents`/etc. and must be run
-explicitly:
+`gh` on `PATH` with network access. `forge-it` is **deliberately not in
+root's `.aggregate(...)` list** so a default `sbt test` doesn't try to
+spawn real CLI subprocesses in a CI / sandbox / cold-laptop environment
+where they aren't usable. Run them explicitly:
 
 ```bash
-sbt "project forge-it" test
+sbt "project forge-it" compile    # verify the IT module still compiles after a refactor
+sbt "project forge-it" test       # run IT suites (need real CLIs + network)
 ```
 
 The pinned CLI floors are listed in the README and in §17 of the

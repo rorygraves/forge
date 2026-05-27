@@ -4,7 +4,7 @@ import cats.data.EitherT
 import cats.effect.{Clock, IO}
 import io.forge.core.{BranchName, FeatureId, PieceId, PrNumber, Sha}
 import io.forge.core.manifest.Manifest
-import io.forge.git.branch.protection.{BranchProtectionCache, CacheKey, RequiredChecksOverlay}
+import io.forge.git.branch.protection.{BranchProtectionCache, CacheKey, OverlaySource, RequiredChecksOverlay}
 import io.forge.git.cli.{FastForwardResult, GhClient, GhError, GitClient, GitError}
 
 /** Concrete [[BranchManager]] composed over [[GhClient]] / [[GitClient]] / [[BranchProtectionCache]].
@@ -167,22 +167,29 @@ final class RealBranchManager(
       case Some(hit) => IO.pure(Right(hit))
       case None =>
         gh.apiBranchProtection(base).flatMap {
-          case Right(json) =>
-            val required = json.fold(Set.empty[String])(parseRequiredChecks)
-            clock.realTimeInstant.flatMap { now =>
-              val overlay = RequiredChecksOverlay(required, now)
-              cache.put(key, overlay).as(Right(overlay))
-            }
+          case Right(Some(json)) =>
+            val required = parseRequiredChecks(json)
+            storeOverlay(key, RequiredChecksOverlay(required, _, OverlaySource.Protected))
+          case Right(None) =>
+            // 404 from `gh api …/branch-protection/required_status_checks` — no protection on this base.
+            storeOverlay(key, RequiredChecksOverlay(Set.empty, _, OverlaySource.Unprotected))
           case Left(_: GhError.Unauthorized) =>
             // Pragmatic fallback per C6: caller lacks `admin:repo`, treat as unprotected. Slice 4 logs the
-            // `harness.protection_unauthorized` audit event; this is intentionally not a [[BranchError]].
-            clock.realTimeInstant.flatMap { now =>
-              val overlay = RequiredChecksOverlay(Set.empty, now)
-              cache.put(key, overlay).as(Right(overlay))
-            }
+            // `harness.protection_unauthorized` audit event off [[OverlaySource.Unauthorized]]; this is
+            // intentionally not a [[BranchError]] so a missing repo-admin permission doesn't block `forge run`.
+            storeOverlay(key, RequiredChecksOverlay(Set.empty, _, OverlaySource.Unauthorized))
           case Left(err: GhError.RateLimited) => IO.pure(Left(BranchError.RateLimited(err.retryAfter)))
           case Left(err) => IO.pure(Left(BranchError.GhFailure(err)))
         }
+    }
+
+  private def storeOverlay(
+      key: CacheKey,
+      build: java.time.Instant => RequiredChecksOverlay
+  ): IO[Either[BranchError, RequiredChecksOverlay]] =
+    clock.realTimeInstant.flatMap { now =>
+      val overlay = build(now)
+      cache.put(key, overlay).as(Right(overlay))
     }
 
   // --- preflight helpers ----------------------------------------------------

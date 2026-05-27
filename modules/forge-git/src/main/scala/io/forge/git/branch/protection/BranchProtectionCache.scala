@@ -16,10 +16,36 @@ import scala.concurrent.duration.{DurationLong, FiniteDuration}
   */
 final case class CacheKey(feature: FeatureId, base: BranchName, epoch: Long)
 
-/** Cached required-checks overlay value. `required` is the union of branch-protection-required check names; `fetchedAt`
-  * is the read timestamp used for TTL eviction.
+/** Discriminator for how the overlay was obtained. Slice-4 audit-log writers map each variant onto a `gh.action` /
+  * `harness.*` entry — in particular `Unauthorized` is the §C6 pragmatic fallback the audit log records as
+  * `harness.protection_unauthorized`. Without the discriminator on [[RequiredChecksOverlay]], Slice 4 cannot
+  * distinguish "no branch protection set up on `base`" (`Unprotected`, 404 from `gh api`) from "caller lacks
+  * `admin:repo`" (`Unauthorized`) — both surface as an empty required set otherwise.
   */
-final case class RequiredChecksOverlay(required: Set[String], fetchedAt: Instant)
+enum OverlaySource:
+  /** `gh api …/branch-protection/required_status_checks` returned a JSON payload — `required` is the genuine
+    * branch-protection contract. The audit log records this case via normal `gh.action` entries.
+    */
+  case Protected
+
+  /** `gh api …` returned 404 — no branch protection on this base. `required` is empty by definition. */
+  case Unprotected
+
+  /** `gh api …` returned 401/403 — caller lacks `admin:repo` on the repo. Slice 3's [[RealBranchManager]] treats this
+    * as "no required checks" pragmatically (so `forge run` doesn't block on missing privileges); Slice 4 logs
+    * `harness.protection_unauthorized` to make the fallback auditable.
+    */
+  case Unauthorized
+
+/** Cached required-checks overlay value. `required` is the union of branch-protection-required check names; `fetchedAt`
+  * is the read timestamp used for TTL eviction; `source` tells Slice 4 which `gh api` outcome produced this overlay so
+  * `harness.protection_unauthorized` can be emitted only when the fallback actually fires (see [[OverlaySource]]).
+  */
+final case class RequiredChecksOverlay(
+    required: Set[String],
+    fetchedAt: Instant,
+    source: OverlaySource = OverlaySource.Protected
+)
 
 /** PR-C C5 — pluggable storage seam. Slice 3 ships [[InMemoryBranchProtectionCache]] only; on-disk persistence is filed
   * as carry-forward **S3-2** (no caller in Slice 3 needs it).
