@@ -27,6 +27,8 @@ val V = new {
 
 // --- libraries ---
 val catsEffect          = "org.typelevel"   %% "cats-effect"            % V.catsEffect
+// Slice 3 PR-F: TestControl for deterministic clock advancement in SessionMonitorSuite.
+val catsEffectTestkit   = "org.typelevel"   %% "cats-effect-testkit"    % V.catsEffect       % Test
 val fs2Core             = "co.fs2"          %% "fs2-core"               % V.fs2
 val fs2Io               = "co.fs2"          %% "fs2-io"                 % V.fs2
 val osLib               = "com.lihaoyi"     %% "os-lib"                 % V.osLib
@@ -79,7 +81,7 @@ lazy val `forge-app` = (project in file("modules/forge-app"))
   .dependsOn(`forge-core`, `forge-agents`, `forge-git`, `forge-specs`, `forge-tui`)
   .settings(commonSettings)
   .settings(
-    libraryDependencies ++= Seq(catsEffect, osLib)
+    libraryDependencies ++= Seq(catsEffect, fs2Core, osLib, catsEffectTestkit)
   )
 
 // Integration tests against real claude/codex CLIs. Built last (Slice 1+).

@@ -890,13 +890,13 @@ and ships the file-channel lock per §13.
   via env var so `sbt "project forge-it" test` smoke runs don't
   pay the per-test JVM spawn cost.
 
-### 1.6 PR F — `SessionMonitor` — ⏳ pending
+### 1.6 PR F — `SessionMonitor` — ✅ landed
 
 The cost-cap / settle-timeout enforcer per §12 / §7.9. Lives in
 `forge-app` because it bridges `forge-agents` (`AgentEvent` stream,
 `StreamingSession.kill()`) and `forge-core` (`FsmEvent` it emits).
 
-- [ ] **F1.** `io.forge.app.monitor.MonitorOutcome` — output ADT
+- [x] **F1.** `io.forge.app.monitor.MonitorOutcome` — output ADT
   that maps **structurally** (not always 1:1) to a Slice-2
   `FsmEvent` variant. The MonitorOutcome carries richer typed
   cost data than the corresponding FsmEvent; the Slice-4
@@ -940,7 +940,7 @@ The cost-cap / settle-timeout enforcer per §12 / §7.9. Lives in
   **Number type is `BigDecimal`**, not `Double`, matching
   `Cost.usd` / `CostTotals.*` in
   `modules/forge-core/src/main/scala/io/forge/core/cost/Cost.scala`.
-- [ ] **F2.** `SessionMonitor` trait:
+- [x] **F2.** `SessionMonitor` trait:
   ```scala
   final case class SessionLimits(
     settleTimeout: FiniteDuration,
@@ -969,7 +969,7 @@ The cost-cap / settle-timeout enforcer per §12 / §7.9. Lives in
   documents the contract: SessionMonitor **does not** mutate the
   cost totals after firing — the orchestrator's settle handler
   resets / advances them per `MonitorOutcome`.
-- [ ] **F3.** Implementation sketch (`io.forge.app.monitor.RealSessionMonitor(clock:
+- [x] **F3.** Implementation sketch (`io.forge.app.monitor.RealSessionMonitor(clock:
   Clock[IO])`):
     - The settle clock starts at `monitor` entry. A `Deferred[IO,
       MonitorOutcome]` collects the first outcome.
@@ -1010,7 +1010,7 @@ The cost-cap / settle-timeout enforcer per §12 / §7.9. Lives in
         `Settled(phase, if success then Clean else
         AdapterError("non-zero result"))` and complete.
     - On Deferred completion, return its value.
-- [ ] **F4.** Phase scope per §17 slice 3:
+- [x] **F4.** Phase scope per §17 slice 3:
   SessionMonitor covers the four driver phases — `Spec`,
   `DesignRevision`, `Implement`, `Fixup`. Reviewer (`reviewDesign` /
   `reviewPr`) and refinery (`refine`) are one-shot adapter calls
@@ -1027,7 +1027,7 @@ The cost-cap / settle-timeout enforcer per §12 / §7.9. Lives in
     > settle outcomes because there is no streaming-session driver
     > for them; the reviewer-asset PR in Slice 4 lands the matching
     > FSM handlers + the one-shot wall-clock cap wrapper together.
-- [ ] **F5.** Unit suite under
+- [x] **F5.** Unit suite under
   `modules/forge-app/src/test/scala/io/forge/app/monitor/`:
     - `SessionMonitorSettleSuite` — `Stream` completes cleanly →
       `Settled(Clean)`; non-zero `Result` → `Settled(AdapterError)`
@@ -1056,7 +1056,7 @@ The cost-cap / settle-timeout enforcer per §12 / §7.9. Lives in
   `cats.effect.testkit.TestControl` for deterministic clocking;
   PR-F adds `munit-cats-effect`'s `TestControl` adapter to
   `forge-app/test`.
-- [ ] **F6.** **Coherence-pass anchor.** Per the AGENTS.md
+- [x] **F6.** **Coherence-pass anchor.** Per the AGENTS.md
   "design-review coherence pass" feedback memory, the SessionMonitor
   contract has three interface boundaries that have to stay aligned:
   the connector trait (`StreamingSession.kill()` semantics), the FSM
@@ -1434,6 +1434,36 @@ after PR-H lands.
   metadata, and `forceRelease` refusing while we hold it.
   forge-app 11 → 14; baselines elsewhere unchanged;
   `scalafmtCheckAll` clean.
+- 2026-05-27 — PR-F landed. `io.forge.app.monitor` package now ships
+  `MonitorOutcome` (`Settled | SettleTimeout | TurnBudgetBreached |
+  BudgetBreached` with BigDecimal-shaped cost payloads per F1),
+  `SessionMonitor` trait + `SessionLimits` (BigDecimal turn/piece/feature
+  caps + settle timeout per F2), and `RealSessionMonitor` implementing
+  the F3 Deferred-based race: a settle-timeout sleeper fiber and an
+  events-processor fiber both fire `Deferred.complete`; the first wins
+  and the other is cancelled by the surrounding `Resource.background`
+  scope. `Deferred.complete` is gated to invoke `session.kill()` only
+  on settle-timeout and turn-budget breaches (§12 check 3); feature-
+  and piece-scope breaches emit `BudgetBreached` without killing
+  (§12 check 2). The F4 precondition refuses reviewer/refine phases
+  (`DesignReview`, `CodeReview`, `Refine`) with
+  `IllegalArgumentException` per S3-5 / S2-8; `SessionMonitor.DriverPhases`
+  is the single source of truth shared with the F5 PhaseCoverageSuite.
+  F6 coherence anchor: `MonitorOutcome`'s scaladoc names the three
+  downstream consumers (`StreamingSession.kill`, `FsmEvent`, §19
+  `harness.session_killed`) so a future Slice-4 reviewer has the
+  alignment list. Test scope: `forge-app` 14 → 36 — `FakeStreamingSession`
+  test fixture + 6 suites (`SessionMonitorSettleSuite` 4,
+  `SessionMonitorTimeoutSuite` 3, `SessionMonitorTurnCostSuite` 3,
+  `SessionMonitorFeatureCostSuite` 3, `SessionMonitorPieceCostSuite` 2,
+  `SessionMonitorPhaseCoverageSuite` 7 = 22 new tests). Timeout +
+  cost-cap suites use `cats.effect.testkit.TestControl` for deterministic
+  clock advancement; build.sbt PR-F adds `cats-effect-testkit` to
+  `forge-app/test` per the F5 docstring and `fs2-core` to `forge-app`'s
+  main deps (was transitive via forge-agents; now explicit). Baselines:
+  `forge-core` 358 / `forge-agents` 181 / `forge-git` 162 / `forge-it` 11
+  unchanged; `scalafmtCheckAll` clean. PR-G (sacrificial-repo IT) is the
+  next entry point.
 
 ## 4. Carry-forward to v1.3
 
