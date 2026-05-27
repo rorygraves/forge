@@ -32,7 +32,7 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
 
   test("open-no-checks: fresh OPEN PR decodes with empty rollup and headSha from commits[-1].oid"):
     decodeFixture("open-no-checks.json") match
-      case Right(DecodedSnapshot(snap, head)) =>
+      case Right(DecodedSnapshot(snap, head, next)) =>
         assertEquals(snap.number, PrNumber(4291))
         assertEquals(snap.state, PrState.Open)
         assertEquals(snap.mergedAt, None)
@@ -42,11 +42,13 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
         assertEquals(snap.requiredChecks, CheckRollup.empty)
         assertEquals(snap.unseenComments, Vector.empty[PrComment])
         assertEquals(head, Sha("abc1234567890abc1234567890abc1234567890a"))
+        // Empty comments + reviews → cursor unchanged from input (still empty).
+        assertEquals(next, PollBaseline.empty)
       case other => fail(s"expected Right, got $other")
 
   test("open-checks-running: in-progress checks land under observed, no conclusions"):
     decodeFixture("open-checks-running.json") match
-      case Right(DecodedSnapshot(snap, _)) =>
+      case Right(DecodedSnapshot(snap, _, _)) =>
         assertEquals(snap.requiredChecks.required, Vector.empty[CheckResult])
         assertEquals(
           snap.requiredChecks.observed,
@@ -60,7 +62,7 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
 
   test("open-checks-mixed: success + failure + neutral conclusions land under observed"):
     decodeFixture("open-checks-mixed.json") match
-      case Right(DecodedSnapshot(snap, _)) =>
+      case Right(DecodedSnapshot(snap, _, _)) =>
         assertEquals(
           snap.requiredChecks.observed,
           Vector(
@@ -74,9 +76,8 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
 
   test("open-changes-requested: comments AND reviews fold into unseenComments"):
     decodeFixture("open-changes-requested.json") match
-      case Right(DecodedSnapshot(snap, _)) =>
+      case Right(DecodedSnapshot(snap, _, next)) =>
         assertEquals(snap.reviewDecision, Some(ReviewDecision.ChangesRequested))
-        // Comment + review both unseen at baseline=empty
         assertEquals(snap.unseenComments.size, 2)
         assert(
           snap.unseenComments.exists(c => c.author == "alice" && c.body.contains("Foo.scala")),
@@ -90,20 +91,28 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
           assertEquals(c.path, None)
           assertEquals(c.line, None)
         }
+        // Cursor advances to the only comment and the only review respectively.
+        assertEquals(
+          next.commentCursor,
+          Some(BaselineCursor(Instant.parse("2026-05-26T10:00:00Z"), Set("IC_kwDOAB000200")))
+        )
+        assertEquals(
+          next.reviewCursor,
+          Some(BaselineCursor(Instant.parse("2026-05-26T10:01:00Z"), Set("PRR_kwDOAB000050")))
+        )
       case other => fail(s"expected Right, got $other")
 
   test("open-mergeable-conflicting: CONFLICTING → Some(false), mergeStateStatus=DIRTY ignored (CI6)"):
     decodeFixture("open-mergeable-conflicting.json") match
-      case Right(DecodedSnapshot(snap, _)) =>
+      case Right(DecodedSnapshot(snap, _, _)) =>
         assertEquals(snap.mergeable, Some(false))
-        // CI6 trap: state is OPEN even though mergeStateStatus says DIRTY
         assertEquals(snap.state, PrState.Open)
         assertEquals(snap.mergedAt, None)
       case other => fail(s"expected Right, got $other")
 
   test("closed-not-merged: CLOSED with null mergedAt/mergeCommit → state Closed, no merge fields"):
     decodeFixture("closed-not-merged.json") match
-      case Right(DecodedSnapshot(snap, _)) =>
+      case Right(DecodedSnapshot(snap, _, _)) =>
         assertEquals(snap.state, PrState.Closed)
         assertEquals(snap.mergedAt, None)
         assertEquals(snap.mergeCommit, None)
@@ -111,7 +120,7 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
 
   test("merged: state MERGED + non-null mergedAt + mergeCommit.oid populated"):
     decodeFixture("merged.json") match
-      case Right(DecodedSnapshot(snap, _)) =>
+      case Right(DecodedSnapshot(snap, _, _)) =>
         assertEquals(snap.state, PrState.Merged)
         assertEquals(snap.mergedAt, Some(Instant.parse("2026-05-26T12:00:00Z")))
         assertEquals(snap.mergeCommit, Some(Sha("5555555555555555555555555555555555555555")))
@@ -119,9 +128,7 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
 
   test("merged-stale-mergestate (CI6 trap): state still MERGED — mergeStateStatus value irrelevant"):
     decodeFixture("merged-stale-mergestate.json") match
-      case Right(DecodedSnapshot(snap, _)) =>
-        // The fixture's mergeStateStatus is "CLEAN" (a non-MERGED value); the decoder must still report Merged because
-        // it derives terminal state from `state` + `mergedAt` only (design-rationale CI6).
+      case Right(DecodedSnapshot(snap, _, _)) =>
         assertEquals(snap.state, PrState.Merged)
         assertEquals(snap.mergedAt, Some(Instant.parse("2026-05-26T13:00:00Z")))
         assertEquals(snap.mergeCommit, Some(Sha("7777777777777777777777777777777777777777")))
@@ -131,7 +138,7 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
 
   test("open-with-comments at baseline=None, botLogin=forge-bot: alice + bob visible, forge-bot dropped"):
     decodeFixture("open-with-comments.json") match
-      case Right(DecodedSnapshot(snap, _)) =>
+      case Right(DecodedSnapshot(snap, _, next)) =>
         val authors = snap.unseenComments.map(_.author)
         val ids = snap.unseenComments.map(_.id).toSet
         assert(!authors.contains("forge-bot"), s"bot author leaked: $authors")
@@ -139,63 +146,114 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
           ids,
           Set("IC_kwDOAB000001", "IC_kwDOAB000002", "IC_kwDOAB000003")
         )
+        // nextBaseline.commentCursor covers ALL entries (bot included) — the cursor records observation, not signal.
+        assertEquals(
+          next.commentCursor,
+          Some(BaselineCursor(Instant.parse("2026-05-26T10:30:00Z"), Set("IC_kwDOAB000004")))
+        )
       case other => fail(s"expected Right, got $other")
 
-  test("open-with-comments at baseline=Some(09:30): only the 10:00 entry from bob survives"):
+  test("open-with-comments at cursor=Some(09:30,{IC_002}): only the strictly-later bob comment survives"):
     val baseline = PollBaseline(
-      lastSeenCommentAt = Some(Instant.parse("2026-05-26T09:30:00Z")),
-      lastSeenReviewAt = None,
+      commentCursor = Some(BaselineCursor(Instant.parse("2026-05-26T09:30:00Z"), Set("IC_kwDOAB000002"))),
+      reviewCursor = None,
       Set.empty
     )
     decodeFixture("open-with-comments.json", baseline = baseline) match
-      case Right(DecodedSnapshot(snap, _)) =>
+      case Right(DecodedSnapshot(snap, _, _)) =>
         assertEquals(snap.unseenComments.map(_.id), Vector("IC_kwDOAB000003"))
         assertEquals(snap.unseenComments.map(_.author), Vector("bob"))
       case other => fail(s"expected Right, got $other")
 
-  test("open-with-comments at baseline=Some(09:00): two later alice comments + bob's survive"):
+  test("open-with-comments at cursor=Some(09:00,{IC_001}): two later non-bot comments survive"):
     val baseline = PollBaseline(
-      lastSeenCommentAt = Some(Instant.parse("2026-05-26T09:00:00Z")),
-      lastSeenReviewAt = None,
+      commentCursor = Some(BaselineCursor(Instant.parse("2026-05-26T09:00:00Z"), Set("IC_kwDOAB000001"))),
+      reviewCursor = None,
       Set.empty
     )
     decodeFixture("open-with-comments.json", baseline = baseline) match
-      case Right(DecodedSnapshot(snap, _)) =>
+      case Right(DecodedSnapshot(snap, _, _)) =>
         assertEquals(
           snap.unseenComments.map(_.id),
           Vector("IC_kwDOAB000002", "IC_kwDOAB000003")
         )
       case other => fail(s"expected Right, got $other")
 
-  test("open-with-comments at baseline=Some(10:00): equality excluded → bob's also dropped"):
+  test("open-with-comments at cursor=Some(10:30,{IC_004}): equality+id-in-seenIds → no new signal"):
     val baseline = PollBaseline(
-      lastSeenCommentAt = Some(Instant.parse("2026-05-26T10:00:00Z")),
-      lastSeenReviewAt = None,
+      commentCursor = Some(BaselineCursor(Instant.parse("2026-05-26T10:30:00Z"), Set("IC_kwDOAB000004"))),
+      reviewCursor = None,
       Set.empty
     )
     decodeFixture("open-with-comments.json", baseline = baseline) match
-      case Right(DecodedSnapshot(snap, _)) =>
+      case Right(DecodedSnapshot(snap, _, _)) =>
         assertEquals(snap.unseenComments, Vector.empty[PrComment])
       case other => fail(s"expected Right, got $other")
 
   test("custom botLogin filters that login (not 'forge-bot')"):
     decodeFixture("open-with-comments.json", botLogin = "alice") match
-      case Right(DecodedSnapshot(snap, _)) =>
+      case Right(DecodedSnapshot(snap, _, _)) =>
         val authors = snap.unseenComments.map(_.author)
         assert(!authors.contains("alice"), s"alice should be filtered: $authors")
-        // bob survives; forge-bot (no longer the bot) surfaces
         assertEquals(snap.unseenComments.map(_.author).toSet, Set("bob", "forge-bot"))
+      case other => fail(s"expected Right, got $other")
+
+  // --- same-second tie-breaker (round-2 high finding) ------------------------
+
+  test("same-second comment with a NEW id surfaces even when cursor.at equals createdAt"):
+    // The reviewer's concrete worry: a comment posted in the same second as the cursor was previously dropped by the
+    // strict isAfter filter. The id tie-breaker rescues it — IC_kwDOAB000B is not in cursor.seenIds, so it surfaces.
+    val sameSecond = Instant.parse("2026-05-26T11:00:00Z")
+    val json = ujson.read(s"""
+      {
+        "number": 200, "state": "OPEN", "mergedAt": null, "mergeCommit": null,
+        "mergeable": "MERGEABLE", "reviewDecision": null,
+        "statusCheckRollup": [],
+        "comments": [
+          {
+            "id": "IC_kwDOAB000A",
+            "body": "first poll already saw this",
+            "createdAt": "$sameSecond",
+            "author": { "login": "alice" }
+          },
+          {
+            "id": "IC_kwDOAB000B",
+            "body": "second poll: same second, NEW id — must surface",
+            "createdAt": "$sameSecond",
+            "author": { "login": "bob" }
+          }
+        ],
+        "reviews": [],
+        "commits": [{ "oid": "1111111111111111111111111111111111111111" }]
+      }
+    """)
+    val baseline = PollBaseline(
+      commentCursor = Some(BaselineCursor(sameSecond, Set("IC_kwDOAB000A"))),
+      reviewCursor = None,
+      Set.empty
+    )
+    PrSnapshotDecoder.decode(json, baseline, DefaultBot) match
+      case Right(DecodedSnapshot(snap, _, next)) =>
+        assertEquals(snap.unseenComments.map(_.id), Vector("IC_kwDOAB000B"))
+        // nextBaseline accumulates both ids at the watermark so the next poll skips both.
+        assertEquals(
+          next.commentCursor,
+          Some(BaselineCursor(sameSecond, Set("IC_kwDOAB000A", "IC_kwDOAB000B")))
+        )
       case other => fail(s"expected Right, got $other")
 
   // --- empty-body filter (review round 1) ------------------------------------
 
   test("open-empty-approval: APPROVED review with empty body is filtered (no spurious unseen comment)"):
     decodeFixture("open-empty-approval.json") match
-      case Right(DecodedSnapshot(snap, _)) =>
-        // The review IS empty-bodied + APPROVED. The FSM uses unseenComments.nonEmpty as a "human override" signal,
-        // so an empty approval must NOT surface. reviewDecision still carries the approval state.
+      case Right(DecodedSnapshot(snap, _, next)) =>
         assertEquals(snap.unseenComments, Vector.empty[PrComment])
         assertEquals(snap.reviewDecision, Some(ReviewDecision.Approved))
+        // The empty-body review is still observed for cursor purposes (so the next poll doesn't re-evaluate it).
+        assertEquals(
+          next.reviewCursor,
+          Some(BaselineCursor(Instant.parse("2026-05-26T11:00:00Z"), Set("PRR_kwDOAB000123")))
+        )
       case other => fail(s"expected Right, got $other")
 
   test("inline empty-body comment is filtered too (robustness)"):
@@ -223,7 +281,7 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
       }
     """)
     PrSnapshotDecoder.decode(json, PollBaseline.empty, DefaultBot) match
-      case Right(DecodedSnapshot(snap, _)) =>
+      case Right(DecodedSnapshot(snap, _, _)) =>
         assertEquals(snap.unseenComments.size, 1)
         assertEquals(snap.unseenComments.head.id, "IC_filled")
       case other => fail(s"expected Right, got $other")
@@ -327,9 +385,6 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
       case other => fail(s"expected UnknownEnumValue(reviewDecision), got $other")
 
   test("StatusContext-shaped check entry (context+state) decodes via the fallback"):
-    // §6 / Slice 0 §4.1 — the rollup is a heterogeneous union of CheckRun and StatusContext. CheckRun uses
-    // `name` + `status`; StatusContext uses `context` + `state`. The decoder accepts either spelling so external CI
-    // integrations (the StatusContext side) don't need a separate code path.
     val json = ujson.read("""
       {
         "number": 1, "state": "OPEN", "mergedAt": null, "mergeCommit": null,
@@ -342,7 +397,7 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
       }
     """)
     PrSnapshotDecoder.decode(json, PollBaseline.empty, DefaultBot) match
-      case Right(DecodedSnapshot(snap, _)) =>
+      case Right(DecodedSnapshot(snap, _, _)) =>
         assertEquals(
           snap.requiredChecks.observed,
           Vector(CheckResult("ci/external", CheckState.Pending, None))

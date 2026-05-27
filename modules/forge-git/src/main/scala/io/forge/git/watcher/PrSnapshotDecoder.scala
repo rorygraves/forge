@@ -23,9 +23,11 @@ import scala.util.Try
   *     non-null `mergedAt`. `mergeStateStatus` is **dropped on the floor** — the field never returns `"MERGED"` even
   *     after the PR has merged, and any "fix this omission" instinct is wrong. The B5 fixture suite asserts the trap
   *     with a `merged-stale-mergestate.json` payload.
-  *   - **Comment baseline filter (design-rationale RL2 / S3-7).** Comments and reviews with `createdAt` / `submittedAt`
-  *     strictly after `baseline.lastSeenCommentAt` / `lastSeenReviewAt` survive into `unseenComments`. Cursor is
-  *     `Instant`, not `Long` — see [[PollBaseline]] for the wire-shape rationale.
+  *   - **Comment baseline filter (design-rationale RL2 / S3-7).** Comments and reviews after the [[PollBaseline]]
+  *     watermark — or at the watermark with an id not in [[BaselineCursor.seenIds]] (the same-second tie-breaker added
+  *     in review round 2) — survive into `unseenComments`. See [[Comments.unseen]] for the predicate and
+  *     [[Comments.advance]] for cursor advancement. The decoder also returns the next [[PollBaseline]] the orchestrator
+  *     should persist via [[DecodedSnapshot.nextBaseline]].
   *   - **Empty-body filter (review round 1).** Posts with an empty `body` are dropped at decode time. GitHub allows
   *     empty-bodied review submissions (e.g. plain approvals), but the FSM treats `unseenComments.nonEmpty` as a human
   *     override signal — an empty approval would spuriously kick a piece back to `PieceReviewFailed`. Blocking review
@@ -64,8 +66,19 @@ object PrSnapshotDecoder:
           commentEntries <- decodeComments(root)
           reviewEntries <- decodeReviews(root)
         yield
-          val newComments = filterUnseen(commentEntries, baseline.lastSeenCommentAt, botLogin)
-          val newReviews = filterUnseen(reviewEntries, baseline.lastSeenReviewAt, botLogin)
+          val newComments = filterUnseen(commentEntries, baseline.commentCursor, botLogin)
+          val newReviews = filterUnseen(reviewEntries, baseline.reviewCursor, botLogin)
+          // Cursor advancement runs against the FULL observed set (including bot-authored / empty-body posts) so the
+          // next poll doesn't re-evaluate the same entries: they're seen from the cursor's perspective even though
+          // we don't surface them as `unseenComments`.
+          val nextCommentCursor = Comments.advance(
+            commentEntries.map(e => (e.at, e.comment.id)),
+            baseline.commentCursor
+          )
+          val nextReviewCursor = Comments.advance(
+            reviewEntries.map(e => (e.at, e.comment.id)),
+            baseline.reviewCursor
+          )
           val snapshot = PrSnapshot(
             number = number,
             state = state,
@@ -76,7 +89,11 @@ object PrSnapshotDecoder:
             unseenComments = newComments ++ newReviews,
             mergeable = mergeable
           )
-          DecodedSnapshot(snapshot, headSha)
+          val nextBaseline = baseline.copy(
+            commentCursor = nextCommentCursor,
+            reviewCursor = nextReviewCursor
+          )
+          DecodedSnapshot(snapshot, headSha, nextBaseline)
 
   // --- known-enum vectors (echoed into UnknownEnumValue.knownValues for diagnosability) ---
 
@@ -366,17 +383,18 @@ object PrSnapshotDecoder:
     }
 
   /** Apply (a) the bot-author filter, (b) the empty-body filter (review round 1 — avoid spurious human-override signal
-    * from plain approval submissions), and (c) the [[Comments.unseen]] timestamp baseline filter in one step.
+    * from plain approval submissions), and (c) the [[Comments.unseen]] cursor filter (review round 2 — id tie-breaker
+    * for same-second entries) in one step.
     */
   private def filterUnseen(
       entries: Vector[CommentEntry],
-      baseline: Option[Instant],
+      cursor: Option[BaselineCursor],
       botLogin: String
   ): Vector[PrComment] =
     val signal = entries.collect {
-      case CommentEntry(at, login, c) if login != botLogin && c.body.nonEmpty => (at, c)
+      case CommentEntry(at, login, c) if login != botLogin && c.body.nonEmpty => (at, c.id, c)
     }
-    Comments.unseen(signal, baseline)
+    Comments.unseen(signal, cursor)
 
   /** Decoder-local intermediate carrying the entry's timestamp + login alongside the public `PrComment`. The timestamp
     * flows into [[Comments.unseen]] for the baseline filter; the login flows into the bot-author filter.

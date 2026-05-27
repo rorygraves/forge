@@ -5,9 +5,11 @@ import io.forge.core.pr.PrSnapshot
 
 /** PR-B B2 — wire-decoded shape emitted by [[PrSnapshotDecoder]].
   *
-  * v1.2 §6 `PrSnapshot` is deliberately provider-neutral and does **not** carry the head SHA — the FSM only needs it to
-  * call `BranchManager.baseFreshness` from Slice 4. PR-B keeps `PrSnapshot` unchanged and surfaces the head SHA as a
-  * parallel field on this wrapper so the consumer has both halves in one canonical place without the type leaking
-  * upstream into `forge-core`.
+  *   - `snapshot` is the v1.2 §6 provider-neutral [[PrSnapshot]] — what the FSM consumes.
+  *   - `headSha` is the head commit oid (from `commits[-1].oid`), kept as a parallel field because v1.2 §6 doesn't
+  *     carry it on `PrSnapshot`. `BranchManager.baseFreshness` (Slice 4) consumes it.
+  *   - `nextBaseline` is the [[PollBaseline]] the orchestrator should persist after consuming this snapshot — the
+  *     watermark + same-second-id tie-breakers needed for the next poll to correctly filter "new since baseline"
+  *     entries (review round 2 — design-rationale S3-7).
   */
-final case class DecodedSnapshot(snapshot: PrSnapshot, headSha: Sha)
+final case class DecodedSnapshot(snapshot: PrSnapshot, headSha: Sha, nextBaseline: PollBaseline)

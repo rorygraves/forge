@@ -323,26 +323,29 @@ PR-B is the *decode-only* PR. Pure functions from `ujson.Value` →
 - [x] **B1.** `PollBaseline` case class in
   `io.forge.git.watcher`:
   ```scala
+  final case class BaselineCursor(at: Instant, seenIds: Set[String])
+
   final case class PollBaseline(
-    lastSeenCommentAt: Option[Instant],
-    lastSeenReviewAt: Option[Instant],
+    commentCursor: Option[BaselineCursor],
+    reviewCursor: Option[BaselineCursor],
     lastSeenCheckRunIds: Set[String]
   )
   ```
   Captured at PR creation per RL2 / §11.4 step 6. The orchestrator
-  (Slice 4) owns persistence; Slice-3 stores the baseline alongside
-  `Feature` (or in the manifest piece record — Slice 4 settles
-  exactly where). The decoder consumes a baseline and filters
-  comments / reviews to those with `createdAt.isAfter(...)` /
-  `submittedAt.isAfter(...)` against the cursor.
-  **Cursor type is `Instant`, not `Long` `databaseId` (review round
-  1 — see design-rationale S3-7).** The original B1 sketch keyed off
-  numeric `databaseId`, but `gh pr view --json comments,reviews`
-  doesn't expose `databaseId` — each entry carries a String `id`
-  (GraphQL global node id) plus an ISO-8601 timestamp (`createdAt`
-  for comments, `submittedAt` for reviews). Timestamps are well-typed
-  under `Instant.isAfter` and the original Long-via-Double precision
-  concern dissolves with the switch.
+  (Slice 4) owns persistence; the decoder returns the next baseline
+  on `DecodedSnapshot.nextBaseline` so Slice 4 just persists what the
+  decoder computed. Filter retains
+  `at.isAfter(cursor.at) || (at == cursor.at &&
+  !cursor.seenIds.contains(id))`.
+  **Cursor shape is `BaselineCursor(at, seenIds)`, not the original
+  `databaseId: Long` plan (review rounds 1 + 2 — design-rationale
+  S3-7).** Round 1 settled the timestamp switch: `gh pr view --json
+  comments,reviews` doesn't expose `databaseId`, each entry carries
+  a String `id` plus an ISO-8601 timestamp. Round 2 added the
+  `seenIds` tie-breaker after the reviewer noted that `gh`
+  timestamps have one-second resolution: a bare `isAfter` filter
+  would silently drop a comment created in the same second as the
+  prior watermark.
 - [x] **B2.** `PrSnapshotDecoder.decode(json: ujson.Value, baseline:
   PollBaseline, botLogin: String): Either[DecodeError,
   DecodedSnapshot]` — the canonical decoder entrypoint.
@@ -1226,6 +1229,21 @@ after PR-H lands.
   empty-body filter cases + missing `id` field case + malformed
   `createdAt`; removed the "empty body still surfaces" inline test).
   All other module baselines unchanged.
+- 2026-05-27 — PR-B review round 2. One finding (high): bare-`Instant`
+  cursor + strict `isAfter` filter (round 1) drops same-second human
+  feedback because `gh` timestamps have one-second resolution.
+  `PollBaseline` now wraps each cursor in
+  `BaselineCursor(at: Instant, seenIds: Set[String])`; filter retains
+  `at.isAfter(cursor.at) || (at == cursor.at &&
+  !cursor.seenIds.contains(id))`. Added `Comments.advance` to compute
+  the next cursor from the full observed `(at, id)` set; surfaced
+  via new field `DecodedSnapshot.nextBaseline` so Slice 4 persists
+  exactly what the next poll needs. design-rationale S3-7 extended
+  with the round-2 rationale + rejected-alternatives; RL2 mirrors
+  the cursor shape change. forge-git tests 73 → 81 (CommentsSuite
+  +8: BaselineCursor tie-breaker, `advance` cursor cases including
+  same-second accumulation; PrSnapshotDecoderSuite +1: same-second
+  fixture); all other module baselines unchanged.
 
 ## 4. Carry-forward to v1.3
 
@@ -1337,23 +1355,32 @@ materialize get pruned; new ones surfaced by code review get added).
   `gh pr create … && gh pr view <url> --json number -q .number`
   for use behind a feature flag, though Slice 3 doesn't ship the
   fallback).
-- **S3-7 — `PollBaseline` cursors are `Instant` (`createdAt` /
-  `submittedAt`), not `databaseId: Long`; empty-body posts are
-  dropped at decode time** (PR-B review round 1, filed in
-  `design-rationale.md` S3-7). Two coupled deviations from the
-  v1.2 reading of design-rationale RL2:
-    - **Cursor type.** `gh pr view --json comments,reviews` does
-      not expose `databaseId`; entries carry a String GraphQL `id`
-      plus a timestamp (`createdAt` for comments, `submittedAt` for
-      reviews). The original PR-B plan (`Long databaseId`) would
+- **S3-7 — `PollBaseline` cursors are
+  `BaselineCursor(at: Instant, seenIds: Set[String])`, not
+  `databaseId: Long`; empty-body posts are dropped at decode time**
+  (PR-B review rounds 1 + 2, filed in `design-rationale.md` S3-7).
+  Three coupled deviations from the v1.2 reading of design-rationale
+  RL2:
+    - **Cursor type (round 1).** `gh pr view --json comments,reviews`
+      does not expose `databaseId`; entries carry a String GraphQL
+      `id` plus a timestamp (`createdAt` for comments, `submittedAt`
+      for reviews). The original PR-B plan (`Long databaseId`) would
       have made `PRWatcher.pollOnce` fail with
       `MissingField("comments[0].databaseId")` on every real PR
-      with human feedback. Slice 3 ships `Option[Instant]` cursors
-      and `Instant.isAfter` ordering. Slice 4 inherits this without
-      change — no orchestrator-side resolution needed; v1.3 RL2
-      pins the cursor type.
-    - **Empty-body filter.** GitHub allows empty-bodied review
-      submissions (plain approvals); the FSM treats
+      with human feedback. v1.3 RL2 pins the cursor type.
+    - **Same-second tie-breaker (round 2).** `gh` timestamps have
+      one-second resolution; a bare `isAfter` filter against an
+      `Option[Instant]` cursor would silently drop any comment
+      created in the same second as the prior watermark. Slice 3
+      ships `BaselineCursor(at, seenIds)` where `seenIds` is the set
+      of entry ids observed exactly at `at`; the filter retains
+      `at.isAfter(cursor.at) || (at == cursor.at &&
+      !cursor.seenIds.contains(id))`. `Comments.advance` accumulates
+      `seenIds` across polls that share the watermark and surfaces
+      the result as `DecodedSnapshot.nextBaseline` for the
+      orchestrator to persist. v1.3 RL2 pins the mechanic.
+    - **Empty-body filter (round 1).** GitHub allows empty-bodied
+      review submissions (plain approvals); the FSM treats
       `unseenComments.nonEmpty` as a human override signal, so an
       empty approval would spuriously kick a piece back to
       `PieceReviewFailed`. Slice 3 drops empty-body entries at
