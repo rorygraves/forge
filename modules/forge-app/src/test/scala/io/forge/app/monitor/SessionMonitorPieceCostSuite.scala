@@ -29,7 +29,12 @@ class SessionMonitorPieceCostSuite extends CatsEffectSuite:
     Cost(provider = "p", model = "m", inputTokens = 0L, outputTokens = 0L, usd = BigDecimal(usd))
 
   test("pieceTotal crossing the cap → BudgetBreached(Piece(p), totals, cap) + kill NOT called"):
-    val events = Stream.emit[IO, AgentEvent](AgentEvent.CostUpdate(cost("3.00")))
+    val events = Stream.emits[IO, AgentEvent](
+      Vector(
+        AgentEvent.CostUpdate(cost("3.00")),
+        AgentEvent.Result(success = true, durationMs = 0)
+      )
+    )
     val program =
       for
         session <- FakeStreamingSession.make
@@ -52,7 +57,12 @@ class SessionMonitorPieceCostSuite extends CatsEffectSuite:
     // Phases that genuinely don't have a piece (Spec, DesignRevision) ought never to be paired with
     // `maxPieceCostUsd = Some(_)`. The fallback to Harness is a programmer-error safety net rather than a
     // first-class supported configuration; the scaladoc on SessionMonitor names this.
-    val events = Stream.emit[IO, AgentEvent](AgentEvent.CostUpdate(cost("3.00")))
+    val events = Stream.emits[IO, AgentEvent](
+      Vector(
+        AgentEvent.CostUpdate(cost("3.00")),
+        AgentEvent.Result(success = true, durationMs = 0)
+      )
+    )
     val program =
       for
         session <- FakeStreamingSession.make

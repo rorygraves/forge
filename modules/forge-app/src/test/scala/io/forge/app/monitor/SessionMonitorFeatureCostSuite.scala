@@ -27,7 +27,14 @@ class SessionMonitorFeatureCostSuite extends CatsEffectSuite:
     Cost(provider = "p", model = "m", inputTokens = 0L, outputTokens = 0L, usd = BigDecimal(usd))
 
   test("featureTotal crossing the cap → BudgetBreached(Feature, totals, cap) + kill NOT called"):
-    val events = Stream.emit[IO, AgentEvent](AgentEvent.CostUpdate(cost("6.00")))
+    // §12 check 2: the breach is recorded on CostUpdate but only published on Result, so the canonical fixture
+    // pairs the breaching CostUpdate with the turn-completing Result.
+    val events = Stream.emits[IO, AgentEvent](
+      Vector(
+        AgentEvent.CostUpdate(cost("6.00")),
+        AgentEvent.Result(success = true, durationMs = 0)
+      )
+    )
     val program =
       for
         session <- FakeStreamingSession.make
@@ -46,11 +53,13 @@ class SessionMonitorFeatureCostSuite extends CatsEffectSuite:
     }
 
   test("featureTotal accumulating across CostUpdates only breaches once the cap is crossed"):
-    // Pre-seed totals so the first CostUpdate doesn't breach but the second one does.
+    // First CostUpdate doesn't breach (feature = 2); second pushes feature to 6 → records pending breach;
+    // Result flushes the pending breach into the published outcome.
     val events = Stream.emits[IO, AgentEvent](
       Vector(
         AgentEvent.CostUpdate(cost("2.00")),
-        AgentEvent.CostUpdate(cost("4.00"))
+        AgentEvent.CostUpdate(cost("4.00")),
+        AgentEvent.Result(success = true, durationMs = 0)
       )
     )
     val program =

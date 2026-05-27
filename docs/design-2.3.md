@@ -1464,6 +1464,42 @@ after PR-H lands.
   `forge-core` 358 / `forge-agents` 181 / `forge-git` 162 / `forge-it` 11
   unchanged; `scalafmtCheckAll` clean. PR-G (sacrificial-repo IT) is the
   next entry point.
+- 2026-05-27 — PR-F review round 1. Two P1 findings, both addressed in
+  a single fix pass.
+  (P1) `RealSessionMonitor` was completing the shared `Deferred` BEFORE
+  running `session.kill()`. Foreground `result.get` would unblock as
+  soon as the Deferred fired, the surrounding `Resource.background`
+  would then cancel the timer/processor fiber — and the cancellation
+  could land mid-`kill()`, leaving a real `Subprocess.kill`'s
+  SIGTERM → 5s grace → SIGKILL state machine half-run and a runaway
+  subprocess unreaped. Reworked the winner path around a
+  `winnerClaimed: Ref[IO, Boolean]` + `IO.uncancelable` "finishAsWinner"
+  helper that claims atomically, runs side effects (e.g. `session.kill()`),
+  and only then completes the published Deferred. Foreground's
+  `result.get` therefore only unblocks after kill has run to completion.
+  (P1) Feature/piece budget breaches were publishing
+  `MonitorOutcome.BudgetBreached` immediately on the breaching
+  CostUpdate, cancelling event consumption mid-turn. §12 check 2 says
+  "per-feature/per-piece breach → let current turn complete, no new
+  spawns". Reworked the breach path around a
+  `pendingBreach: Ref[IO, Option[BudgetBreached]]`: feature/piece caps
+  record the breach and continue consuming; on the next
+  `AgentEvent.Result` (or stream end) the pending breach is flushed
+  into the published outcome. Turn-budget and settle-timeout still
+  preempt a pending breach (their `finishAsWinner` calls beat the
+  end-of-turn flush). Defensive backstop: stream-end-without-Result
+  still flushes a pending breach so the orchestrator sees the §12
+  signal instead of the SettleTimeout fallback.
+  Test scope: forge-app 36 → 43 — new `SessionMonitorReviewRound1Suite`
+  pins both fixes (P1 ×2: timeout + turn-budget paths, asserting
+  `result.get` returns AFTER `killFinishedAt` is stamped by a
+  `SlowKillSession` fake; P2 ×5: pending-breach all-events-consumed,
+  turn-budget beats pending, settle-timeout beats pending, stream-end
+  backstop, first-detected-scope preservation). Existing FeatureCost /
+  PieceCost suites tightened to pair the breaching CostUpdate with a
+  trailing `Result` so they exercise the canonical end-of-turn flush
+  path rather than the defensive stream-end backstop. Baselines
+  elsewhere unchanged; `scalafmtCheckAll` clean.
 
 ## 4. Carry-forward to v1.3
 
