@@ -19,6 +19,9 @@ import io.forge.core.paths.ForgePaths
   *   - Filesystem write failure — surfaces [[AssetInstaller.WriteFailed]]. The first failure aborts the install (the
   *     short-circuit is intentional — partial installs against a permission-denied user are easier to recover from than
   *     a half-installed `~/.forge/`).
+  *   - Existing destination is not a regular file (directory, FIFO, …) — surfaces
+  *     [[AssetInstaller.InvalidExistingDestination]] rather than silent `Skipped`, so the operator finds out at install
+  *     time instead of when the reviewer connector later fails to read it.
   */
 object AssetInstaller:
 
@@ -40,6 +43,14 @@ object AssetInstaller:
 
   final case class WriteFailed(dest: os.Path, cause: Throwable) extends Error:
     def detail: String = s"failed to write $dest: ${cause.getMessage}"
+
+  /** The destination path exists but isn't a regular file (directory, FIFO, broken symlink, etc.). Reading it as a file
+    * downstream would fail; reporting `Skipped` would falsely claim a healthy install. The connector that reads this
+    * path next would surface a generic IO error well away from the cause — better to fail loudly here.
+    */
+  final case class InvalidExistingDestination(dest: os.Path, kind: String) extends Error:
+    def detail: String =
+      s"refusing to skip $dest — exists but is not a regular file (kind=$kind); remove or replace it manually"
 
   /** First-run installer. Reads each shipped asset from the classpath and writes it to the matching location under the
     * user's `~/.forge/`. Existing destination files are left untouched.
@@ -66,7 +77,18 @@ object AssetInstaller:
       case None => Right(acc.result())
 
   private def installOne(asset: ShippedAsset): Either[Error, InstalledAsset] =
-    if os.exists(asset.dest) then Right(InstalledAsset(asset.resourcePath, asset.dest, Action.Skipped))
+    // os.exists alone treats a directory or FIFO at the leaf as "present", which would have the installer
+    // claim success while the connector that reads the leaf as a file later fails with a generic IOException
+    // well removed from the cause. Tightening to "exists AND is a regular file" surfaces the misconfiguration
+    // here, as a typed error the bootstrap can render at install time.
+    if os.exists(asset.dest) then
+      if os.isFile(asset.dest) then Right(InstalledAsset(asset.resourcePath, asset.dest, Action.Skipped))
+      else
+        val kind =
+          if os.isDir(asset.dest) then "directory"
+          else if os.isLink(asset.dest) then "symlink"
+          else "non-file"
+        Left(InvalidExistingDestination(asset.dest, kind))
     else
       readResource(asset.resourcePath) match
         case None => Left(MissingResource(asset.resourcePath))

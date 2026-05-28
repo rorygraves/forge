@@ -101,3 +101,22 @@ class AssetInstallerSuite extends munit.FunSuite:
       case Left(_: AssetInstaller.WriteFailed) => () // expected
       case Left(other) => fail(s"expected WriteFailed, got ${other.getClass.getSimpleName}: ${other.detail}")
       case Right(v) => fail(s"expected failure, got success with ${v.size} records")
+
+  test("existing destination that is a directory surfaces InvalidExistingDestination (not silent Skip)"):
+    val (_, paths) = tempPaths()
+    // Plant a directory at one of the leaf destinations — e.g. someone ran `mkdir refine.json` by accident,
+    // or a previous install corrupted under a race. os.exists returns true but reading it as a file later
+    // would explode; the installer must surface that here, not claim success.
+    val target = paths.userSchemasDir / "refine.json"
+    os.makeDir.all(target)
+    assert(os.isDir(target), "fixture sanity: target should be a directory")
+
+    val result = AssetInstaller.installIfMissing(paths).unsafeRunSync()
+    result match
+      case Left(AssetInstaller.InvalidExistingDestination(dest, kind)) =>
+        assertEquals(dest, target)
+        assertEquals(kind, "directory")
+      case Left(other) =>
+        fail(s"expected InvalidExistingDestination, got ${other.getClass.getSimpleName}: ${other.detail}")
+      case Right(v) =>
+        fail(s"expected failure, got success with ${v.size} records")

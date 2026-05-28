@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://forge.io/schemas/refine.json",
   "title": "RefineResult",
-  "description": "Schema for forge refine outputs (§14.3). Mirrors RefineResult in forge-agents/Reviews.scala. The `patch` field is required iff outcome == 'update_plan'.",
+  "description": "Schema for forge refine outputs (§14.3). Mirrors RefineResult in forge-agents/Reviews.scala. The `patch` field is required iff outcome == 'update_plan' and must conform to the ManifestPatch (reason + ops) wire shape — uPickle serialises ManifestPatchOp variants with a `$type` discriminator.",
   "type": "object",
   "additionalProperties": false,
   "required": ["outcome", "reason"],
@@ -17,14 +17,111 @@
       "description": "Human-readable rationale for the chosen outcome."
     },
     "patch": {
-      "type": "object",
-      "description": "Manifest patch in §5.4 shape; required when outcome == 'update_plan', ignored otherwise."
+      "$ref": "#/$defs/manifestPatch"
     }
   },
   "allOf": [
     {
       "if": { "properties": { "outcome": { "const": "update_plan" } } },
       "then": { "required": ["patch"] }
+    },
+    {
+      "if": {
+        "properties": { "outcome": { "enum": ["no_change", "reopen_design"] } }
+      },
+      "then": { "not": { "required": ["patch"] } }
     }
-  ]
+  ],
+  "$defs": {
+    "manifestPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "ops"],
+      "properties": {
+        "reason": { "type": "string" },
+        "ops": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/manifestPatchOp" }
+        }
+      }
+    },
+    "manifestPatchOp": {
+      "oneOf": [
+        { "$ref": "#/$defs/op_addPiece" },
+        { "$ref": "#/$defs/op_removePiece" },
+        { "$ref": "#/$defs/op_editPiece" },
+        { "$ref": "#/$defs/op_reorderPieces" }
+      ]
+    },
+    "op_addPiece": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["$type", "after", "piece"],
+      "properties": {
+        "$type": { "const": "AddPiece" },
+        "after": { "type": ["string", "null"] },
+        "piece": { "$ref": "#/$defs/piece" }
+      }
+    },
+    "op_removePiece": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["$type", "id"],
+      "properties": {
+        "$type": { "const": "RemovePiece" },
+        "id": { "type": "string" }
+      }
+    },
+    "op_editPiece": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["$type", "id", "title", "summary", "specPath", "acceptanceHash"],
+      "properties": {
+        "$type": { "const": "EditPiece" },
+        "id": { "type": "string" },
+        "title": { "type": ["string", "null"] },
+        "summary": { "type": ["string", "null"] },
+        "specPath": { "type": ["string", "null"] },
+        "acceptanceHash": { "type": ["string", "null"] }
+      }
+    },
+    "op_reorderPieces": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["$type", "newOrder"],
+      "properties": {
+        "$type": { "const": "ReorderPieces" },
+        "newOrder": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "piece": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "order", "title", "summary", "specPath",
+        "acceptanceHash", "status", "baseSha", "prNumber",
+        "mergeCommit", "mergedAt", "attempts"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "order": { "type": "integer" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "specPath": { "type": "string" },
+        "acceptanceHash": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "in_progress", "merged"]
+        },
+        "baseSha": { "type": ["string", "null"] },
+        "prNumber": { "type": ["integer", "null"] },
+        "mergeCommit": { "type": ["string", "null"] },
+        "mergedAt": { "type": ["string", "null"] },
+        "attempts": { "type": "integer" }
+      }
+    }
+  }
 }

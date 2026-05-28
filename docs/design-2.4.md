@@ -1683,6 +1683,29 @@ ticks off only after PR-Q lands.
   (358), `forge-agents` (181), `forge-git` (168) preserved.
   `sbt scalafmtCheckAll` clean; `sbt clean compile` clean
   under `-Xfatal-warnings`; `forge-it` still compiles.
+- 2026-05-28 — PR-A review round 1 landed (2 findings). **P2**
+  (`refine.json` `patch` field wasn't constrained to
+  `ManifestPatch` shape, and stray `patch` on `no_change` /
+  `reopen_design` was silently permitted): tightened the
+  schema to model the real `ManifestPatch(reason, ops)` wire
+  shape with `oneOf` branches per `ManifestPatchOp` variant
+  using the uPickle `$type` discriminator, then added a
+  second `allOf` branch that forbids `patch` when
+  `outcome ∈ {no_change, reopen_design}`. Backed the
+  tightening with a new `RefineSchemaValidationSuite` (14
+  cases) that uses networknt's JSON Schema validator against
+  payloads built from real `ManifestPatch` /
+  `ManifestPatchOp` values via uPickle — so the schema and
+  the wire shape can no longer drift silently. **P3**
+  (`AssetInstaller` silently treated any existing dest as
+  `Skipped`, including a directory): tightened the
+  existing-dest check to require a regular file and added
+  `InvalidExistingDestination(dest, kind)` to the error
+  channel, with a new `AssetInstallerSuite` case where a
+  directory at the destination surfaces the typed error
+  rather than a misleading success. `forge-app` test count
+  46 → 82 (PR-A landing was 46 → 63; review round 1 added
+  +19 cases). All baselines preserved.
 
 ## 4. Carry-forward (inherited + new)
 
