@@ -344,25 +344,44 @@ object ClaudeConnector:
       )
       .flatMap: (exit, stdoutLines, stderrLines) =>
         val stdoutStr = stdoutLines.mkString("\n").trim
-        if exit != 0 then
+        dumpRawEnvelope(stdoutStr) *> parseReviewerStdout(exit, stdoutStr, stderrLines)
+
+  /** Opt-in raw capture: when `FORGE_REVIEWER_RAW_DUMP_DIR` is set, write each reviewer call's full raw stdout (the
+    * complete `--output-format json` envelope) to a uniquely-named file under that dir. Off by default and best-effort
+    * (a dump failure never fails the reviewer call), so it is safe to leave wired in. Used to characterise the length /
+    * `stop_reason` distribution across a regression batch offline, without re-running — see **C18**.
+    */
+  private def dumpRawEnvelope(raw: String): IO[Unit] =
+    sys.env.get("FORGE_REVIEWER_RAW_DUMP_DIR") match
+      case None => IO.unit
+      case Some(dir) =>
+        IO.blocking {
+          val d = os.Path(dir, os.pwd)
+          os.makeDir.all(d)
+          os.write.over(d / s"claude-reviewer-${java.util.UUID.randomUUID()}.json", raw)
+        }.attempt
+          .void
+
+  private def parseReviewerStdout(exit: Int, stdoutStr: String, stderrLines: Vector[String]): IO[Value] =
+    if exit != 0 then
+      IO.raiseError(
+        ReviewerProcessFailure(
+          s"Claude reviewer process exited $exit; stderr tail: ${stderrLines.takeRight(20).mkString("\n")}"
+        )
+      )
+    else if stdoutStr.isEmpty then
+      IO.raiseError(
+        ReviewerProcessFailure(
+          s"Claude reviewer produced empty stdout; stderr tail: ${stderrLines.takeRight(20).mkString("\n")}"
+        )
+      )
+    else
+      try IO.pure(ujson.read(stdoutStr))
+      catch
+        case e: ujson.ParsingFailedException =>
           IO.raiseError(
-            ReviewerProcessFailure(
-              s"Claude reviewer process exited $exit; stderr tail: ${stderrLines.takeRight(20).mkString("\n")}"
-            )
+            StructuredOutputMissing(s"Claude reviewer stdout was not valid JSON: ${e.getMessage}")
           )
-        else if stdoutStr.isEmpty then
-          IO.raiseError(
-            ReviewerProcessFailure(
-              s"Claude reviewer produced empty stdout; stderr tail: ${stderrLines.takeRight(20).mkString("\n")}"
-            )
-          )
-        else
-          try IO.pure(ujson.read(stdoutStr))
-          catch
-            case e: ujson.ParsingFailedException =>
-              IO.raiseError(
-                StructuredOutputMissing(s"Claude reviewer stdout was not valid JSON: ${e.getMessage}")
-              )
 
   /** Pull the schema-conformant payload out of the `claude -p --output-format json` result envelope.
     *
@@ -400,14 +419,15 @@ object ClaudeConnector:
                 case None =>
                   Left("Claude result envelope missing 'structured_output' field and has no string 'result' fallback")
                 case Some(resultStr) =>
-                  parseResultPayload(resultStr)
+                  parseResultPayload(resultStr, obj)
 
   /** Parse the `result` string into the schema-conformant object. Tries a clean parse first (Claude 2.1.153 shape); on
     * failure salvages the first balanced JSON object from prose / a Markdown fence (Claude 2.1.156, **C18**). The
     * salvaged candidate is still parsed by `ujson`, so a non-JSON or malformed object surfaces `Left` exactly as
-    * before.
+    * before. The failure `Left` carries a [[resultDiagnostic]] computed from the envelope so a schema-fail says *why*
+    * (truncation vs raw control chars vs other escaping) without a re-run — see **C18**.
     */
-  private def parseResultPayload(resultStr: String): Either[String, Value] =
+  private def parseResultPayload(resultStr: String, envelopeObj: collection.Map[String, Value]): Either[String, Value] =
     try Right(ujson.read(resultStr))
     catch
       case _: ujson.ParsingFailedException =>
@@ -416,8 +436,58 @@ object ClaudeConnector:
           case None =>
             Left(
               "Claude result envelope had no 'structured_output' field and its 'result' string was not valid JSON " +
-                s"(nor did it contain a salvageable JSON object): ${truncate(resultStr)}"
+                s"(nor a salvageable JSON object). ${resultDiagnostic(resultStr, envelopeObj)} payload head: " +
+                truncate(resultStr)
             )
+
+  /** Diagnostic for a `result`-string parse failure. The signals localise the cause without eyeballing the raw bytes:
+    *   - `stopReason=max_tokens` (Anthropic) → the **model** was cut off mid-output → genuine truncation.
+    *   - `braces=UNBALANCED` with `stopReason=end_turn` → the model finished but the object is unclosed → truncation
+    *     downstream of the model (CLI `result` cap), *not* in our stdout draining (the enclosing envelope parsed whole,
+    *     proving we received complete bytes).
+    *   - `braces=balanced` with `rawControlChars>0` → the object is structurally complete but contains literal control
+    *     chars (e.g. newlines in a multi-line `summary`) that JSON forbids inside strings → a formatting issue, not
+    *     truncation; recoverable by tolerant parsing rather than by shortening the review.
+    */
+  private[agents] def resultDiagnostic(resultStr: String, envelopeObj: collection.Map[String, Value]): String =
+    val stopReason = envelopeObj.get("stop_reason").flatMap(_.strOpt).getOrElse("?")
+    val outTokens = envelopeObj
+      .get("usage")
+      .flatMap(_.objOpt)
+      .flatMap(_.get("output_tokens"))
+      .flatMap(_.numOpt)
+      .map(_.toInt.toString)
+      .getOrElse("?")
+    val (balanced, finalDepth) = braceBalance(resultStr)
+    val rawCtrl = resultStr.count(_ < ' ')
+    s"[diag len=${resultStr.length} stopReason=$stopReason outputTokens=$outTokens " +
+      s"braces=${if balanced then "balanced" else s"UNBALANCED(finalDepth=$finalDepth)"} rawControlChars=$rawCtrl]"
+
+  /** String/escape-aware brace-balance check over the first `{`…matching-`}` region. Returns whether the object closed
+    * cleanly (depth returned to 0 at end) and the final depth (>0 ⇒ unclosed ⇒ truncated).
+    */
+  private[agents] def braceBalance(s: String): (Boolean, Int) =
+    val start = s.indexOf('{')
+    if start < 0 then (false, 0)
+    else
+      var depth = 0
+      var inStr = false
+      var escaped = false
+      var i = start
+      while i < s.length do
+        val c = s.charAt(i)
+        if escaped then escaped = false
+        else if inStr then
+          if c == '\\' then escaped = true
+          else if c == '"' then inStr = false
+        else
+          c match
+            case '"' => inStr = true
+            case '{' => depth += 1
+            case '}' => depth -= 1
+            case _ => ()
+        i += 1
+      (depth == 0, depth)
 
   /** Best-effort recovery of one JSON object from a `result` string the model wrapped in prose or a fence. Locates the
     * first `{` and its matching `}` (brace depth, string/escape aware), parses that span, and returns it only if it
@@ -453,5 +523,5 @@ object ClaudeConnector:
         try Some(ujson.read(s.substring(start, end + 1)))
         catch case _: ujson.ParsingFailedException => None
 
-  private def truncate(s: String, max: Int = 200): String =
+  private def truncate(s: String, max: Int = 600): String =
     if s.length <= max then s else s.take(max) + "…"
