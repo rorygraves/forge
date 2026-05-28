@@ -1,8 +1,8 @@
-# design-2.4 — Slice 4 implementation plan
+# design-1.4 — Slice 1.4 implementation plan
 
-> **Maps to:** [`roadmap.md`](roadmap.md) §2.4 (Phase 1 / Slice 4 —
-> Reviewer assets + `forge-specs` (4A) → headless orchestrator + REPL
-> (4B)) and [`forge-design-1.2.md`](forge-design-1.2.md) §17 slice 4
+> **Maps to:** [`roadmap.md`](roadmap.md) §2.4 (Phase 1 / Slice 1.4 —
+> Reviewer assets + `forge-specs` (1.4a) → headless orchestrator + REPL
+> (1.4b)) and [`forge-design-1.2.md`](forge-design-1.2.md) §17 slice 4
 > deliverables.
 >
 > **Convention** ([`AGENTS.md`](../AGENTS.md) §"Per-section implementation
@@ -12,27 +12,27 @@
 > land; the roadmap section gets ticked off only after a code review on
 > the section as a whole.
 >
-> **Status:** 🟢 open — 2026-05-27. Slice 4 is the largest of Phase 1
+> **Status:** 🟢 open — 2026-05-27. Slice 1.4 is the largest of Phase 1
 > and the MVP-gate that closes Phase 1. Split dependency-shaped into
-> **4A** (reviewer assets, `forge-specs` repopulation, PR-D
-> regression gate — writable foundation) and **4B** (orchestrator
-> loop, CLI, self-hosting gate — built on top of 4A). 4A's sub-PRs
-> are **PR-A → PR-H**; 4B's are **PR-I → PR-Q**. Inherited
+> **1.4a** (reviewer assets, `forge-specs` repopulation, Task 1.4.7
+> regression gate — writable foundation) and **1.4b** (orchestrator
+> loop, CLI, self-hosting gate — built on top of 1.4a). 1.4a's Tasks
+> are **Task 1.4.1 → Task 1.4.8**; 1.4b's are **Task 1.4.9 → Task 1.4.17**. Inherited
 > carry-forwards from Slices 1–3 (**C14**, **C15**, **S2-1**
 > through **S2-10**, **S3-1** through **S3-8**) are walked in §4
-> against the sub-PR each one resolves in.
+> against the Task each one resolves in.
 
-## 0. Exit criterion for Slice 4
+## 0. Exit criterion for Slice 1.4
 
-Roadmap §2.4 splits this slice in two: 4A ships reviewer assets,
-`forge-specs` (re)population, and the PR-D regression gate; 4B
+Roadmap §2.4 splits this slice in two: 1.4a ships reviewer assets,
+`forge-specs` (re)population, and the Task 1.4.7 regression gate; 1.4b
 ships the orchestrator loop, line-mode REPL, and drives a small
 real feature end-to-end through Forge — the **MVP gate** that
 closes Phase 1.
 
-### 0.1 4A exit criterion
+### 0.1 1.4a exit criterion
 
-4A is done when:
+1.4a is done when:
 
 1. Reviewer assets ship at the v1.2 §17 / §10.2 / §14.3 paths:
    - `~/.forge/schemas/{design-review,code-review,refine}.json` —
@@ -56,40 +56,40 @@ closes Phase 1.
      per **M1** / §5.3. Idempotent; no in-place Markdown parsing.
    - `ChangeCollector` — Allow / Deny / Ask classification per
      §10.1; deny-pattern globbing against `config.staging.*` from
-     §18; Slice 1's `Connector`-internal answer routing
+     §18; Slice 1.1's `Connector`-internal answer routing
      (§10.4) bridges the Ask path.
 3. `forge-app` exposes:
    - Reviewer-call wrappers — `ReviewerCall.designReview /
      prReview / refine` in `io.forge.app.reviewer`, each owning
      the one-shot wall-clock cap that closes the SessionMonitor
      reviewer/refine carve-out (**S2-8** / **S3-5**). Wraps the
-     Slice-1 `forge-agents.Reviews.*` adapter methods; surfaces
+     Slice 1.1 `forge-agents.Reviews.*` adapter methods; surfaces
      `ReviewerOutcome.Timeout` on cap breach (no
-     `MonitorOutcome` boundary — that belongs to Slice 3's
-     driver-phase `SessionMonitor`). The orchestrator (Slice 4B
-     PR-J) maps `ReviewerOutcome.Timeout` to either
+     `MonitorOutcome` boundary — that belongs to Slice 1.3's
+     driver-phase `SessionMonitor`). The orchestrator (Slice 1.4b
+     Task 1.4.10) maps `ReviewerOutcome.Timeout` to either
      `FsmEvent.SettleTimeout(SessionPhase.{DesignReview,
-     CodeReview, Refine}, _)` (PR-L option a) or
+     CodeReview, Refine}, _)` (Task 1.4.12 option a) or
      `FsmEvent.HarnessError(...)` (option b).
-4. **PR-D regression suite (C15)** lands as a gating check on
-   4A close — ≥19/20 native schema bar on `reviewDesign /
+4. **Task 1.4.7 regression suite (C15)** lands as a gating check on
+   1.4a close — ≥19/20 native schema bar on `reviewDesign /
    reviewPr / refine` against each connector, against shipped
    reviewer assets. Suite lives in `forge-it`; default-off
    opt-in via `FORGE_IT_RUN_REGRESSION=1` per the
-   default-on-`<60s` runtime budget (mirrors PR-D pattern in
-   Slice 1's reliability suite). Failure → schema/prompt
-   tightening inside 4A, not deferred further.
-5. A 4A close-out review (PR-H) walks the §4 carry-forward
-   bucket for "resolved-in-4A" items (**C15**, the asset-shape
+   default-on-`<60s` runtime budget (mirrors the reliability-suite
+   pattern in Slice 1.1). Failure → schema/prompt
+   tightening inside 1.4a, not deferred further.
+5. A 1.4a close-out review (Task 1.4.8) walks the §4 carry-forward
+   bucket for "resolved-in-1.4a" items (**C15**, the asset-shape
    half of **C14**, the partial **S2-8** / **S3-5** carve-out
-   if 4A's wall-clock wrappers fully close it). Items that
+   if 1.4a's wall-clock wrappers fully close it). Items that
    remain carry-forward (**S2-5**, the orchestrator half of
    **C14**, **S2-8** if reviewer wrappers don't fully close it)
-   stay open for 4B.
+   stay open for 1.4b.
 
-### 0.2 4B exit criterion (Phase 1 exit gate)
+### 0.2 1.4b exit criterion (Phase 1 exit gate)
 
-4B is done when:
+1.4b is done when:
 
 1. `forge-app` exposes:
    - `forge-app/main` — actual `IOApp` entry point. Routes the
@@ -97,7 +97,7 @@ closes Phase 1.
      `forge new | spec | run | status | resume | reconcile |
      refresh-cache | abandon | rebuild-state | unlock --force
      | tail`. (`forge tail` is added as a §2.5 polish item —
-     see **PR-I I3** below for the `ForgeCommand.ReadOnlyKind`
+     see **Task 1.4.9 I3** below for the `ForgeCommand.ReadOnlyKind`
      extension.) CLI parsing in `io.forge.app.cli`;
      per-command handler in `io.forge.app.command`.
    - `Orchestrator` — the headless feature loop. Reads `Feature`
@@ -131,8 +131,8 @@ closes Phase 1.
    `Fsm.transition` handlers for `SessionPhase.{DesignReview,
    CodeReview, Refine}` (with `ResumeHintCoverageSuite` rows) or
    documented orchestrator-side conversion to `HarnessError`
-   events. 4A's reviewer wrappers may have already partially
-   closed this; 4B verifies.
+   events. 1.4a's reviewer wrappers may have already partially
+   closed this; 1.4b verifies.
 9. **MVP gate — drive one small, concrete, low-variance feature
    through Forge end-to-end on this repo.** Pick a contained
    target (a small `forge-git` helper, a narrow `forge-app`
@@ -147,30 +147,30 @@ closes Phase 1.
     bullet in `roadmap.md` §2.4 flips to `[x]`. Phase 1
     closes; Phase 2 (MLP / TUI) opens.
 
-## 1. Sub-PR breakdown
+## 1. Task breakdown
 
-Seventeen numbered sub-PRs across the two halves. **4A: PR-A →
-PR-H. 4B: PR-I → PR-Q.** The dependency graph is mostly linear
-within each half (`A → B → … → H` for 4A; `I → … → Q` for 4B)
-with the 4A → 4B handoff at PR-H. §2 names the safe
-parallelisation points but follows Slice 3's discipline of
+Seventeen numbered Tasks across the two halves. **1.4a: Task 1.4.1 →
+Task 1.4.8. 1.4b: Task 1.4.9 → Task 1.4.17.** The dependency graph is mostly linear
+within each half (`A → B → … → H` for 1.4a; `I → … → Q` for 1.4b)
+with the 1.4a → 1.4b handoff at Task 1.4.8. §2 names the safe
+parallelisation points but follows Slice 1.3's discipline of
 landing serially to keep review surface manageable.
 
-The plan below pins the first-pass checklist; sub-PRs may be
+The plan below pins the first-pass checklist; Tasks may be
 combined or split during execution as PRs land and the
 landscape becomes clearer. The carry-forward in §4 names which
-sub-PR is the durable home for each inherited item.
+Task is the durable home for each inherited item.
 
 ---
 
-### 4A — Reviewer assets, `forge-specs` repopulation, regression gate
+### Slice 1.4a — Reviewer assets, `forge-specs` repopulation, regression gate
 
-### 1.1 PR A — Reviewer schemas + system prompts under `~/.forge/`  ✅ landed 2026-05-28
+### Task 1.4.1 — Reviewer schemas + system prompts under `~/.forge/`  ✅ landed 2026-05-28
 
-The reviewer-asset shipping foundation. Slice 1 wired
+The reviewer-asset shipping foundation. Slice 1.1 wired
 `ReviewerAssets(PerMethod(schema, systemPrompt))` through both
 connectors and the `Reviews.scala` ADT; the actual files don't
-yet exist on disk anywhere. PR-A lands them as a versioned set
+yet exist on disk anywhere. Task 1.4.1 lands them as a versioned set
 under `assets/reviewer/` in-tree, with an installer wired into
 `forge-app`'s bootstrap so first-run populates
 `~/.forge/{schemas,prompts}/` from the in-tree copies.
@@ -204,7 +204,7 @@ under `assets/reviewer/` in-tree, with an installer wired into
   if target file exists (operator may have customised).
   Per-asset `InstalledAsset(source, dest, action: Installed |
   Skipped)` so the bootstrap can log what it did. Lives in
-  `forge-app` (where the entry point will live in PR-I).
+  `forge-app` (where the entry point will live in Task 1.4.9).
 - [x] **A3.** Unit suite under
   `modules/forge-app/src/test/scala/io/forge/app/bootstrap/`:
   - `AssetInstallerSuite` — first-run installs every asset;
@@ -217,33 +217,33 @@ under `assets/reviewer/` in-tree, with an installer wired into
     field listed in the Scala ADT appears in the schema's
     `required` array. Catches drift where someone adds a Scala
     field but forgets to update the JSON Schema.
-- [x] **A4.** Wire `design-2.4.md` into the parent docs:
+- [x] **A4.** Wire `design-1.4.md` into the parent docs:
   - `AGENTS.md` §"Active design-`<section>`.md files" — replace
-    *(none currently open)* with the design-2.4.md pointer.
+    *(none currently open)* with the design-1.4.md pointer.
   - `CLAUDE.md` TL;DR "Active implementation plan" — replace
-    *(none currently open)* with the design-2.4.md pointer.
-    Bump "Current state" to mark Slice 4 active.
-  - `roadmap.md` §2.4 — add a 🟢 "Slice 4 open — 2026-05-27"
-    status block pointing at `design-2.4.md` with PR-A as the
-    entry point. Mirror Slice 3's open-section pattern.
-- [x] **A5.** PR-A landing checklist:
+    *(none currently open)* with the design-1.4.md pointer.
+    Bump "Current state" to mark Slice 1.4 active.
+  - `roadmap.md` §2.4 — add a 🟢 "Slice 1.4 open — 2026-05-27"
+    status block pointing at `design-1.4.md` with Task 1.4.1 as the
+    entry point. Mirror Slice 1.3's open-section pattern.
+- [x] **A5.** Task 1.4.1 landing checklist:
   - `sbt clean compile` clean under `-Xfatal-warnings`.
-  - `sbt test` green; baseline test counts from Slice 3 close
+  - `sbt test` green; baseline test counts from Slice 1.3 close
     (`forge-core` 358 / `forge-agents` 181 / `forge-git` 168
     / `forge-app` 46) preserved or grown.
   - `sbt scalafmtCheckAll` clean.
-  - `ForgePathsSuite`'s `os.walk` sweep still green (PR-A
+  - `ForgePathsSuite`'s `os.walk` sweep still green (Task 1.4.1
     only adds in-tree assets and a `forge-app` bootstrap
     helper — no new `.forge` literals outside `ForgePaths`).
-  - This file's PR-A header flipped to "✅ landed" and a §3
+  - This file's Task 1.4.1 header flipped to "✅ landed" and a §3
     status-log entry added.
 
-### 1.2 PR B — Reviewer-call wrappers + wall-clock cap (closes S2-8 / S3-5 partially)
+### Task 1.4.2 — Reviewer-call wrappers + wall-clock cap (closes S2-8 / S3-5 partially)
 
-Slice 3's `SessionMonitor` deliberately excluded the
+Slice 1.3's `SessionMonitor` deliberately excluded the
 reviewer/refine phases (§17 slice 3 — only the four driver
 phases have a `Stream[IO, AgentEvent]` to monitor; reviewer
-calls are one-shot blocking IO). 4A's reviewer wrappers
+calls are one-shot blocking IO). 1.4a's reviewer wrappers
 colocate the wall-clock cap with the one-shot adapter call.
 
 **Boundary note — what the wrapper cannot see.** The current
@@ -257,10 +257,10 @@ subclasses of `ReviewerError` (a `RuntimeException`-flavoured
 sealed trait — `ReviewerProcessFailure`,
 `ReviewerNotConfigured`, `StructuredOutputMissing`,
 `StructuredOutputMalformed`) raised into the IO, not in an
-`Either` channel. **Slice 4A keeps that boundary as-is** —
+`Either` channel. **Slice 1.4a keeps that boundary as-is** —
 widening `Connector.reviewDesign` / `reviewPr` / `refine` to
 return cost + a kill handle would ripple through every
-existing connector suite plus the PR-G regression suite, for
+existing connector suite plus the Task 1.4.7 regression suite, for
 no measurable gain on a one-shot blocking adapter call. The
 wrapper therefore wraps what's there:
 
@@ -282,7 +282,7 @@ wrapper therefore wraps what's there:
   (`extractStructuredOutput` / `extractAgentMessageText` paths
   used by `reviewDesign` / `reviewPr` / `refine`) **do not
   emit `AgentEvent.CostUpdate`** the way the streaming driver
-  pipeline does. Slice 4A therefore makes per-reviewer-call
+  pipeline does. Slice 1.4a therefore makes per-reviewer-call
   cost enforcement **explicitly out of scope** and files a
   new carry-forward **S4-3** in `design-rationale.md` and §4
   below. Closing S4-3 requires either widening
@@ -291,12 +291,12 @@ wrapper therefore wraps what's there:
   `AgentEvent.CostUpdate` through the one-shot reviewer
   collectors so the orchestrator's `Feature.cost` projection
   picks them up; either is a real connector-boundary change
-  that 4A deliberately defers. **Until S4-3 closes, reviewer
+  that 1.4a deliberately defers. **Until S4-3 closes, reviewer
   spend does not contribute to `feature.cost` / `piece.cost`
   budget caps** — the §12 check 1/2 budgets remain a
   driver-session-only invariant for v1, and the four reviewer
   / refine calls per piece are assumed bounded by the
-  wall-clock cap PR-B does enforce.
+  wall-clock cap Task 1.4.2 does enforce.
 
   `ReviewerOutcome[A]` is a sealed trait:
   - `Settled(result: A)` — clean return. No `cost: Cost`
@@ -310,10 +310,10 @@ wrapper therefore wraps what's there:
     `Resource` finalizer release the underlying subprocess.
     Whether that release reliably issues SIGTERM/SIGKILL
     against the CLI subprocess depends on connector
-    internals (Slice 1's `Subprocess` honours fiber
+    internals (Slice 1.1's `Subprocess` honours fiber
     cancellation, but the reviewer collector path doesn't
     re-expose that as an observable kill signal in the
-    return value). **PR-B does not claim observable kill
+    return value). **Task 1.4.2 does not claim observable kill
     success or failure** — it returns `Timeout`, and any
     leftover subprocess is the connector resource finalizer's
     responsibility. If reliable kill-with-diagnostics matters
@@ -324,8 +324,8 @@ wrapper therefore wraps what's there:
     surfaced in the outcome channel. Each sub-variant
     (`ReviewerProcessFailure`, `ReviewerNotConfigured`,
     `StructuredOutputMissing`, `StructuredOutputMalformed`)
-    is passed through unchanged; the orchestrator (Slice 4B
-    PR-J) routes each per §7.5 / §7.6 (process failures
+    is passed through unchanged; the orchestrator (Slice 1.4b
+    Task 1.4.10) routes each per §7.5 / §7.6 (process failures
     retryable, others not).
 - [ ] **B2.** `RealReviewerCall(connector: Connector, clock:
   Clock[IO])` — wraps the three `connector.review*` methods.
@@ -334,25 +334,25 @@ wrapper therefore wraps what's there:
   `ReviewerError` subclasses and turn them into the
   `AdapterFailure` channel. Connector resource lifetime
   ownership: connector is constructed once per orchestrator
-  run (Slice 4B PR-J), not per reviewer call.
+  run (Slice 1.4b Task 1.4.10), not per reviewer call.
 - [ ] **B3.** **`ReviewerCall` boundary is `ReviewerOutcome`.**
-  PR-B does **not** emit `MonitorOutcome.SettleTimeout`
-  directly — `MonitorOutcome` is Slice-3 `SessionMonitor`'s
+  Task 1.4.2 does **not** emit `MonitorOutcome.SettleTimeout`
+  directly — `MonitorOutcome` is Slice 1.3 `SessionMonitor`'s
   driver-phase surface and the reviewer wrapper has no
   business reaching across into it. The conversion from
   `ReviewerOutcome.Timeout` to an FSM-visible event happens
-  in the orchestrator (Slice 4B PR-J), and the choice of
-  target event closes **S2-8** / **S3-5** in PR-L:
+  in the orchestrator (Slice 1.4b Task 1.4.10), and the choice of
+  target event closes **S2-8** / **S3-5** in Task 1.4.12:
   - **(a)** Orchestrator maps `Timeout` →
     `FsmEvent.SettleTimeout(SessionPhase.{DesignReview,
-    CodeReview, Refine}, reason)`; PR-L adds explicit FSM
+    CodeReview, Refine}, reason)`; Task 1.4.12 adds explicit FSM
     handlers per **S2-8** option (i).
   - **(b)** Orchestrator maps `Timeout` →
     `FsmEvent.HarnessError("reviewer settle timeout — ...")`;
-    PR-L documents the orchestrator-side conversion per
+    Task 1.4.12 documents the orchestrator-side conversion per
     **S2-8** option (ii) and the FSM gains no new handlers.
   Recommend **(a)** for symmetry with the driver-phase
-  SessionMonitor / FSM surface; PR-L lands the matching
+  SessionMonitor / FSM surface; Task 1.4.12 lands the matching
   FSM handlers and the `ResumeHintCoverageSuite` rows. File
   the decision against **S2-8** in `design-rationale.md` once
   taken.
@@ -371,10 +371,10 @@ wrapper therefore wraps what's there:
     `ReviewerError` subclass via `IO.raiseError` →
     `AdapterFailure(err)` with the variant preserved.
 
-### 1.3 PR C — `forge-specs` skeleton + `SpecStore`
+### Task 1.4.3 — `forge-specs` skeleton + `SpecStore`
 
-`forge-specs` lost its sources in Slice 2 PR-A (manifest types
-relocated to `forge-core` per **S2-1**). PR-C re-populates the
+`forge-specs` lost its sources in Slice 1.2 Task 1.2.1 (manifest types
+relocated to `forge-core` per **S2-1**). Task 1.4.3 re-populates the
 module with the persistence wrappers it actually owns.
 
 - [ ] **C1.** Module skeleton under
@@ -398,7 +398,7 @@ module with the persistence wrappers it actually owns.
   ```
   The decomposition methods exist explicitly because **M1** /
   §5.3 makes `decomposition.md` a render target that
-  `forge reconcile` (PR-M / **M6**) also reads back via the
+  `forge reconcile` (Task 1.4.13 / **M6**) also reads back via the
   editable-region markers — both directions need a typed
   path. `ForgePaths.decomposition(featureId)` is the
   underlying location. Atomic write semantics: temp file +
@@ -408,11 +408,11 @@ module with the persistence wrappers it actually owns.
   source of truth, so its writes must be atomic.** The
   atomic-write helper itself can be lifted from
   `FileStateCache` and shared, or duplicated thinly — settle
-  in PR-C.
+  in Task 1.4.3.
 - [ ] **C3.** `FileSpecStore(paths: ForgePaths)` — uses
   `ForgePaths.manifest / design / decomposition / pieceSpec`
   exclusively (one accessor per `SpecStore` method pair in
-  C2). No `.forge/...` literals in this module either (PR-A
+  C2). No `.forge/...` literals in this module either (Task 1.4.1
   wires `ForgePathsSuite`'s `os.walk` sweep over the new
   `forge-specs` sources).
 - [ ] **C4.** `SpecStoreError` sealed trait:
@@ -423,16 +423,16 @@ module with the persistence wrappers it actually owns.
 - [ ] **C5.** Unit suite — `FileSpecStoreSuite` covers
   round-trip for each method, atomic-write crash-window
   recovery (write fails partway → original survives), and the
-  three error variants. Cross-reference Slice 2 PR-F F13
+  three error variants. Cross-reference Slice 1.2 Task 1.2.6 F13
   reader-side atomic-merge invariant — the writer side here is
-  **S2-5**'s anchor (closure happens at Slice 4B PR-K).
+  **S2-5**'s anchor (closure happens at Slice 1.4b Task 1.4.11).
 
-### 1.4 PR D — `DocSync` (decomposition.md re-render)
+### Task 1.4.4 — `DocSync` (decomposition.md re-render)
 
 Per **M1** / §5.3 — `manifest.json` is the machine source of
 truth; `decomposition.md` is a rendered view. `forge reconcile`
-inverse path is via the HTML-comment editable regions (Slice 1
-hasn't shipped that direction yet — it's a Slice 4B / PR-O
+inverse path is via the HTML-comment editable regions (Slice 1.1
+hasn't shipped that direction yet — it's a Slice 1.4b / Task 1.4.15
 polish item).
 
 - [ ] **D1.** `io.forge.specs.DocSync` trait:
@@ -443,12 +443,12 @@ polish item).
   ```
   Reads `manifest.json` via `SpecStore.loadManifest`, applies
   the `~/.forge/templates/decomposition.md.hbs` template,
-  writes via PR-C's `SpecStore.saveDecomposition` (atomic
+  writes via Task 1.4.3's `SpecStore.saveDecomposition` (atomic
   temp+rename+fsync; same shape as `saveManifest`).
 - [ ] **D2.** Template engine choice — Handlebars-Scala (the
   `decomposition.md.hbs` extension implies Handlebars) or a
   hand-rolled mustache-shaped renderer. Decision recorded in
-  PR-D against `design-rationale.md` as a v1 module-layout
+  Task 1.4.4 against `design-rationale.md` as a v1 module-layout
   call (no spec implication). Lightweight is fine; the
   template doesn't have conditionals beyond piece-status
   badges.
@@ -464,7 +464,7 @@ polish item).
   - Missing template surfaces `TemplateMissing` not a generic
     `IoFailure`.
 
-### 1.5 PR E — `ChangeCollector` (Allow / Deny / Ask)
+### Task 1.4.5 — `ChangeCollector` (Allow / Deny / Ask)
 
 Per §10.1. The decision-rich piece: deny-pattern globbing,
 allow-pattern overlay, the "Ask" path that bridges into the
@@ -486,7 +486,7 @@ driver's `AskUserQuestion` mechanism.
   `FileChange(path: os.Path, kind: Added | Modified |
   Deleted | Renamed(from))` — emitted by `git status
   --porcelain`-equivalent (`GitClient.isWorktreeClean`
-  returns Boolean only; PR-E extends `GitClient` if needed
+  returns Boolean only; Task 1.4.5 extends `GitClient` if needed
   with a `changedFiles` method, or reads the porcelain
   output directly via `os.proc`).
 - [ ] **E2.** Pattern matching — adopt one of (a)
@@ -495,7 +495,7 @@ driver's `AskUserQuestion` mechanism.
   `os-lib`'s native `**` matching, or (c) a hand-rolled
   matcher. v1.2 §18 patterns use `**` for any-depth and
   `*` for single-segment — picking (a) keeps zero new
-  deps. Decision recorded in PR-E.
+  deps. Decision recorded in Task 1.4.5.
 - [ ] **E3.** `StagingConfig` shape per v1.2 §18:
   ```scala
   final case class StagingConfig(
@@ -504,11 +504,11 @@ driver's `AskUserQuestion` mechanism.
     allowPatterns: Vector[String]
   ) derives ReadWriter
   ```
-  Loaded by the orchestrator from `.forge/config.json` (PR-I);
-  PR-E just consumes it.
+  Loaded by the orchestrator from `.forge/config.json` (Task 1.4.9);
+  Task 1.4.5 just consumes it.
 - [ ] **E4.** F7 phase-aware denial — the **classification**
   produced by ChangeCollector is phase-agnostic; the
-  orchestrator (Slice 4B PR-J) wires the result into
+  orchestrator (Slice 1.4b Task 1.4.10) wires the result into
   `ResumeHint.ResolveLocalImplementationChanges` (pre-PR) vs
   `RunAnotherFixup` (post-PR) per §11.4 step 6 / §11.6.
 - [ ] **E5.** Decision rules per v1.2 §10.1 (re-stated so the
@@ -525,7 +525,7 @@ driver's `AskUserQuestion` mechanism.
   — the spec is explicit that unmatched-in-strict goes to
   `Ask`, surfacing every borderline path through the
   driver's question mechanism rather than silently dropping
-  it. The Slice-4 review caught an earlier draft that
+  it. The Slice 1.4 review caught an earlier draft that
   conflated "filter" with the spec contract; this rule list
   is the authoritative version.
 - [ ] **E6.** Unit suite under
@@ -550,11 +550,11 @@ driver's `AskUserQuestion` mechanism.
     matching both `denyPatterns` and `allowPatterns` falls
     to `Deny` (rule 1 dominates rule 5-strict).
 
-### 1.6 PR F — Templates landing under `~/.forge/templates/`
+### Task 1.4.6 — Templates landing under `~/.forge/templates/`
 
 Land the v1 PR-body / decomposition / answer-template files
-the orchestrator depends on. PR-A landed the in-tree
-`assets/templates/` copies; PR-F lands the actual content.
+the orchestrator depends on. Task 1.4.1 landed the in-tree
+`assets/templates/` copies; Task 1.4.6 lands the actual content.
 
 - [ ] **F1.** `pr-body.md.hbs` — Per §11.4 step 6 template
   shape. Renders feature title, piece title, piece spec,
@@ -562,7 +562,7 @@ the orchestrator depends on. PR-A landed the in-tree
   available: feature manifest entry, piece spec body, prior
   pieces merged so far.
 - [ ] **F2.** `decomposition.md.hbs` — Already touched by
-  PR-D's renderer. PR-F ships the actual v1 template content
+  Task 1.4.4's renderer. Task 1.4.6 ships the actual v1 template content
   (status badges, piece headers, editable-region HTML
   comments per **M2** / §5.3).
 - [ ] **F3.** Per-phase answer templates:
@@ -576,11 +576,11 @@ the orchestrator depends on. PR-A landed the in-tree
   context and asserting key fields appear. Lightweight golden
   files (one rendered fixture per template).
 
-### 1.7 PR G — Reviewer regression suite (closes C15)
+### Task 1.4.7 — Reviewer regression suite (closes C15)
 
-The ≥19/20 native-schema regression suite Slice 1 deferred per
-**C15**. Now that reviewer assets exist (PR-A) and reviewer
-wrappers exist (PR-B), PR-G runs the real CLIs against
+The ≥19/20 native-schema regression suite Slice 1.1 deferred per
+**C15**. Now that reviewer assets exist (Task 1.4.1) and reviewer
+wrappers exist (Task 1.4.2), Task 1.4.7 runs the real CLIs against
 shipped schemas and prompts.
 
 - [ ] **G1.** `ReviewerRegressionSuite` in `forge-it`. Opt-in
@@ -596,41 +596,41 @@ shipped schemas and prompts.
   suite by construction — six runs × 20 samples × ~15s per
   reviewer call ≈ 30 minutes; opt-in is mandatory.
 - [ ] **G3.** Pass bar: ≥19/20 per method per connector. A
-  schema-validation failure (per the Slice 1 `Native` schema
+  schema-validation failure (per the Slice 1.1 `Native` schema
   contract) counts as a fail. Adapter errors that are
   retryable per §7.6 don't count against the bar (retried
   per `reviewProcessRetries`).
 - [ ] **G4.** Failure mode: if a method × connector pair
-  fails the bar in PR-G, schema/prompt tightening happens
-  inside 4A (not deferred further). The PR-G commit lists
-  the failing pairs; a follow-up commit tightens; PR-G
+  fails the bar in Task 1.4.7, schema/prompt tightening happens
+  inside 1.4a (not deferred further). The Task 1.4.7 commit lists
+  the failing pairs; a follow-up commit tightens; Task 1.4.7
   re-runs until bar met. The "section closes" only when
   all six pairs pass.
 - [ ] **G5.** File **C15** resolution in
   `design-rationale.md` — the entry's "Action required"
   flips from "defer to reviewer-asset PR" to "closed in
-  Slice 4A PR-G; bar met for all 6 method × connector
+  Slice 1.4a Task 1.4.7; bar met for all 6 method × connector
   pairs". Roadmap §7.2.2 entry updated.
 
-### 1.8 PR H — 4A close-out + handoff to 4B
+### Task 1.4.8 — 1.4a close-out + handoff to 1.4b
 
-Mirror of Slice 3 PR-H structure: section-level coherence
-review, roadmap status update, carry-forward walk for 4A's
+Mirror of Slice 1.3 Task 1.3.8 structure: section-level coherence
+review, roadmap status update, carry-forward walk for 1.4a's
 half.
 
-- [ ] **H1.** Code review on PR-A through PR-G as a section.
+- [ ] **H1.** Code review on Task 1.4.1 through Task 1.4.7 as a section.
   Checklist:
   - Does every §7.1 reviewer-method × per-CLI pair have a
-    shipped schema + prompt under PR-A?
-  - Does the PR-G regression suite cover every method ×
+    shipped schema + prompt under Task 1.4.1?
+  - Does the Task 1.4.7 regression suite cover every method ×
     connector pair?
-  - Does `ReviewerCall.Timeout` (PR-B) document the
+  - Does `ReviewerCall.Timeout` (Task 1.4.2) document the
     fiber-cancellation-only contract (no observable
     `killError` channel) and is the connector resource
     finalizer responsible for any leftover subprocess
     cleanup? **S4-3** (cost + kill diagnostics deferred)
     filed in `design-rationale.md`.
-  - Does PR-D's `DocSync` round-trip preserve byte
+  - Does Task 1.4.4's `DocSync` round-trip preserve byte
     identity against the `decomposition.md.hbs` fixture?
   - Does `ChangeCollector` enforce every v1.2 §18 default
     deny pattern at the unit level?
@@ -638,42 +638,42 @@ half.
     "Testing & review discipline" rule "Review comments on
     design docs are signals, not the patch list": re-walk the
     contract end-to-end, not just patch named findings.
-- [ ] **H2.** §4 carry-forward walked for 4A items:
-  - **C15** — closed in PR-G (assuming bar met for all 6
+- [ ] **H2.** §4 carry-forward walked for 1.4a items:
+  - **C15** — closed in Task 1.4.7 (assuming bar met for all 6
     pairs).
-  - **S2-8 / S3-5** — PR-B's reviewer wrappers ship the
-    wall-clock side as `ReviewerOutcome.Timeout`; 4B PR-L
+  - **S2-8 / S3-5** — Task 1.4.2's reviewer wrappers ship the
+    wall-clock side as `ReviewerOutcome.Timeout`; 1.4b Task 1.4.12
     decides whether the orchestrator maps `Timeout` to
     explicit `FsmEvent.SettleTimeout` handlers (option a)
-    or to `FsmEvent.HarnessError` (option b). PR-B does
+    or to `FsmEvent.HarnessError` (option b). Task 1.4.2 does
     **not** itself emit `MonitorOutcome.SettleTimeout`
     (that boundary belongs to driver-phase
-    `SessionMonitor` — Slice 3); the FSM-event mapping
+    `SessionMonitor` — Slice 1.3); the FSM-event mapping
     is purely orchestrator-side.
-  - **C14** — orchestrator half still open; 4B PR-N
+  - **C14** — orchestrator half still open; 1.4b Task 1.4.14
     closes it.
   - **S4-3** — reviewer cost + observable kill diagnostics
-    deferred (new at PR-B; see §4). Stays open into 4B as
+    deferred (new at Task 1.4.2; see §4). Stays open into 1.4b as
     a watch item only; budgets remain driver-session-only
     for v1.
 - [ ] **H3.** `roadmap.md` §2.4 status block updated —
-  "🟢 Slice 4A complete, 4B open — PR-I is the entry
+  "🟢 Slice 1.4a complete, 1.4b open — Task 1.4.9 is the entry
   point". Don't flip the §2.4 bullet from `[~]` to
-  `[x]` yet; that's PR-Q after 4B closes.
-- [ ] **H4.** `AGENTS.md` "Current state" gets a Slice 4A
-  paragraph (mirror Slice 3's structure / length). Active
-  design-`<section>`.md list keeps `design-2.4.md` pointer.
+  `[x]` yet; that's Task 1.4.17 after 1.4b closes.
+- [ ] **H4.** `AGENTS.md` "Current state" gets a Slice 1.4a
+  paragraph (mirror Slice 1.3's structure / length). Active
+  design-`<section>`.md list keeps `design-1.4.md` pointer.
 - [ ] **H5.** `CLAUDE.md` TL;DR mirrors §3 / §4
   carry-forward changes.
 
 ---
 
-### 4B — Orchestrator loop, CLI, self-hosting gate
+### Slice 1.4b — Orchestrator loop, CLI, self-hosting gate
 
-### 1.9 PR I — `forge-app` entry skeleton + config loader
+### Task 1.4.9 — `forge-app` entry skeleton + config loader
 
-`forge-app` so far has `lock/`, `monitor/`, `bootstrap/` (4A
-PR-A), `reviewer/` (4A PR-B). PR-I lands the `main` entry
+`forge-app` so far has `lock/`, `monitor/`, `bootstrap/` (1.4a
+Task 1.4.1), `reviewer/` (1.4a Task 1.4.2). Task 1.4.9 lands the `main` entry
 point and the configuration loader that every command depends
 on.
 
@@ -774,20 +774,20 @@ on.
   command): IO[ExitCode]`. Handlers in
   `io.forge.app.command.{new_, spec, run, status, resume,
   reconcile, refreshCache, abandon, rebuildState, unlock,
-  tail}`. PR-I lands the empty handler shells; PR-J / PR-M
+  tail}`. Task 1.4.9 lands the empty handler shells; Task 1.4.10 / Task 1.4.13
   wire the actual logic.
-  - **`ForgeCommand` ADT extension.** Slice 3 PR-C landed
+  - **`ForgeCommand` ADT extension.** Slice 1.3 Task 1.3.3 landed
     `io.forge.git.branch.ForgeCommand` with a
     `ReadOnly(kind: ReadOnlyKind)` variant covering
     `Status | Replay | RebuildState`. **`Replay` is
-    cut**: Slice 4 ships `forge tail` (live log tail, what
+    cut**: Slice 1.4 ships `forge tail` (live log tail, what
     the §2.5 polish list actually names) instead of
     `forge replay` (batch render-from-log, which was a
-    placeholder the Slice-3 sketch carried forward without
-    a §17 / §15 anchor). PR-I extends
+    placeholder the Slice 1.3 sketch carried forward without
+    a §17 / §15 anchor). Task 1.4.9 extends
     `ReadOnlyKind` to `Status | Tail | RebuildState` and
     updates `BranchManagerPreflightSuite`'s read-only row
-    to match. The cut is filed as a new Slice-4
+    to match. The cut is filed as a new Slice 1.4
     carry-forward **S4-2** in `design-rationale.md` (no
     v1.3 spec edit — §15 names "`replay`" only in the
     `ForgeCommand` table comment, not in the command-line
@@ -797,14 +797,14 @@ on.
   malformed JSON surfaces typed error, per-key override
   resolution.
 - [ ] **I5.** **AGENTS.md "ask before scope-expanding" anchor**
-  — if PR-I needs new `forge-core` / `forge-git` /
+  — if Task 1.4.9 needs new `forge-core` / `forge-git` /
   `forge-agents` surface (likely: connector construction
   factory, since `Main` constructs the connector once per
   run), file an `AskUserQuestion` before silently expanding.
 
-### 1.10 PR J — `Orchestrator` loop (the headless feature engine)
+### Task 1.4.10 — `Orchestrator` loop (the headless feature engine)
 
-The heart of Slice 4B. Wires Slices 1–3 together through
+The heart of Slice 1.4b. Wires Slices 1–3 together through
 `Fsm.transition`.
 
 - [ ] **J1.** `io.forge.app.orchestrator.Orchestrator` —
@@ -865,7 +865,7 @@ The heart of Slice 4B. Wires Slices 1–3 together through
   is the **S2-5** writer-side invariant. The §11.5 step 1
   crash window (manifest written, log not yet) is recovered
   by `RebuildState.reconcile` (already in `forge-core`).
-  The `inFlightSessions` projection is a Slice-4 widening
+  The `inFlightSessions` projection is a Slice 1.4 widening
   of `RebuildState.run`'s return shape (carry-forward
   **S4-4**); see J2 for the per-phase × FSM-state
   synthetic-`HarnessError` mapping.
@@ -916,7 +916,7 @@ The heart of Slice 4B. Wires Slices 1–3 together through
   and `AgentSession.scala` — only Spec / DesignRevision
   return `StreamingSession`). The `phase` field carries
   enough type information to safely downcast where the
-  streaming surface is needed: `forge spec` REPL (PR-M M2)
+  streaming surface is needed: `forge spec` REPL (Task 1.4.13 M2)
   pattern-matches
   `case Some(ActiveSession(SessionPhase.Spec, s:
   StreamingSession)) => …` and raises
@@ -1011,7 +1011,7 @@ The heart of Slice 4B. Wires Slices 1–3 together through
   - **`InteractiveSpec` reachability.** Only `forge spec`
     enters `InteractiveSpec`; `forge run` invoked on a
     feature whose state is `InteractiveSpec` refuses at
-    handler-level (§15 / PR-M M3) and prints a hint to
+    handler-level (§15 / Task 1.4.13 M3) and prints a hint to
     run `forge spec` instead.
 
   **(III) Post-settle synthesis recipes** (the missing
@@ -1065,7 +1065,7 @@ The heart of Slice 4B. Wires Slices 1–3 together through
   the FSM) because the PR already exists and there's no
   `createPr` step to crash through. Both are valid §11
   encodings of "side effects bracket the FSM transition";
-  PR-J documents the asymmetry in `Orchestrator`'s scaladoc.
+  Task 1.4.10 documents the asymmetry in `Orchestrator`'s scaladoc.
 
   The synthesized event from sub-phase III feeds back into
   `Fsm.transition` within the same loop iteration without
@@ -1104,7 +1104,7 @@ The heart of Slice 4B. Wires Slices 1–3 together through
     (`Map[PrNumber, PollBaseline]` keyed across the design
     PR + every piece PR). Add a
     `ForgePaths.pollBaselineFile(featureId)` accessor in
-    PR-J (one-line addition; matches the Slice-2
+    Task 1.4.10 (one-line addition; matches the Slice 1.2
     `stateFile` shape). Flagged as carry-forward **S4-1**
     in §4 / `design-rationale.md`. Alternative considered
     + rejected: widen `Manifest.designPr` and `Piece` to
@@ -1119,7 +1119,7 @@ The heart of Slice 4B. Wires Slices 1–3 together through
     `FsmEvent.DesignReviewReceived / CodeReviewVerdict /
     RefineOutcome`; `Timeout` →
     `FsmEvent.SettleTimeout(SessionPhase.{DesignReview,
-    CodeReview, Refine}, _)` per **S2-8** option (a) (PR-L)
+    CodeReview, Refine}, _)` per **S2-8** option (a) (Task 1.4.12)
     or `FsmEvent.HarnessError(...)` per option (b);
     `AdapterFailure(err)` → either retried (if
     `ReviewerProcessFailure` and retry budget remains) or
@@ -1134,7 +1134,7 @@ The heart of Slice 4B. Wires Slices 1–3 together through
   `currentDriverSession` starts at `None` on every process
   start — a prior subprocess does not survive Forge process
   death, regardless of whether Claude / Codex preserve the
-  session id under `--resume`. **PR-J extends
+  session id under `--resume`. **Task 1.4.10 extends
   `RebuildState.run` with an additional projection:**
   ```scala
   final case class InFlightSession(
@@ -1143,7 +1143,7 @@ The heart of Slice 4B. Wires Slices 1–3 together through
     piece: Option[PieceId]      // None for design phases; Some(p) for implement/fixup
   )
 
-  // Extended return shape (Slice 2 returned only Feature; PR-J widens to:)
+  // Extended return shape (Slice 1.2 returned only Feature; Task 1.4.10 widens to:)
   final case class RebuildResult(
     feature: Feature,
     inFlightSessions: Vector[InFlightSession]
@@ -1156,7 +1156,7 @@ The heart of Slice 4B. Wires Slices 1–3 together through
   `TurnBudgetBreached` / `BudgetBreached` action for the
   same `(phase, piece)` key. This projection is computed by
   walking the log tail; it does NOT change the canonical
-  `Feature` shape (so the Slice-2 invariants stay
+  `Feature` shape (so the Slice 1.2 invariants stay
   unchanged).
 
   Before entering the main loop, the orchestrator
@@ -1226,7 +1226,7 @@ The heart of Slice 4B. Wires Slices 1–3 together through
   4. **Otherwise** — leave `currentDriverSession`
      unchanged and re-enter the source race.
 
-  PR-J's unit test surface includes:
+  Task 1.4.10's unit test surface includes:
   - `OrchestratorSourceSelectionSuite` — table-driven
     assertion that every `(FsmState, activeSession)` row
     in the table above selects the documented sources;
@@ -1246,8 +1246,8 @@ The heart of Slice 4B. Wires Slices 1–3 together through
 
   **`RebuildState.run` signature change carried forward.**
   Widening to return `RebuildResult(feature,
-  inFlightSessions)` is the Slice-4 closure of a gap that
-  was implicit in Slice 2 (`Feature.foldEvents` returns
+  inFlightSessions)` is the Slice 1.4 closure of a gap that
+  was implicit in Slice 1.2 (`Feature.foldEvents` returns
   `observedTransitions` and `observedPieceMerges` but no
   in-flight bookkeeping). Filed as new carry-forward
   **S4-4** in §4.
@@ -1257,9 +1257,9 @@ The heart of Slice 4B. Wires Slices 1–3 together through
   runHeadlessImplementation / runFixup /
   resumeStreamingSpec` calls share the connector
   resource. **C14 watch:** the Codex resume call needs
-  to handle role framing per PR-N's resolution.
+  to handle role framing per Task 1.4.14's resolution.
 - [ ] **J4.** Atomic manifest persistence — `SpecStore.saveManifest`
-  (4A PR-C) is called **before** the action log append +
+  (1.4a Task 1.4.3) is called **before** the action log append +
   state cache write. Per §11.5 step 1, if the orchestrator
   crashes between manifest write and FSM transition action,
   the next `forge resume` reads the merged status from
@@ -1281,10 +1281,10 @@ The heart of Slice 4B. Wires Slices 1–3 together through
     append; restart reads manifest, reconcile synthesises
     the missing action, FSM advances normally.
 
-### 1.11 PR K — **S2-5** writer-side atomic-merge test
+### Task 1.4.11 — **S2-5** writer-side atomic-merge test
 
-A focused PR that pins the writer-side invariant Slice 2 PR-F
-deferred. Sub-PR exists as its own anchor so a future reviewer
+A focused PR that pins the writer-side invariant Slice 1.2 Task 1.2.6
+deferred. Task exists as its own anchor so a future reviewer
 walking carry-forwards can find the test directly.
 
 - [ ] **K1.** `OrchestratorAtomicMergeSuite` in `forge-app`
@@ -1299,13 +1299,13 @@ walking carry-forwards can find the test directly.
     synthesises the missing `audit.piece_merged` and FSM
     advances to `Refining` correctly.
 - [ ] **K2.** Close **S2-5** in `design-rationale.md` —
-  "Action required" flips from "deferred to Slice 4" to
-  "closed in Slice 4B PR-K". Roadmap §7.2.2 entry
+  "Action required" flips from "deferred to Slice 1.4" to
+  "closed in Slice 1.4b Task 1.4.11". Roadmap §7.2.2 entry
   updated.
 
-### 1.12 PR L — **S2-8** / **S3-5** reviewer/refine SettleTimeout closure
+### Task 1.4.12 — **S2-8** / **S3-5** reviewer/refine SettleTimeout closure
 
-Whichever option B3 (in PR-B) chose — explicit FSM handlers
+Whichever option B3 (in Task 1.4.2) chose — explicit FSM handlers
 (a) or documented orchestrator-side conversion (b).
 
 - [ ] **L1.** **If (a):** Add `Fsm.transition` handlers for
@@ -1326,10 +1326,10 @@ Whichever option B3 (in PR-B) chose — explicit FSM handlers
 - [ ] **L3.** Close **S2-8** and **S3-5** in
   `design-rationale.md`. Roadmap §7.2.2 entry updated.
 
-### 1.13 PR M — CLI surface (every §17 / §15 command)
+### Task 1.4.13 — CLI surface (every §17 / §15 command)
 
 The user-facing surface. Per-command handlers wire into the
-orchestrator (PR-J) or are read-only / preflight-only.
+orchestrator (Task 1.4.10) or are read-only / preflight-only.
 
 - [ ] **M1.** `forge new "<title>" [--mode <mode>] [--id <slug>]`
   — slugs per §5.2; creates `<branchPrefix>/<feature>/design`;
@@ -1377,27 +1377,27 @@ orchestrator (PR-J) or are read-only / preflight-only.
   deliberately corrupted cache fixture (one test that
   hand-mutates `.forge/state/<feature>.json`).
 - [ ] **M10.** `forge unlock --force` — calls
-  `ProcessLock.forceRelease` (Slice 3). Refuses with
+  `ProcessLock.forceRelease` (Slice 1.3). Refuses with
   exit 2 on `LiveHolderRefused`.
 - [ ] **M11.** `forge tail <feature>` — §2.5 polish; tails
   `.forge/log/<feature>.jsonl`. Read-only; doesn't acquire
-  the lock. Routes through PR-I's
+  the lock. Routes through Task 1.4.9's
   `ForgeCommand.ReadOnly(ReadOnlyKind.Tail)`.
 - [ ] **M12.** Unit + IT coverage — per-command handler
   unit tests in `modules/forge-app/src/test/`; the
-  MVP-gate end-to-end run (PR-P) exercises the integration
+  MVP-gate end-to-end run (Task 1.4.16) exercises the integration
   surface.
 
-### 1.14 PR N — **C14** Codex resume role-framing closure
+### Task 1.4.14 — **C14** Codex resume role-framing closure
 
 The orchestrator-side half of **C14**. v1.3 (not yet
 written) chooses between (i) drop the §7.10(a) "applies to
 resume" claim, or (ii) widen the trait to carry
-`systemPromptPath`. PR-N implements whichever v1.3 picks.
+`systemPromptPath`. Task 1.4.14 implements whichever v1.3 picks.
 
 - [ ] **N1.** v1.3 spec decision filed in
   `docs/forge-design-1.3.md` (new file per the §23
-  standalone-revisions rule). PR-N adopts whichever
+  standalone-revisions rule). Task 1.4.14 adopts whichever
   direction v1.3 specifies.
 - [ ] **N2.** **If (i):** Orchestrator's `resumeStreamingSpec`
   call sites (§11.2 step 12, §11.3 step 2) embed role
@@ -1414,16 +1414,16 @@ resume" claim, or (ii) widen the trait to carry
   prepends per §7.10(a)). Update every call site in
   `forge-app`.
 - [ ] **N4.** Close **C14** in `design-rationale.md` —
-  "Action required" flips to "closed in Slice 4B PR-N
+  "Action required" flips to "closed in Slice 1.4b Task 1.4.14
   per v1.3 §7.10(a) revision (option <i|ii>)". Roadmap
   §7.2.1 / §7.2.2 entries updated.
 - [ ] **N5.** Regression test against the resume path —
   asserts the system-prompt content actually reaches
   Codex on a resume call. Fake `Subprocess` is fine
-  (assert argv shape); the PR-G regression suite is the
+  (assert argv shape); the Task 1.4.7 regression suite is the
   real-CLI bar.
 
-### 1.15 PR O — Targeted polish (§2.5)
+### Task 1.4.15 — Targeted polish (§2.5)
 
 The MVP-gate enablers — Forge is unusable without these.
 
@@ -1460,7 +1460,7 @@ The MVP-gate enablers — Forge is unusable without these.
     threshold if 3-consecutive feels wrong under lived
     `forge run` cadence.
 
-### 1.16 PR P — MVP-gate run
+### Task 1.4.16 — MVP-gate run
 
 The Phase-1 exit gate. Drive one small, contained,
 low-variance feature through Forge from `forge new` to
@@ -1481,7 +1481,7 @@ merged-`FeatureDone`.
   Recommend the v1.3 spec-text correction route — it
   exercises every reviewer + driver phase against
   small, well-bounded scope (text + one test). File
-  the choice in this checklist before PR-P begins.
+  the choice in this checklist before Task 1.4.16 begins.
 - [ ] **P2.** Drive end-to-end:
   - `forge new "<title>"`.
   - `forge spec <feature>` — interactive REPL until
@@ -1499,21 +1499,21 @@ merged-`FeatureDone`.
   prose summary of what worked, what didn't, what
   surfaced as friction.
 - [ ] **P4.** **Friction items surface as Phase 2 input,
-  not Slice 4 follow-ups.** Phase 2 is where prompt
-  iteration + TUI live; Slice 4 is "Forge ships its own
+  not Slice 1.4 follow-ups.** Phase 2 is where prompt
+  iteration + TUI live; Slice 1.4 is "Forge ships its own
   next slice", not "Forge ships its own slice
   beautifully". Document friction in
   `docs/slice-4/mvp-friction.md` for Phase 2 to
   triage.
 
-### 1.17 PR Q — Slice 4 close-out + Phase 1 exit
+### Task 1.4.17 — Slice 1.4 close-out + Phase 1 exit
 
-Mirror of Slice 3 PR-H but for the whole §2.4 bullet
-(both 4A and 4B). Flips the roadmap `[~]` → `[x]` and
+Mirror of Slice 1.3 Task 1.3.8 but for the whole §2.4 bullet
+(both 1.4a and 1.4b). Flips the roadmap `[~]` → `[x]` and
 opens Phase 2.
 
-- [ ] **Q1.** Section-level code review on PR-A through
-  PR-P:
+- [ ] **Q1.** Section-level code review on Task 1.4.1 through
+  Task 1.4.16:
   - Every §17 slice-4 deliverable shipped (orchestrator
     loop, line-mode REPL, every command in §15)?
   - Every §11 lifecycle path exercised end-to-end at
@@ -1529,17 +1529,17 @@ opens Phase 2.
 - [ ] **Q2.** `roadmap.md` §2.4 bullet flips `[~]` →
   `[x]`. Status block updated to ✅. Top status line
   bumps draft revision.
-- [ ] **Q3.** `AGENTS.md` "Current state" — Slice 4
-  paragraph (mirror Slice 3's structure / length).
+- [ ] **Q3.** `AGENTS.md` "Current state" — Slice 1.4
+  paragraph (mirror Slice 1.3's structure / length).
   Active design-`<section>`.md list returns to
   *(none currently open — Phase 2 opens its own
   doc when work starts)*. Recently-closed audit
-  trails list grows to include `design-2.4.md`.
+  trails list grows to include `design-1.4.md`.
 - [ ] **Q4.** `CLAUDE.md` TL;DR mirrors the same
   updates; "Current state" rewritten covering
   Slices 1–4 + the MVP-gate landing.
 - [ ] **Q5.** §4 carry-forward final walk — every
-  Slice-1/2/3 carry-forward either closed in Slice 4
+  Slice 1.1/2/3 carry-forward either closed in Slice 1.4
   or explicitly carried to v1.3 / Phase 2 with a
   durable home in `design-rationale.md`.
 - [ ] **Q6.** This file flipped from "active" to
@@ -1549,48 +1549,48 @@ opens Phase 2.
 
 ## 2. Order of work
 
-`A → B → C → D → E → F → G → H` for 4A; `I → J → K →
-L → M → N → O → P → Q` for 4B. Strictly linear is the
+`A → B → C → D → E → F → G → H` for 1.4a; `I → J → K →
+L → M → N → O → P → Q` for 1.4b. Strictly linear is the
 canonical order, matching Slices 2/3.
 
 The dependency-strict edges:
 
-- 4A: `A` is the foundation (shipped reviewer assets +
+- 1.4a: `A` is the foundation (shipped reviewer assets +
   in-tree templates); `B` consumes `A`'s shipped paths
   via `ReviewerAssets.PerMethod`; `C, D, E, F` only
   depend on `forge-core` (and on `ForgePaths` from
-  Slice 2). `G` (regression suite) needs `A` + `B`
+  Slice 1.2). `G` (regression suite) needs `A` + `B`
   shipped; `H` is always last.
-- 4B: `I` is the entry-point + config; `J` consumes
-  everything from 4A + Slice 3 + Slice 1 connectors.
+- 1.4b: `I` is the entry-point + config; `J` consumes
+  everything from 1.4a + Slice 1.3 + Slice 1.1 connectors.
   `K, L, N, O` are focused PRs that can land in any
   order after `J` lands. `M` (CLI) depends on `J`. `P`
   needs everything else; `Q` is always last.
 
 Safe parallelisation points (not required to use):
 
-- 4A: `C, D, E, F` can all land in parallel after `A`
+- 1.4a: `C, D, E, F` can all land in parallel after `A`
   if reviewer attention allows; they touch disjoint
   parts of `forge-specs` / `forge-app`.
-- 4B: `K, L, N, O` after `J` lands; again, disjoint.
+- 1.4b: `K, L, N, O` after `J` lands; again, disjoint.
 
-In practice, Slice 2/3 experience says review attention
+In practice, Slice 1.2/3 experience says review attention
 is the bottleneck — landing serially keeps per-PR
 review surface manageable.
 
 ## 3. Status log
 
 Update this section as items land. The roadmap section
-ticks off only after PR-Q lands.
+ticks off only after Task 1.4.17 lands.
 
-- 2026-05-27 — design-2.4.md created on the close of
-  Slice 3 (`design-2.3.md` closed earlier same day). No
-  PR-A code yet. Carry-forward inheritance from Slices
+- 2026-05-27 — design-1.4.md created on the close of
+  Slice 1.3 (`design-2.3.md` closed earlier same day). No
+  Task 1.4.1 code yet. Carry-forward inheritance from Slices
   1–3: **C14**, **C15**, **S2-1** through **S2-10**,
   **S3-1** through **S3-8** — each routed to the
-  sub-PR named in §4 below.
+  Task named in §4 below.
 - 2026-05-28 — plan-review rounds 1 + 2 + 3 landed
-  before PR-A. Round 1 (5 findings) tightened the
+  before Task 1.4.1. Round 1 (5 findings) tightened the
   reviewer-call boundary, added explicit decomposition
   APIs on `SpecStore`, fixed `ChangeCollector`'s strict-mode
   semantics, redirected `PollBaseline` persistence to a
@@ -1600,11 +1600,11 @@ ticks off only after PR-Q lands.
   argv-parse, moved reviewer cost + observable kill
   diagnostics out of v1 scope (carry-forward **S4-3**),
   pinned `ReviewerOutcome` (not `MonitorOutcome`) as
-  PR-B's boundary, and added `decomposition` to
+  Task 1.4.2's boundary, and added `decomposition` to
   `FileSpecStore`'s accessor list. Round 3 (3 findings)
   introduced an orchestrator-local
   `currentDriverSession` Ref + a deterministic
-  source-selection table in PR-J J2 so
+  source-selection table in Task 1.4.10 J2 so
   `DesignReviewing(round)` / `DesignPrFeedback` /
   `PieceAwaitingReview` no longer ambiguously race
   SessionMonitor + ReviewerCall, restructured `Main`'s
@@ -1615,8 +1615,8 @@ ticks off only after PR-Q lands.
   filed: **S4-1** (poll-baseline file), **S4-2**
   (`replay` cut), **S4-3** (reviewer cost / kill
   diagnostics deferred).
-- 2026-05-28 — plan-review round 4 landed before PR-A.
-  Four findings against PR-J's orchestrator model. (a)
+- 2026-05-28 — plan-review round 4 landed before Task 1.4.1.
+  Four findings against Task 1.4.10's orchestrator model. (a)
   `(PieceImplementing, hasDriver=false)` wasn't an
   illegal combination — it's the transient post-settle
   window between `Settled(Implement, Clean)` (which
@@ -1647,11 +1647,11 @@ ticks off only after PR-Q lands.
   `FsmEvent.HarnessError(reason: String)` payload carries
   no `SessionPhase`); the orchestrator tags each iteration
   with its source and clears `currentDriverSession`
-  unconditionally when source = `SessionMonitor`. PR-J's
+  unconditionally when source = `SessionMonitor`. Task 1.4.10's
   test surface grew by two suites
   (`OrchestratorPostSettleSynthesisSuite`,
   `OrchestratorRestartSuite`).
-- 2026-05-28 — PR-A landed. Shipped in-tree reviewer assets
+- 2026-05-28 — Task 1.4.1 landed. Shipped in-tree reviewer assets
   under `assets/reviewer/{schemas,prompts}/` (3 JSON Schemas,
   6 reviewer system prompts) and `assets/templates/` (6
   templates per §11.4 / §7.7 / §14.3). `forge-app`'s sbt
@@ -1683,7 +1683,7 @@ ticks off only after PR-Q lands.
   (358), `forge-agents` (181), `forge-git` (168) preserved.
   `sbt scalafmtCheckAll` clean; `sbt clean compile` clean
   under `-Xfatal-warnings`; `forge-it` still compiles.
-- 2026-05-28 — PR-A review round 1 landed (2 findings). **P2**
+- 2026-05-28 — Task 1.4.1 review round 1 landed (2 findings). **P2**
   (`refine.json` `patch` field wasn't constrained to
   `ManifestPatch` shape, and stray `patch` on `no_change` /
   `reopen_design` was silently permitted): tightened the
@@ -1704,45 +1704,46 @@ ticks off only after PR-Q lands.
   channel, with a new `AssetInstallerSuite` case where a
   directory at the destination surfaces the typed error
   rather than a misleading success. `forge-app` test count
-  46 → 82 (PR-A landing was 46 → 63; review round 1 added
+  46 → 82 (Task 1.4.1 landing was 46 → 63; review round 1 added
   +19 cases). All baselines preserved.
 
 ## 4. Carry-forward (inherited + new)
 
-Items the section closure (PR-Q) **must not silently
+Items the section closure (Task 1.4.17) **must not silently
 bury** when it flips the §2.4 roadmap bullet. Each one
-either resolves in a named sub-PR or carries forward
+either resolves in a named Task or carries forward
 explicitly to v1.3 / Phase 2 with a durable home in
 `design-rationale.md`.
 
-### Inherited from Slices 1–3, resolved in Slice 4
+### Inherited from Slices 1–3, resolved in Slice 1.4
 
 - **C14** — Codex resume system-prompt prepending. Two
   halves: the spec-text decision (v1.3 §7.10(a)) and
-  the orchestrator implementation. **Resolves in PR-N.**
-- **C15** — Native schema regression suite (PR-D in
-  Slice 1's plan; now redrawn as **PR-G here**).
+  the orchestrator implementation. **Resolves in Task 1.4.14.**
+- **C15** — Native schema regression suite (originally
+  Slice 1.1's PR-D in design-2.1.md, deferred per C15;
+  now resolved as **Task 1.4.7 here**).
   Resolves once all 6 method × connector pairs meet the
   ≥19/20 bar.
 - **S2-5** — Writer-side atomic-merge ordering test.
-  **Resolves in PR-K** with a focused fault-injection
+  **Resolves in Task 1.4.11** with a focused fault-injection
   test against the orchestrator's manifest-write
   ordering.
 - **S2-8** — `Fsm.transition` doesn't handle
   `SettleTimeout` for reviewer/refine phases. **Resolves
-  in PR-L** via whichever path PR-B's B3 chose
+  in Task 1.4.12** via whichever path Task 1.4.2's B3 chose
   (explicit FSM handlers vs orchestrator-side
   conversion).
 - **S3-5** — `SessionMonitor` carve-out matches **S2-8**
   on the SessionMonitor side. Closes alongside
-  **S2-8** in PR-L (4A PR-B's reviewer wrappers ship
+  **S2-8** in Task 1.4.12 (1.4a Task 1.4.2's reviewer wrappers ship
   the wall-clock emission path).
 
 ### Inherited from Slices 1–3, conditional / watch items
 
-These resolve only if Slice 4 surfaces a measurable cost
+These resolve only if Slice 1.4 surfaces a measurable cost
 cliff. If they stay quiet under MVP-run load, they roll
-into v1.3 as documented defaults. **Walked in PR-O.**
+into v1.3 as documented defaults. **Walked in Task 1.4.15.**
 
 - **S2-3** — `ActionLog` write durability vs throughput
   (per-batch `force()` fallback if perf cliff fires).
@@ -1754,22 +1755,22 @@ into v1.3 as documented defaults. **Walked in PR-O.**
 - **S3-4** — `PRWatcher` rate-limit cliff threshold
   (config knob if 3-consecutive feels wrong).
 
-### Inherited from Slices 1–3, no Slice 4 code work
+### Inherited from Slices 1–3, no Slice 1.4 code work
 
-These need v1.3 spec-text edits, not Slice 4 code.
-PR-Q's close-out checklist verifies each is filed in
+These need v1.3 spec-text edits, not Slice 1.4 code.
+Task 1.4.17's close-out checklist verifies each is filed in
 `design-rationale.md` and surfaced in `roadmap.md`
 §7.2.1.
 
 - **S2-1** — Manifest data types relocated; v1.3 §3.2
-  re-attribution. Already filed; PR-Q verifies.
+  re-attribution. Already filed; Task 1.4.17 verifies.
 - **S2-2** — `FsmEvent` ADT shape needs spec text.
-  Already filed; PR-Q verifies. Slice 4's orchestrator
+  Already filed; Task 1.4.17 verifies. Slice 1.4's orchestrator
   is the first consumer of the de-facto ADT — if any
-  event variant turns out under-specified during PR-J,
-  PR-Q notes it under S2-2 for v1.3 to address.
+  event variant turns out under-specified during Task 1.4.10,
+  Task 1.4.17 notes it under S2-2 for v1.3 to address.
 - **S2-4** — `PrSnapshot` ownership doc fixed in
-  Slice 2 PR-G. Closed; PR-Q verifies.
+  Slice 1.2 Task 1.2.7. Closed; Task 1.4.17 verifies.
 - **S2-6** — `Feature.designPrFeedbackRound: Int` v1.3
   §6 addition. Code already correct; v1.3 text
   follows.
@@ -1779,9 +1780,9 @@ PR-Q's close-out checklist verifies each is filed in
   tightened to `"p"`. v1.3 §19 pin. Code already
   correct.
 - **S3-1** — `forge-git` subprocess utility ownership
-  (no spec change needed). Filed; PR-Q verifies.
+  (no spec change needed). Filed; Task 1.4.17 verifies.
 - **S3-3** — `GhClient` / `GitClient` trait
-  abstractions (testability seam). Filed; PR-Q verifies.
+  abstractions (testability seam). Filed; Task 1.4.17 verifies.
 - **S3-6** — `gh pr create` URL parse contract; v1.3
   BM8 correction. Code already correct.
 - **S3-7** — `PollBaseline` cursor shape; v1.3 RL2 +
@@ -1789,44 +1790,44 @@ PR-Q's close-out checklist verifies each is filed in
 - **S3-8** — `reviewDecision: ""` flattening; v1.3
   §9 quirk note. Code already correct.
 
-### New in Slice 4 (to be reconciled at PR-Q)
+### New in Slice 1.4 (to be reconciled at Task 1.4.17)
 
 Items surfaced during plan-review and during landing of
-the sub-PRs. Each gets a `S4-N` identifier and a sub-PR
-anchor; PR-Q's H1-equivalent walk reconciles
+the Tasks. Each gets a `S4-N` identifier and a Task
+anchor; Task 1.4.17's H1-equivalent walk reconciles
 expected-vs-actual.
 
 - **S4-1 — Poll-baseline persistence location.** Surfaced
-  at plan-review pre-PR-A. `Manifest` / `Piece`
+  at plan-review pre-Task 1.4.1. `Manifest` / `Piece`
   (`modules/forge-core/src/main/scala/io/forge/core/manifest/`)
-  carry no baseline fields, so PR-J persists
+  carry no baseline fields, so Task 1.4.10 persists
   `PollBaseline` to a sibling file
   `.forge/state/<feature>.poll-baselines.json`
   via a new `ForgePaths.pollBaselineFile(featureId)`
   accessor. v1.3 impact: §6 `Feature` may want a typed
   projection `pollBaselines: Map[PrNumber, PollBaseline]`
   (rebuilt from the file via `RebuildState.run`); §11.0
-  precondition list grows by one file. Filed at PR-J
+  precondition list grows by one file. Filed at Task 1.4.10
   close in `design-rationale.md`.
 - **S4-2 — `forge replay` cut in favour of `forge tail`.**
-  Surfaced at plan-review pre-PR-A. Slice-3 PR-C's
+  Surfaced at plan-review pre-Task 1.4.1. Slice 1.3 Task 1.3.3's
   `ForgeCommand.ReadOnlyKind` carried `Replay` as a
-  placeholder without a §17 / §15 anchor; Slice 4
+  placeholder without a §17 / §15 anchor; Slice 1.4
   ships `forge tail` (live tail of
   `.forge/log/<feature>.jsonl`, the §2.5 polish item
   the roadmap actually names) and drops `Replay`. v1.3
   impact: none (§15 references "replay" only in the
-  table; not in the command surface). Filed at PR-I
+  table; not in the command surface). Filed at Task 1.4.9
   close in `design-rationale.md`.
 - **S4-3 — Reviewer call cost + observable kill diagnostics
-  are out of scope in 4A.** Surfaced at plan-review pre-PR-B.
+  are out of scope in 1.4a.** Surfaced at plan-review pre-Task 1.4.2.
   `Connector.reviewDesign / reviewPr / refine` return
   `IO[A]` only — no cost projection, no subprocess handle.
   The one-shot reviewer collectors in `forge-agents`
   (`extractStructuredOutput` / `extractAgentMessageText`)
   do not emit `AgentEvent.CostUpdate` either, so reviewer
   spend cannot flow into `Feature.cost` under the current
-  boundary. Slice 4A's `ReviewerCall` therefore (a) omits
+  boundary. Slice 1.4a's `ReviewerCall` therefore (a) omits
   `maxCostUsd` from `ReviewerLimits`; (b) omits
   `cost: Cost` from `ReviewerOutcome.Settled`; and (c)
   omits `killError: Option[String]` from
@@ -1840,16 +1841,16 @@ expected-vs-actual.
   plumb `AgentEvent.CostUpdate` through the one-shot
   collectors so the orchestrator's `Feature.cost` projection
   picks them up. v1.3 impact: §7.1 reviewer-method
-  signatures or §12 budget-scope wording. Filed at PR-B
+  signatures or §12 budget-scope wording. Filed at Task 1.4.2
   close in `design-rationale.md`. Stays open as a watch
-  item into Slice 4B; PR-Q evaluates whether MVP-run cost
+  item into Slice 1.4b; Task 1.4.17 evaluates whether MVP-run cost
   data warrants closure inside Phase 1 or whether it rolls
   into v1.3.
 - **S4-4 — `RebuildState.run` widened to return
   `RebuildResult(feature, inFlightSessions)` for restart
-  recovery.** Surfaced at plan-review pre-PR-J. The
-  Slice-2 `RebuildState.run` returns just `Feature`; Slice
-  4B's orchestrator needs an `inFlightSessions:
+  recovery.** Surfaced at plan-review pre-Task 1.4.10. The
+  Slice 1.2 `RebuildState.run` returns just `Feature`; Slice
+  1.4b's orchestrator needs an `inFlightSessions:
   Vector[InFlightSession]` projection (sessions whose
   `<actor>.spawn` / `<actor>.resume` action has no
   subsequent `Settled` / `SettleTimeout` /
@@ -1865,19 +1866,19 @@ expected-vs-actual.
   process. v1.3 impact: §11.0 step 4 (cache-vs-log
   verification) gains an in-flight scan step;
   `Feature.foldEvents` either grows a sibling projection
-  or `RebuildState.run` adds it post-fold. Filed at PR-J
+  or `RebuildState.run` adds it post-fold. Filed at Task 1.4.10
   close in `design-rationale.md`; the rebuild signature
   change is contained to `forge-core` and `forge-app` /
-  `forge-app/main` (no Slice-2 caller change because
-  Slice 2 had no orchestrator caller). Stays open through
-  Slice 4B; closure at PR-J landing.
+  `forge-app/main` (no Slice 1.2 caller change because
+  Slice 1.2 had no orchestrator caller). Stays open through
+  Slice 1.4b; closure at Task 1.4.10 landing.
 
 ## 5. Cross-references
 
-- v1.2 spec for Slice 4 scope: §17 slice 4 (Headless
+- v1.2 spec for Slice 1.4 scope: §17 slice 4 (Headless
   feature loop with line-mode REPL), §11 (lifecycle —
-  every state Slice 4 drives), §15 (command-aware
-  preflight table — every command Slice 4 ships), §18
+  every state Slice 1.4 drives), §15 (command-aware
+  preflight table — every command Slice 1.4 ships), §18
   (configuration — `.forge/config.json` the
   orchestrator loads).
 - v1.2 spec for reviewer assets: §10.2 (reviewer
@@ -1889,7 +1890,7 @@ expected-vs-actual.
 - v1.2 spec for orchestrator wiring: §11.0
   (preconditions — every state-changing command), §12
   (budget enforcement), §13 (locking).
-- Decisions backing the Slice-4 contracts:
+- Decisions backing the Slice 1.4 contracts:
   design-rationale **M1** (manifest is source of
   truth), **M2** (HTML-comment editable regions for
   reconcile), **F11** (`requireSessionId` not
@@ -1902,11 +1903,11 @@ expected-vs-actual.
   on Claude / CodexPrompt prepending on Codex).
 - Phase context + seam discipline: `roadmap.md` §2.4
   (this slice), §2.5 (targeted polish — folded into
-  PR-O), §2.6 (seams to leave open — `.forge/state/.lock`
+  Task 1.4.15), §2.6 (seams to leave open — `.forge/state/.lock`
   scope, paths via `ForgePaths`, no global
   singletons), §3 (Phase 2 receives MVP-run friction
   output).
-- Predecessors: `design-2.1.md` (Slice 1 audit trail,
-  closed 2026-05-26), `design-2.2.md` (Slice 2 audit
-  trail, closed 2026-05-26), `design-2.3.md` (Slice 3
+- Predecessors: `design-2.1.md` (Slice 1.1 audit trail,
+  closed 2026-05-26), `design-2.2.md` (Slice 1.2 audit
+  trail, closed 2026-05-26), `design-2.3.md` (Slice 1.3
   audit trail, closed 2026-05-27).
