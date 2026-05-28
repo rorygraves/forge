@@ -366,7 +366,7 @@ object ClaudeConnector:
 
   /** Pull the schema-conformant payload out of the `claude -p --output-format json` result envelope.
     *
-    * Two envelope shapes are accepted, because the CLI changed between the pinned floor and current releases:
+    * Three envelope shapes are accepted, because the CLI changed between the pinned floor and current releases:
     *
     *   - **Claude ≤ 2.1.150** surfaced the parsed object in a dedicated `structured_output` field (Slice 0
     *     `transcripts/07-claude-schema.json`):
@@ -374,8 +374,13 @@ object ClaudeConnector:
     *   - **Claude 2.1.153** dropped that field; the schema-conformant payload now arrives as the `result` **string** (a
     *     JSON document), the same shape the Codex path already extracts from `agent_message.text` (design-rationale
     *     **C16**): {{{{ "type":"result", "subtype":"success", ..., "result":"{\"verdict\":...}" }}}}
+    *   - **Claude 2.1.156**: `--json-schema` validates but does **not** hard-enforce — the model sometimes returns the
+    *     JSON wrapped in prose ("Based on the design… {…}") or a ```json fence rather than as a bare document
+    *     (design-rationale **C18**). A clean `ujson.read(result)` then fails even though a conformant object is
+    *     present.
     *
-    * Prefer `structured_output` when present (back-compat), otherwise parse `result` as JSON. `Left(detail)` describes
+    * Prefer `structured_output` when present (back-compat); otherwise parse the `result` string as JSON, and if that
+    * fails, salvage a single JSON object out of prose / a Markdown fence before giving up. `Left(detail)` describes
     * what was missing or wrong; the caller maps to [[StructuredOutputMissing]] / [[StructuredOutputMalformed]].
     */
   def extractStructuredOutput(envelope: Value): Either[String, Value] =
@@ -390,15 +395,63 @@ object ClaudeConnector:
           obj.get("structured_output") match
             case Some(v) => Right(v)
             case None =>
-              // Claude 2.1.153: no structured_output field; the schema-conformant JSON is the `result` string.
+              // Claude 2.1.153+: no structured_output field; the schema-conformant JSON is in the `result` string.
               obj.get("result").flatMap(_.strOpt) match
                 case None =>
                   Left("Claude result envelope missing 'structured_output' field and has no string 'result' fallback")
                 case Some(resultStr) =>
-                  try Right(ujson.read(resultStr))
-                  catch
-                    case e: ujson.ParsingFailedException =>
-                      Left(
-                        "Claude result envelope had no 'structured_output' field and its 'result' string was not " +
-                          s"valid JSON: ${e.getMessage}"
-                      )
+                  parseResultPayload(resultStr)
+
+  /** Parse the `result` string into the schema-conformant object. Tries a clean parse first (Claude 2.1.153 shape); on
+    * failure salvages the first balanced JSON object from prose / a Markdown fence (Claude 2.1.156, **C18**). The
+    * salvaged candidate is still parsed by `ujson`, so a non-JSON or malformed object surfaces `Left` exactly as
+    * before.
+    */
+  private def parseResultPayload(resultStr: String): Either[String, Value] =
+    try Right(ujson.read(resultStr))
+    catch
+      case _: ujson.ParsingFailedException =>
+        salvageJsonObject(resultStr) match
+          case Some(v) => Right(v)
+          case None =>
+            Left(
+              "Claude result envelope had no 'structured_output' field and its 'result' string was not valid JSON " +
+                s"(nor did it contain a salvageable JSON object): ${truncate(resultStr)}"
+            )
+
+  /** Best-effort recovery of one JSON object from a `result` string the model wrapped in prose or a fence. Locates the
+    * first `{` and its matching `}` (brace depth, string/escape aware), parses that span, and returns it only if it
+    * parses cleanly. Returns `None` when no balanced object is found or the span fails to parse — the caller then
+    * reports the original-payload `Left`.
+    */
+  private[agents] def salvageJsonObject(s: String): Option[Value] =
+    val start = s.indexOf('{')
+    if start < 0 then None
+    else
+      var depth = 0
+      var inStr = false
+      var escaped = false
+      var end = -1
+      var i = start
+      while i < s.length && end < 0 do
+        val c = s.charAt(i)
+        if escaped then escaped = false
+        else if inStr then
+          if c == '\\' then escaped = true
+          else if c == '"' then inStr = false
+        else
+          c match
+            case '"' => inStr = true
+            case '{' => depth += 1
+            case '}' =>
+              depth -= 1
+              if depth == 0 then end = i
+            case _ => ()
+        i += 1
+      if end < 0 then None
+      else
+        try Some(ujson.read(s.substring(start, end + 1)))
+        catch case _: ujson.ParsingFailedException => None
+
+  private def truncate(s: String, max: Int = 200): String =
+    if s.length <= max then s else s.take(max) + "…"

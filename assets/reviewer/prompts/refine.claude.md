@@ -14,8 +14,12 @@ to change before the next piece starts.
 
 ## What you return
 
-A single JSON object matching the `refine.json` schema. **Output only
-the JSON object. No prose, no Markdown fences.**
+Your entire response must be a single JSON object matching the `refine.json`
+schema — **nothing else**. The very first character you emit must be `{` and
+the very last must be `}`. Do not write any preamble ("Looking at the merged
+piece…", "Here is my assessment…"), any closing remark, any explanation
+outside the JSON, and no Markdown code fences (no ` ```json `). All reasoning
+belongs inside the `reason` field.
 
 ```
 {
@@ -69,3 +73,9 @@ Things that are **not** enough signal:
 - Don't pre-empt the next code review by editing piece specs to "make
   them easier to implement". Specs change only when the design no longer
   matches reality.
+
+## Output format (strict)
+
+Emit only the JSON object — first character `{`, last character `}`, no
+prose before or after, no Markdown fences. A response that wraps the object
+in any surrounding text is a malformed response.

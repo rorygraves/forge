@@ -2226,6 +2226,35 @@ ticks off only after Task 1.4.17 lands.
   compiles. **C15 now unblocked on both connector paths** (Claude
   envelope fix **C16** + Codex schema fix **C17**); the full live
   ≥19/20 batch across all six pairs is the remaining opt-in run.
+- 2026-05-28 — Task 1.4.7 cheap-smoke re-run (per "cheap smoke first"
+  before committing to the full batch) on the upgraded **Claude CLI
+  2.1.156** (was 2.1.153 at the C16 fix). **Codex pair clean
+  (`Settled`); Claude design-review pair failed `StructuredOutputMissing`**
+  ("`result` not valid JSON: got \"B\" at index 0"). Root-caused with a
+  direct envelope capture using the exact `reviewerArgv` flags: the
+  envelope shape is unchanged (still the `result` string per C16), but
+  `--json-schema` on 2.1.156 **validates without hard-enforcing** —
+  `claude --help` now describes it as "structured output *validation*",
+  and the model returned a conformant object **wrapped in prose** on a
+  larger fixture (bare JSON on a trivial one). The orchestrator (1.4b)
+  will hit the same prose leakage, so this is a connector-robustness gap,
+  not a test artifact. **Fix (filed as design-rationale C18):**
+  `extractStructuredOutput` gains a salvage step
+  (`parseResultPayload` → `salvageJsonObject`) — when a clean
+  `ujson.read(result)` fails, recover the first balanced JSON object via a
+  string/escape-aware brace-depth scan and accept it only if it parses;
+  a prose-only `result` still surfaces `Left`. Belt-and-braces, the three
+  `*.claude.md` reviewer prompts were tightened ("first char `{`, last
+  char `}`, no preamble/fences" + a strict "Output format" footer) to
+  lower the leak rate at the source. `ClaudeConnectorSuite` 26 → 31 (+5:
+  two `extractStructuredOutput` salvage cases, two `salvageJsonObject`
+  unit cases, one fake-CLI end-to-end on the 2.1.156 prose shape).
+  `forge-agents` 185 → 190; other baselines preserved (`forge-core` 358,
+  `forge-git` 168, `forge-app` 96, `forge-specs` 132). **C15 still
+  open** — the validate-vs-enforce shift means the salvage + prompt
+  tightening must be confirmed by the full live 6×20 batch (G3/G4/G5)
+  before C15 closes; if Claude pairs still miss the bar, G4 prompt
+  tightening is the next lever (don't loosen the decoder).
 
 ## 4. Carry-forward (inherited + new)
 

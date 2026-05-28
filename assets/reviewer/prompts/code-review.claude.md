@@ -18,8 +18,12 @@ merge.
 
 ## What you return
 
-A single JSON object matching the `code-review.json` schema. **Output
-only the JSON object. No prose, no Markdown fences.**
+Your entire response must be a single JSON object matching the
+`code-review.json` schema — **nothing else**. The very first character you
+emit must be `{` and the very last must be `}`. Do not write any preamble
+("Based on the diff…", "Here is my review…"), any closing remark, any
+explanation outside the JSON, and no Markdown code fences (no ` ```json `).
+All reasoning belongs inside the `summary` and `blockers[].summary` fields.
 
 ```
 {
@@ -70,3 +74,9 @@ only the JSON object. No prose, no Markdown fences.**
   refine cycle.
 - Don't return an empty `summary` — a one-sentence rationale is the
   minimum.
+
+## Output format (strict)
+
+Emit only the JSON object — first character `{`, last character `}`, no
+prose before or after, no Markdown fences. A response that wraps the object
+in any surrounding text is a malformed response.

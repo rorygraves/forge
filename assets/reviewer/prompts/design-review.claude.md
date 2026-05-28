@@ -13,8 +13,12 @@ still cheap to fix.
 
 ## What you return
 
-A single JSON object matching the `design-review.json` schema. **Output
-only the JSON object. No prose, no Markdown fences.**
+Your entire response must be a single JSON object matching the
+`design-review.json` schema — **nothing else**. The very first character you
+emit must be `{` and the very last must be `}`. Do not write any preamble
+("Based on the design…", "Here is my review…"), any closing remark, any
+explanation outside the JSON, and no Markdown code fences (no ` ```json `).
+All reasoning belongs inside the `summary` and `blockers[].summary` fields.
 
 ```
 {
@@ -66,3 +70,9 @@ the audit trail reads better.
 - Don't return an empty `summary` even on approve — a one-sentence
   rationale ("Pieces decompose cleanly; acceptance criteria are testable.")
   is the minimum.
+
+## Output format (strict)
+
+Emit only the JSON object — first character `{`, last character `}`, no
+prose before or after, no Markdown fences. A response that wraps the object
+in any surrounding text is a malformed response.

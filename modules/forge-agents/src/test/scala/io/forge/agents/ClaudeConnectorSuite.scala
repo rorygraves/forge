@@ -318,6 +318,37 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     val result = ClaudeConnector.extractStructuredOutput(envelope)
     assert(result.left.exists(_.contains("not")), clue = result)
 
+  test("extractStructuredOutput: Claude 2.1.156 — salvages a JSON object wrapped in prose (C18)"):
+    // 2.1.156's --json-schema validates but does not hard-enforce; the model sometimes prefixes prose ("Based on…")
+    // before the object. The salvage path recovers the single balanced object so a conformant payload still decodes.
+    val envelope = ujson.read(
+      """{"type":"result","subtype":"success","is_error":false,
+        |"result":"Based on the design, here is my review: {\"verdict\":\"approve\",\"blockers\":[],\"questions\":[],\"summary\":\"ok\"} Hope that helps!"}""".stripMargin
+    )
+    val result = ClaudeConnector.extractStructuredOutput(envelope)
+    assert(result.isRight, clue = result)
+    assertEquals(result.toOption.flatMap(_.obj.get("verdict")).flatMap(_.strOpt), Some("approve"))
+    assertEquals(result.toOption.flatMap(_.obj.get("summary")).flatMap(_.strOpt), Some("ok"))
+
+  test("extractStructuredOutput: Claude 2.1.156 — salvages a JSON object inside a ```json fence (C18)"):
+    val envelope = ujson.read(
+      """{"type":"result","subtype":"success","is_error":false,
+        |"result":"```json\n{\"verdict\":\"request_changes\",\"blockers\":[],\"questions\":[],\"summary\":\"needs work\"}\n```"}""".stripMargin
+    )
+    val result = ClaudeConnector.extractStructuredOutput(envelope)
+    assert(result.isRight, clue = result)
+    assertEquals(result.toOption.flatMap(_.obj.get("verdict")).flatMap(_.strOpt), Some("request_changes"))
+
+  test("salvageJsonObject: brace matching is string-aware (braces inside string values don't close the object)"):
+    // A naive first-{-to-last-} would mis-span on `}` inside a string literal. The depth scanner must ignore them.
+    val salvaged = ClaudeConnector.salvageJsonObject("""prefix {"a":"a } not a close","b":2} suffix""")
+    assert(salvaged.isDefined, clue = salvaged)
+    assertEquals(salvaged.flatMap(_.obj.get("a")).flatMap(_.strOpt), Some("a } not a close"))
+    assertEquals(salvaged.flatMap(_.obj.get("b")).flatMap(_.numOpt), Some(2.0))
+
+  test("salvageJsonObject: prose with no JSON object at all returns None"):
+    assertEquals(ClaudeConnector.salvageJsonObject("I cannot comply with that."), None)
+
   test("reviewer end-to-end against a fake CLI: schema-conformant envelope decoded to DesignReview"):
     // Fake `claude` = a small shell script that echoes a Slice 0 §3.1 shape envelope and exits 0. Sandboxed from the
     // real binary — verifies the full reviewer plumbing (argv → spawn → collect → extract → decode) works without
@@ -385,6 +416,40 @@ class ClaudeConnectorSuite extends munit.FunSuite:
       .unsafeRunSync()
     assertEquals(review.verdict, ReviewVerdict.Approve)
     assertEquals(review.summary, "Looks fine.")
+
+  test("reviewer end-to-end against a fake CLI: Claude 2.1.156 prose-wrapped `result` decoded to DesignReview (C18)"):
+    // Fake `claude` echoing the 2.1.156 prose-leak shape: --json-schema let free-form text through, so the
+    // schema-conformant object is embedded in the `result` string after a preamble. The salvage path must recover it
+    // so the full plumbing (collect → extract → salvage → decode) still yields a DesignReview.
+    val inner = """{\"verdict\":\"approve\",\"blockers\":[],\"questions\":[],\"summary\":\"Salvaged.\"}"""
+    val envelope =
+      s"""{"type":"result","subtype":"success","is_error":false,""" +
+        s""""result":"Based on the design document: $inner"}"""
+    val fakeClaude = os.temp(
+      contents = s"""#!/bin/sh
+                    |cat <<'JSON'
+                    |$envelope
+                    |JSON
+                    |""".stripMargin,
+      prefix = "fake-claude-2156-",
+      suffix = ".sh",
+      deleteOnExit = true
+    )
+    os.perms.set(fakeClaude, "rwx------")
+    val schema = os.temp(contents = """{"type":"object"}""", prefix = "schema-", suffix = ".json", deleteOnExit = true)
+    val systemPrompt =
+      os.temp(contents = "Review the design", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val assets = ReviewerAssets(
+      designReview = ReviewerAssets.PerMethod(schema, systemPrompt),
+      prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
+      refine = ReviewerAssets.PerMethod(schema, systemPrompt)
+    )
+    val connector = ClaudeConnector(binary = fakeClaude.toString, reviewerAssets = Some(assets))
+    val review = connector
+      .reviewDesign(DesignReviewInput(FeatureId("feat-1"), 1, "design md content"))
+      .unsafeRunSync()
+    assertEquals(review.verdict, ReviewVerdict.Approve)
+    assertEquals(review.summary, "Salvaged.")
 
   test("reviewer end-to-end against a fake CLI: non-zero exit surfaces as ReviewerProcessFailure"):
     val fakeClaude = os.temp(
