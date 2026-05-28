@@ -374,18 +374,18 @@ wrapper therefore wraps what's there:
     `ReviewerError` subclass via `IO.raiseError` →
     `AdapterFailure(err)` with the variant preserved.
 
-### Task 1.4.3 — `forge-specs` skeleton + `SpecStore`
+### Task 1.4.3 — `forge-specs` skeleton + `SpecStore`  ✅ landed 2026-05-28
 
 `forge-specs` lost its sources in Slice 1.2 Task 1.2.1 (manifest types
 relocated to `forge-core` per **S2-1**). Task 1.4.3 re-populates the
 module with the persistence wrappers it actually owns.
 
-- [ ] **C1.** Module skeleton under
+- [x] **C1.** Module skeleton under
   `modules/forge-specs/src/main/scala/io/forge/specs/`.
   `build.sbt` already declares the module (verify dependency:
   `forge-specs` depends on `forge-core` for `Manifest` /
   `ManifestPatch` / `FeatureId` / `PieceId`).
-- [ ] **C2.** `io.forge.specs.SpecStore` trait — the §4
+- [x] **C2.** `io.forge.specs.SpecStore` trait — the §4
   source-of-truth boundary for `manifest.json` / `design.md` /
   `decomposition.md` / `pieces/<p>.md`:
   ```scala
@@ -412,18 +412,18 @@ module with the persistence wrappers it actually owns.
   atomic-write helper itself can be lifted from
   `FileStateCache` and shared, or duplicated thinly — settle
   in Task 1.4.3.
-- [ ] **C3.** `FileSpecStore(paths: ForgePaths)` — uses
+- [x] **C3.** `FileSpecStore(paths: ForgePaths)` — uses
   `ForgePaths.manifest / design / decomposition / pieceSpec`
   exclusively (one accessor per `SpecStore` method pair in
   C2). No `.forge/...` literals in this module either (Task 1.4.1
   wires `ForgePathsSuite`'s `os.walk` sweep over the new
   `forge-specs` sources).
-- [ ] **C4.** `SpecStoreError` sealed trait:
+- [x] **C4.** `SpecStoreError` sealed trait:
   - `NotFound(path: os.Path)` — feature / piece doesn't exist.
   - `Malformed(path: os.Path, cause: Throwable)` — JSON parse
     or markdown shape errors.
   - `IoFailure(path: os.Path, cause: Throwable)`.
-- [ ] **C5.** Unit suite — `FileSpecStoreSuite` covers
+- [x] **C5.** Unit suite — `FileSpecStoreSuite` covers
   round-trip for each method, atomic-write crash-window
   recovery (write fails partway → original survives), and the
   three error variants. Cross-reference Slice 1.2 Task 1.2.6 F13
@@ -1746,6 +1746,67 @@ ticks off only after Task 1.4.17 lands.
   Baselines preserved (`forge-core` 358, `forge-agents`
   181, `forge-git` 168); `sbt clean compile test` and
   `sbt scalafmtCheckAll` clean; `forge-it` still compiles.
+- 2026-05-28 — Task 1.4.3 landed. Re-populated the
+  `forge-specs` module (lost its sources in Slice 1.2 Task 1.2.1
+  when manifest types relocated to `forge-core` per **S2-1**)
+  with the §4 source-of-truth boundary the orchestrator
+  (Task 1.4.10) and `DocSync` (Task 1.4.4) will sit on top of. New
+  surface in `io.forge.specs`: `SpecStore` trait (eight
+  `IO[Either[SpecStoreError, _]]` methods covering load + save
+  for `manifest.json`, `design.md`, `decomposition.md`, and
+  `pieces/<p>.md`), `FileSpecStore(paths: ForgePaths)` impl,
+  and `SpecStoreError = NotFound | Malformed | IoFailure`.
+  `loadManifest` validates against `Manifest.validate` so a
+  JSON document that parses but violates §5.1 invariants
+  surfaces as `Malformed` rather than propagating a broken
+  manifest forward. Atomic-write semantics mirror
+  `FileStateCache.save`: sibling temp file with `SYNC`,
+  `Files.move(ATOMIC_MOVE)`, parent-directory fsync (best
+  effort), with stray-temp cleanup on failure — the helper is
+  thinly duplicated rather than lifted to a shared module
+  since both call sites are short and `forge-specs` is the
+  only other consumer in v1. Routes exclusively through
+  `ForgePaths.{manifest, design, decomposition, pieceSpec}`;
+  no `".forge` literals in the new sources (`ForgePathsSuite`
+  `os.walk` sweep clean). The §11.5 step 1 atomic-merge
+  *ordering* invariant (manifest written before action log +
+  state cache) is still **S2-5** carry-forward — its writer
+  side closes at Slice 1.4b Task 1.4.11 against the orchestrator
+  loop. Test coverage: `FileSpecStoreSuite` (17 cases —
+  round-trip for every method pair, overwrite, atomic-write
+  hygiene (no sibling temp leftover), on-demand parent-dir
+  creation for both `specs/<feature>/` and `pieces/`,
+  `NotFound` for every load method, `Malformed` on truncated
+  JSON + on §5.1-invariant-violating manifest, `IoFailure` on
+  parent-path collision and on read-against-directory). New
+  module test count `forge-specs` 0 → 17; baselines preserved
+  (`forge-core` 358, `forge-agents` 181, `forge-git` 168,
+  `forge-app` 94). `sbt clean compile test` and
+  `sbt scalafmtCheckAll` clean under `-Xfatal-warnings`.
+- 2026-05-28 — Task 1.4.3 review round 1 landed (2 findings,
+  both consistency gaps against the sibling `FileManifestStore`
+  that the pre-declaration consistency sweep should have
+  caught). **M1** (`loadManifest` only ran `Manifest.validate`,
+  not the `schemaVersion`-supported and embedded-`featureId`-
+  matches-requested-id guards `FileManifestStore.load`
+  applies — so a hand-edit / stale-file swap at
+  `.forge/specs/<id>/manifest.json` could load a foreign-id or
+  future-schema manifest). **M2** (`saveManifest` wrote any
+  `Manifest` unvalidated — since `SpecStore` is the committed
+  write boundary, this could atomically persist a manifest the
+  next `loadManifest` rejects as `Malformed`, bricking the
+  feature). Extracted a pure `checkManifest(file, id, m)`
+  guard mirroring `FileManifestStore` (schemaVersion →
+  featureId identity → `Manifest.validate`, first failure
+  wins, surfaced as `Malformed`); both `loadManifest` and
+  `saveManifest` run it, and `saveManifest` runs it **before**
+  `atomicWriteBytes` so a rejected save never touches the
+  existing file. Added 5 regression rows (mirroring
+  `ManifestStoreSuite`'s identity + schema-version cases on
+  the load side, plus save-side variants asserting the prior
+  committed manifest survives intact on a rejected overwrite).
+  `forge-specs` test count 17 → 22. Baselines preserved;
+  `sbt compile test` and `sbt scalafmtCheckAll` clean.
 
 ## 4. Carry-forward (inherited + new)
 
