@@ -1,0 +1,4 @@
+modules/forge-app/src/main/scala/io/forge/app/bootstrap/AssetInstaller.scala
+modules/forge-app/src/test/scala/io/forge/app/bootstrap/AssetInstallerSuite.scala
+modules/forge-app/src/test/scala/io/forge/app/bootstrap/RefineSchemaValidationSuite.scala
+modules/forge-app/src/test/scala/io/forge/app/bootstrap/SchemaShapeSuites.scala

@@ -1,0 +1,125 @@
+diff --git a/modules/forge-core/src/main/scala/io/forge/core/Question.scala b/modules/forge-core/src/main/scala/io/forge/core/Question.scala
+index 33a554e..404f004 100644
+--- a/modules/forge-core/src/main/scala/io/forge/core/Question.scala
++++ b/modules/forge-core/src/main/scala/io/forge/core/Question.scala
+@@ -2,14 +2,20 @@ package io.forge.core
+ 
+ import upickle.default.{readwriter, ReadWriter}
+ 
+-/** A driver-originated question awaiting human input. Same shape regardless of the underlying delivery mechanism (§7.2
+-  * / §7.3).
++/** A question awaiting human input. Same shape regardless of the underlying delivery mechanism (§7.2 / §7.3) or origin
++  * (a driver `AskUserQuestion` / halt envelope, or a Forge-internal gate such as the §10.1 ChangeCollector `Ask`).
++  *
++  * `defaultOption` is the option a Q&A pane should treat as the safe answer when the human gives none (timeout / no
++  * input). Driver-originated questions carry `None` — the wire shape has no default and the human is expected to
++  * answer. The §10.1 ChangeCollector `Ask` carries `Some("Deny")` so the safe-by-default posture (don't stage a
++  * borderline path) is encoded structurally rather than left to option ordering. When set, it must be one of `options`.
+   */
+ final case class Question(
+     text: String,
+     options: Vector[String],
+     allowFreeText: Boolean,
+-    severity: QuestionSeverity
++    severity: QuestionSeverity,
++    defaultOption: Option[String] = None
+ ) derives ReadWriter
+ 
+ /** §6 — only `Blocking` forces a state transition into a *NeedsHumanInput state during design review (§11.2 step 11).
+diff --git a/modules/forge-specs/src/main/scala/io/forge/specs/ChangeCollector.scala b/modules/forge-specs/src/main/scala/io/forge/specs/ChangeCollector.scala
+index 5436979..46e72e4 100644
+--- a/modules/forge-specs/src/main/scala/io/forge/specs/ChangeCollector.scala
++++ b/modules/forge-specs/src/main/scala/io/forge/specs/ChangeCollector.scala
+@@ -32,13 +32,14 @@ trait ChangeCollector:
+   *   - [[Allow]] — every change may be staged.
+   *   - [[Deny]] — at least one change is forbidden; carries every `(change, reason)` pair so the operator message can
+   *     name them. `reason` is the matched deny pattern (rule 1) or a rule descriptor (rules 2–4).
+-  *   - [[Ask]] — strict mode (rule 5) surfaced at least one borderline path; `questions` is one per asked path (default
+-  *     option `Deny`, applied by the orchestrator on no-answer), `included` is the set that passed cleanly.
++  *   - [[Ask]] — strict mode (rule 5) surfaced at least one borderline path; `asked` pairs each borderline
++  *     [[FileChange]] with its [[Question]] (whose `defaultOption` is `Some("Deny")`) so the orchestrator can map an
++  *     answer straight back to the file it would stage, and `included` is the set that passed cleanly.
+   */
+ enum Classification:
+   case Allow(included: Vector[FileChange])
+   case Deny(denied: Vector[(FileChange, String)])
+-  case Ask(questions: Vector[Question], included: Vector[FileChange])
++  case Ask(asked: Vector[(FileChange, Question)], included: Vector[FileChange])
+ 
+ /** Default [[ChangeCollector]] implementing the §10.1 decision rules verbatim (E5).
+   *
+@@ -63,9 +64,9 @@ final class DefaultChangeCollector extends ChangeCollector:
+       val denied = verdicts.collect { case (c, FileVerdict.Deny(reason)) => c -> reason }
+       if denied.nonEmpty then Classification.Deny(denied)
+       else
+-        val asks = verdicts.collect { case (c, FileVerdict.Ask(q)) => c -> q }
++        val asked = verdicts.collect { case (c, FileVerdict.Ask(q)) => c -> q }
+         val allowed = verdicts.collect { case (c, FileVerdict.Allow) => c }
+-        if asks.nonEmpty then Classification.Ask(asks.map(_._2), allowed)
++        if asked.nonEmpty then Classification.Ask(asked, allowed)
+         else Classification.Allow(allowed)
+     }
+ 
+@@ -96,7 +97,8 @@ final class DefaultChangeCollector extends ChangeCollector:
+         s"Stage '$relStr'? It is not covered by staging.allowPatterns and strict mode (requireExplicitAllow) is on.",
+       options = Vector("Allow", "Deny"),
+       allowFreeText = false,
+-      severity = QuestionSeverity.Blocking
++      severity = QuestionSeverity.Blocking,
++      defaultOption = Some("Deny") // §10.1 — the safe default when the human gives no answer
+     )
+ 
+   /** First pattern in `patterns` that matches `relStr` (a `/`-separated repo-relative path), or `None`. */
+diff --git a/modules/forge-specs/src/test/scala/io/forge/specs/ChangeCollectorStrictAskSuite.scala b/modules/forge-specs/src/test/scala/io/forge/specs/ChangeCollectorStrictAskSuite.scala
+index a24172c..167f209 100644
+--- a/modules/forge-specs/src/test/scala/io/forge/specs/ChangeCollectorStrictAskSuite.scala
++++ b/modules/forge-specs/src/test/scala/io/forge/specs/ChangeCollectorStrictAskSuite.scala
+@@ -4,8 +4,9 @@ import io.forge.core.QuestionSeverity
+ 
+ /** Task 1.4.5 E6 — the rule-5-strict variant the spec calls out: `requireExplicitAllow: true` + a path NOT matched by
+   * `allowPatterns` goes to [[Classification.Ask]], it is **not** silently filtered. Asserts the surfaced [[Question]]
+-  * is structurally well-formed so it routes cleanly through the driver's `AskUserQuestion` mechanism (§10.4); the
+-  * orchestrator (Task 1.4.10) applies the §10.1 "default option Deny" on no-answer.
++  * is structurally well-formed so it routes cleanly through the driver's `AskUserQuestion` mechanism (§10.4), that the
++  * §10.1 "default option Deny" is encoded on `Question.defaultOption` (not left to option ordering), and that each
++  * question stays paired with the [[FileChange]] it decides (so the orchestrator maps the answer back to a file).
+   */
+ class ChangeCollectorStrictAskSuite extends munit.FunSuite, ChangeCollectorSupport:
+ 
+@@ -18,26 +19,29 @@ class ChangeCollectorStrictAskSuite extends munit.FunSuite, ChangeCollectorSuppo
+   test("strict mode Asks about a path not covered by allowPatterns (never silently dropped)") {
+     val change = at("docs/notes.md", FileChangeKind.Added)
+     classify(Vector(change), strict) match
+-      case Classification.Ask(questions, included) =>
++      case Classification.Ask(asked, included) =>
+         assert(included.isEmpty, "asked path must not appear in included")
+-        assertEquals(questions.size, 1)
+-        val q = questions.head
++        assertEquals(asked.size, 1)
++        val (file, q) = asked.head
++        assertEquals(file, change, "the question must stay associated with its FileChange")
+         assert(q.text.nonEmpty, "question text must be non-empty")
+         assert(q.text.contains("docs/notes.md"), "question should name the path under decision")
+         assertEquals(q.options, Vector("Allow", "Deny"))
+         assertEquals(q.allowFreeText, false)
+         assertEquals(q.severity, QuestionSeverity.Blocking)
++        assertEquals(q.defaultOption, Some("Deny"), "§10.1 safe default must be encoded structurally")
+       case other => fail(s"expected Ask, got $other")
+   }
+ 
+-  test("mixed set — allowed paths are included, unmatched paths each produce a question") {
++  test("mixed set — allowed paths are included, unmatched paths each pair with a question") {
+     val allowed = at("src/Main.scala", FileChangeKind.Modified)
+     val asked1 = at("docs/a.md", FileChangeKind.Added)
+     val asked2 = at("scripts/b.sh", FileChangeKind.Added)
+     classify(Vector(allowed, asked1, asked2), strict) match
+-      case Classification.Ask(questions, included) =>
++      case Classification.Ask(asked, included) =>
+         assertEquals(included, Vector(allowed))
+-        assertEquals(questions.size, 2)
+-        assert(questions.forall(q => q.options == Vector("Allow", "Deny") && !q.allowFreeText))
++        assertEquals(asked.map(_._1), Vector(asked1, asked2), "each question stays keyed to its FileChange, in order")
++        assert(asked.forall { case (_, q) => q.options == Vector("Allow", "Deny") && !q.allowFreeText })
++        assert(asked.forall { case (_, q) => q.defaultOption.contains("Deny") })
+       case other => fail(s"expected Ask, got $other")
+   }

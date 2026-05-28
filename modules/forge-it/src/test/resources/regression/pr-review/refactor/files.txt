@@ -1,0 +1,4 @@
+modules/forge-git/src/main/scala/io/forge/git/branch/RealBranchManager.scala
+modules/forge-git/src/main/scala/io/forge/git/branch/protection/BranchProtectionCache.scala
+modules/forge-git/src/main/scala/io/forge/git/cli/RealGhClient.scala
+modules/forge-git/src/test/scala/io/forge/git/branch/BranchProtectionCacheSuite.scala

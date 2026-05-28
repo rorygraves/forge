@@ -1,0 +1,3 @@
+modules/forge-core/src/main/scala/io/forge/core/Question.scala
+modules/forge-specs/src/main/scala/io/forge/specs/ChangeCollector.scala
+modules/forge-specs/src/test/scala/io/forge/specs/ChangeCollectorStrictAskSuite.scala

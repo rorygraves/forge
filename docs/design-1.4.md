@@ -668,23 +668,52 @@ The ≥19/20 native-schema regression suite Slice 1.1 deferred per
 wrappers exist (Task 1.4.2), Task 1.4.7 runs the real CLIs against
 shipped schemas and prompts.
 
-- [ ] **G1.** `ReviewerRegressionSuite` in `forge-it`. Opt-in
+- [x] **G1.** `ReviewerRegressionSuite` in `forge-it`. Opt-in
   via `FORGE_IT_RUN_REGRESSION=1` per the default-on `<60s`
   budget (matches `FORGE_IT_RUN_RELIABILITY` / `_PROCLOCK`
   pattern).
-- [ ] **G2.** Per-method × per-connector fixture set — 20
-  representative inputs each for `designReview`, `prReview`,
-  `refine`. Source: hand-curated from real Forge repo
-  history (design docs, PRs); store under
-  `modules/forge-it/src/test/resources/regression/`. Per the
-  "test runtime cost is design" memory, this is a multi-minute
-  suite by construction — six runs × 20 samples × ~15s per
-  reviewer call ≈ 30 minutes; opt-in is mandatory.
+  **As landed:** six tests (one per method × connector); each
+  builds the connector with `reviewerAssets` installed into a
+  throwaway `~/.forge` via the real `AssetInstaller` path, then
+  drives `RealReviewerCall` (Task 1.4.2) — so the suite measures
+  the same install→bind→decode path the orchestrator uses.
+  Per-connector escape hatches `FORGE_IT_SKIP_CLAUDE` /
+  `FORGE_IT_SKIP_CODEX` mirror the smoke suites. A separate,
+  far-cheaper single-call wiring smoke (`FORGE_IT_RUN_REGRESSION_SMOKE=1`)
+  proves the plumbing end-to-end without the full batch.
+- [x] **G2.** Per-method × per-connector fixture set under
+  `modules/forge-it/src/test/resources/regression/`.
+  **Deviation from "20 inputs each" (taken with the maintainer):**
+  the §16 bar is a *reliability* measurement of the model's
+  structured-output formatting, which the established idiom
+  (`CodexHaltWithQuestionReliabilitySuite`) samples with **one
+  input × 20 runs**. We follow that idiom with a **small real
+  fixture set** — 3 representative inputs per method, drawn from
+  this repo's own design docs and PR diffs — **cycled to 20
+  samples**. The variance under test is the model's, not the input
+  set's; this avoids authoring 60 large fixtures while staying
+  faithful to what the bar measures. PR-review diffs are captured
+  verbatim from real commits (`adb3791`, `f873169`, `705796f`);
+  refine manifests are built inline from a real `Manifest` value
+  (type-checked, no fixture drift — same idiom as `DocSyncSuite`).
 - [ ] **G3.** Pass bar: ≥19/20 per method per connector. A
   schema-validation failure (per the Slice 1.1 `Native` schema
   contract) counts as a fail. Adapter errors that are
   retryable per §7.6 don't count against the bar (retried
   per `reviewProcessRetries`).
+  **As landed (scoring implemented; full bar run pending):** the
+  suite classifies each sample `Settled` = pass,
+  `StructuredOutputMissing/Malformed` = schema-fail (counts
+  against the bar), and retries `ReviewerProcessFailure` / wall-clock
+  `Timeout` before scoring (transient, "don't count" per §7.6),
+  then asserts `passes ≥ 19/20` with a per-sample breakdown clue.
+  **Blocker found + fixed:** the wiring smoke caught that Claude
+  2.1.153 moved the reviewer schema payload out of
+  `structured_output` into the `result` string —
+  `ClaudeConnector.extractStructuredOutput` failed 100% (now fixed,
+  back-compat, design-rationale **C16**). The full live ≥19/20
+  measurement across all 6 pairs (~30–90 min, real CLI spend) is
+  an opt-in run not yet executed; **G4 / G5 stay open until it is.**
 - [ ] **G4.** Failure mode: if a method × connector pair
   fails the bar in Task 1.4.7, schema/prompt tightening happens
   inside 1.4a (not deferred further). The Task 1.4.7 commit lists
@@ -2091,6 +2120,58 @@ ticks off only after Task 1.4.17 lands.
   `forge-agents` 181, `forge-git` 168). `sbt clean compile
   test` and `sbt scalafmtCheckAll` clean under
   `-Xfatal-warnings`; `forge-it` compiles.
+- 2026-05-28 — Task 1.4.7 partial landing (G1, G2 done; G3 scoring
+  done, full bar run + G4 / G5 / C15 still open). Shipped
+  `ReviewerRegressionSuite` in `forge-it` — six method × connector
+  tests, opt-in via `FORGE_IT_RUN_REGRESSION=1`, each building the
+  connector with `reviewerAssets` installed into a throwaway
+  `~/.forge` through the real `AssetInstaller` path and driving
+  `RealReviewerCall` (Task 1.4.2), so it exercises the same
+  install→bind→decode path the orchestrator will. **G2 deviation
+  (taken with the maintainer):** the §16 bar measures the model's
+  structured-output *reliability*, which the established idiom
+  (`CodexHaltWithQuestionReliabilitySuite`) samples with one input ×
+  20 runs; we follow that with a **small real fixture set** (3 inputs
+  per method, cycled to 20 samples) rather than 60 hand-authored
+  files. Fixtures under
+  `modules/forge-it/src/test/resources/regression/`: 3 design-review
+  markdowns, 3 PR-review diffs captured verbatim from real commits
+  (`adb3791` / `f873169` / `705796f`) + piece specs + changed-file
+  lists, 3 refine designs (manifest built inline from a real
+  `Manifest` value, type-checked, no fixture drift — `DocSyncSuite`
+  idiom). **G3 scoring:** `Settled` = pass, `StructuredOutputMissing` /
+  `Malformed` = schema-fail (counts against the bar), transient
+  `ReviewerProcessFailure` / wall-clock `Timeout` retried before
+  scoring (don't count, §7.6), assert `passes ≥ 19/20` with a
+  per-sample breakdown clue. A separate cheap single-call wiring
+  smoke gate (`FORGE_IT_RUN_REGRESSION_SMOKE=1`) proves the plumbing
+  without the full batch. **Blocker found + fixed (bundled per
+  maintainer decision):** the wiring smoke immediately caught that
+  **Claude CLI 2.1.153 dropped the `structured_output` envelope
+  field** — the schema-conformant payload now arrives as the `result`
+  string (the 2.1.150 Slice 0 transcript had `structured_output`), so
+  `ClaudeConnector.extractStructuredOutput` was failing 100% of
+  reviewer calls. Fixed back-compatibly (prefer `structured_output`,
+  else parse `result` as JSON — the same shape the Codex path reads
+  from `agent_message.text`); filed as design-rationale **C16**.
+  Added 4 `ClaudeConnectorSuite` tests (3 `extractStructuredOutput`
+  shape cases + 1 fake-CLI end-to-end on the 2.1.153 shape, the
+  fake-mirrors-real discipline). The live smoke then returned
+  `Settled` against the real 2.1.153 CLI (clean schema decode) —
+  wiring + fix confirmed. **Watch-item:** that single live call took
+  ~90 min wall-clock despite a 3-min per-call cap; most likely Claude
+  rate-limiting/backoff on the day, but the per-call wall-clock cap's
+  effectiveness under sustained CLI-internal backoff (the **S4-3**
+  cancellation caveat) needs verifying before the full 6×20 batch is
+  kicked off. **Still open:** the live ≥19/20 measurement across all
+  six pairs (G3 bar / G4 / G5) is an opt-in run (~tens of minutes to
+  hours, real CLI spend) **not yet executed**; **C15 stays open** and
+  its `design-rationale.md` "Action required" is unchanged until that
+  run confirms the bar. `forge-agents` test count 181 → 185 (+4);
+  baselines preserved (`forge-core` 358, `forge-git` 168,
+  `forge-app` 94, `forge-specs` 132). `sbt test` green;
+  `sbt scalafmtCheckAll` clean under `-Xfatal-warnings`; `forge-it`
+  compiles.
 
 ## 4. Carry-forward (inherited + new)
 
@@ -2231,6 +2312,16 @@ expected-vs-actual.
   item into Slice 1.4b; Task 1.4.17 evaluates whether MVP-run cost
   data warrants closure inside Phase 1 or whether it rolls
   into v1.3.
+  **Task 1.4.7 latency observation (2026-05-28):** the single live
+  reviewer wiring smoke returned `Settled` but took ~90 min
+  wall-clock despite a 3-min per-call `ReviewerLimits` cap —
+  consistent with either Claude rate-limiting/backoff on the day
+  or the cap's fiber-cancellation not actually terminating a
+  CLI subprocess stuck in internal retry (the exact
+  no-observable-kill gap above). Verify the per-call wall-clock
+  cap bounds real wall-time before kicking off the full Task 1.4.7
+  6×20 batch; if it doesn't, S4-3's connector-boundary widening
+  (observable kill) is the closure path.
 - **S4-4 — `RebuildState.run` widened to return
   `RebuildResult(feature, inFlightSessions)` for restart
   recovery.** Surfaced at plan-review pre-Task 1.4.10. The

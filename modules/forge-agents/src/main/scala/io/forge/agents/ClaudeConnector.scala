@@ -31,7 +31,9 @@ import scala.concurrent.duration.*
   *
   * **Reviewer one-shots** use `claude -p --output-format json --json-schema '<schema-content>' --system-prompt-file
   * <path> <prompt>` (Slice 0 §3.1). With `--output-format json` the CLI prints a single JSON envelope on exit (not
-  * stream-json); the schema-conformant payload lives in the envelope's `structured_output` field.
+  * stream-json). The schema-conformant payload lives either in a dedicated `structured_output` field (Claude ≤ 2.1.150)
+  * or, on Claude 2.1.153, in the `result` string as a JSON document — [[ClaudeConnector.extractStructuredOutput]]
+  * handles both (design-rationale **C16**).
   */
 final class ClaudeConnector(
     binary: String = "claude",
@@ -136,7 +138,9 @@ final class ClaudeConnector(
 
   /** Shared reviewer-one-shot path. Reads the schema content from disk (Claude wants it inline as a flag argument),
     * spawns the CLI with `--output-format json` so stdout is a single envelope, collects exit + stdout, extracts the
-    * `structured_output` field, and decodes via the shared [[ReviewDecoders]] into the per-method domain type.
+    * schema-conformant payload (`structured_output` field or the `result` JSON string — see
+    * [[ClaudeConnector.extractStructuredOutput]]), and decodes via the shared [[ReviewDecoders]] into the per-method
+    * domain type.
     */
   private def runReviewer[A](
       pick: ReviewerAssets => ReviewerAssets.PerMethod,
@@ -231,8 +235,9 @@ object ClaudeConnector:
 
   /** argv for reviewer one-shots: `claude -p '<prompt>' --output-format json --json-schema '<schema>'
     * --system-prompt-file <path>` plus isolation. Distinct shape from `headlessArgv`: `--output-format json` (not
-    * stream-json) so we get a single envelope with `structured_output`, and the inline `--json-schema` argument
-    * carrying the *contents* of the schema file (Slice 0 §3.1).
+    * stream-json) so we get a single result envelope, and the inline `--json-schema` argument carrying the *contents*
+    * of the schema file (Slice 0 §3.1). The schema-conformant payload is read by
+    * [[ClaudeConnector.extractStructuredOutput]] from either `structured_output` or `result` per CLI version.
     */
   def reviewerArgv(
       binary: String,
@@ -359,15 +364,19 @@ object ClaudeConnector:
                 StructuredOutputMissing(s"Claude reviewer stdout was not valid JSON: ${e.getMessage}")
               )
 
-  /** Pull the `structured_output` field out of the result envelope. The envelope shape matches Slice 0
-    * `transcripts/07-claude-schema.json`:
+  /** Pull the schema-conformant payload out of the `claude -p --output-format json` result envelope.
     *
-    * {{{
-    *   { "type":"result", "subtype":"success", ..., "structured_output": { ... } }
-    * }}}
+    * Two envelope shapes are accepted, because the CLI changed between the pinned floor and current releases:
     *
-    * `Left(detail)` describes what was missing or wrong; the caller maps to [[StructuredOutputMissing]] /
-    * [[StructuredOutputMalformed]] as appropriate.
+    *   - **Claude ≤ 2.1.150** surfaced the parsed object in a dedicated `structured_output` field (Slice 0
+    *     `transcripts/07-claude-schema.json`):
+    *     {{{{ "type":"result", "subtype":"success", ..., "structured_output": { ... } }}}}
+    *   - **Claude 2.1.153** dropped that field; the schema-conformant payload now arrives as the `result` **string** (a
+    *     JSON document), the same shape the Codex path already extracts from `agent_message.text` (design-rationale
+    *     **C16**): {{{{ "type":"result", "subtype":"success", ..., "result":"{\"verdict\":...}" }}}}
+    *
+    * Prefer `structured_output` when present (back-compat), otherwise parse `result` as JSON. `Left(detail)` describes
+    * what was missing or wrong; the caller maps to [[StructuredOutputMissing]] / [[StructuredOutputMalformed]].
     */
   def extractStructuredOutput(envelope: Value): Either[String, Value] =
     envelope.objOpt match
@@ -379,5 +388,17 @@ object ClaudeConnector:
           Left(s"Claude reviewer envelope is_error=true: $reason")
         else
           obj.get("structured_output") match
-            case None => Left("Claude result envelope missing 'structured_output' field")
             case Some(v) => Right(v)
+            case None =>
+              // Claude 2.1.153: no structured_output field; the schema-conformant JSON is the `result` string.
+              obj.get("result").flatMap(_.strOpt) match
+                case None =>
+                  Left("Claude result envelope missing 'structured_output' field and has no string 'result' fallback")
+                case Some(resultStr) =>
+                  try Right(ujson.read(resultStr))
+                  catch
+                    case e: ujson.ParsingFailedException =>
+                      Left(
+                        "Claude result envelope had no 'structured_output' field and its 'result' string was not " +
+                          s"valid JSON: ${e.getMessage}"
+                      )

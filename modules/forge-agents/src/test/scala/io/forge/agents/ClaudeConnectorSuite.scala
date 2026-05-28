@@ -258,7 +258,7 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     assert(argv.containsSlice(List("--setting-sources", "project,local")), clue = argv)
     assert(argv.contains("--strict-mcp-config"), clue = argv)
     // Reviewer-shape output flags: single JSON envelope, NOT stream-json. Critical — `--output-format json` is what
-    // makes `structured_output` appear in the envelope (Slice 0 §3.1).
+    // makes the CLI emit a single result envelope (carrying the schema payload in `structured_output` or `result`).
     assert(argv.containsSlice(List("--output-format", "json")), clue = argv)
     assert(!argv.containsSlice(List("--output-format", "stream-json")), clue = argv)
     // Schema is inline content, not a path.
@@ -289,6 +289,34 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     val envelope = ujson.read("""{"type":"result","is_error":true,"result":"sandbox launch failed"}""")
     val result = ClaudeConnector.extractStructuredOutput(envelope)
     assert(result.left.exists(_.contains("sandbox launch failed")), clue = result)
+
+  test("extractStructuredOutput: Claude 2.1.153 — parses the `result` JSON string when structured_output is absent"):
+    // C16: 2.1.153 dropped the dedicated structured_output field; the schema-conformant payload arrives as the
+    // `result` string. Real envelope shape captured against claude 2.1.153.
+    val envelope = ujson.read(
+      """{"type":"result","subtype":"success","is_error":false,
+        |"result":"{\"verdict\":\"request_changes\",\"blockers\":[],\"questions\":[],\"summary\":\"needs work\"}"}""".stripMargin
+    )
+    val result = ClaudeConnector.extractStructuredOutput(envelope)
+    assert(result.isRight, clue = result)
+    assertEquals(result.toOption.flatMap(_.obj.get("verdict")).flatMap(_.strOpt), Some("request_changes"))
+    assertEquals(result.toOption.flatMap(_.obj.get("summary")).flatMap(_.strOpt), Some("needs work"))
+
+  test("extractStructuredOutput: structured_output wins over `result` when both are present (back-compat)"):
+    val envelope = ujson.read(
+      """{"type":"result","subtype":"success","is_error":false,
+        |"structured_output":{"verdict":"approve","blockers":[],"summary":"ok"},
+        |"result":"{\"verdict\":\"request_changes\"}"}""".stripMargin
+    )
+    val result = ClaudeConnector.extractStructuredOutput(envelope)
+    assertEquals(result.toOption.flatMap(_.obj.get("verdict")).flatMap(_.strOpt), Some("approve"))
+
+  test("extractStructuredOutput: no structured_output and a non-JSON `result` string returns Left"):
+    val envelope = ujson.read(
+      """{"type":"result","subtype":"success","is_error":false,"result":"I cannot comply with that."}"""
+    )
+    val result = ClaudeConnector.extractStructuredOutput(envelope)
+    assert(result.left.exists(_.contains("not")), clue = result)
 
   test("reviewer end-to-end against a fake CLI: schema-conformant envelope decoded to DesignReview"):
     // Fake `claude` = a small shell script that echoes a Slice 0 §3.1 shape envelope and exits 0. Sandboxed from the
@@ -324,6 +352,39 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     assertEquals(review.verdict, ReviewVerdict.Approve)
     assertEquals(review.summary, "All good.")
     assertEquals(review.blockers, Vector.empty[ReviewBlocker])
+
+  test("reviewer end-to-end against a fake CLI: Claude 2.1.153 `result`-string envelope decoded to DesignReview"):
+    // Fake `claude` echoing the *current* (2.1.153) envelope shape: no structured_output field; the schema-conformant
+    // JSON is the `result` string. Mirrors the real binary so the full plumbing (collect → extract → decode) is
+    // exercised against the shape the live CLI actually emits (C16).
+    val envelope =
+      """{"type":"result","subtype":"success","is_error":false,""" +
+        """"result":"{\"verdict\":\"approve\",\"blockers\":[],\"questions\":[],\"summary\":\"Looks fine.\"}"}"""
+    val fakeClaude = os.temp(
+      contents = s"""#!/bin/sh
+                    |cat <<'JSON'
+                    |$envelope
+                    |JSON
+                    |""".stripMargin,
+      prefix = "fake-claude-2153-",
+      suffix = ".sh",
+      deleteOnExit = true
+    )
+    os.perms.set(fakeClaude, "rwx------")
+    val schema = os.temp(contents = """{"type":"object"}""", prefix = "schema-", suffix = ".json", deleteOnExit = true)
+    val systemPrompt =
+      os.temp(contents = "Review the design", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val assets = ReviewerAssets(
+      designReview = ReviewerAssets.PerMethod(schema, systemPrompt),
+      prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
+      refine = ReviewerAssets.PerMethod(schema, systemPrompt)
+    )
+    val connector = ClaudeConnector(binary = fakeClaude.toString, reviewerAssets = Some(assets))
+    val review = connector
+      .reviewDesign(DesignReviewInput(FeatureId("feat-1"), 1, "design md content"))
+      .unsafeRunSync()
+    assertEquals(review.verdict, ReviewVerdict.Approve)
+    assertEquals(review.summary, "Looks fine.")
 
   test("reviewer end-to-end against a fake CLI: non-zero exit surfaces as ReviewerProcessFailure"):
     val fakeClaude = os.temp(

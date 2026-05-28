@@ -1,0 +1,263 @@
+diff --git a/modules/forge-git/src/main/scala/io/forge/git/branch/RealBranchManager.scala b/modules/forge-git/src/main/scala/io/forge/git/branch/RealBranchManager.scala
+index 5f24081..403f1c6 100644
+--- a/modules/forge-git/src/main/scala/io/forge/git/branch/RealBranchManager.scala
++++ b/modules/forge-git/src/main/scala/io/forge/git/branch/RealBranchManager.scala
+@@ -4,7 +4,7 @@ import cats.data.EitherT
+ import cats.effect.{Clock, IO}
+ import io.forge.core.{BranchName, FeatureId, PieceId, PrNumber, Sha}
+ import io.forge.core.manifest.Manifest
+-import io.forge.git.branch.protection.{BranchProtectionCache, CacheKey, RequiredChecksOverlay}
++import io.forge.git.branch.protection.{BranchProtectionCache, CacheKey, OverlaySource, RequiredChecksOverlay}
+ import io.forge.git.cli.{FastForwardResult, GhClient, GhError, GitClient, GitError}
+ 
+ /** Concrete [[BranchManager]] composed over [[GhClient]] / [[GitClient]] / [[BranchProtectionCache]].
+@@ -167,24 +167,31 @@ final class RealBranchManager(
+       case Some(hit) => IO.pure(Right(hit))
+       case None =>
+         gh.apiBranchProtection(base).flatMap {
+-          case Right(json) =>
+-            val required = json.fold(Set.empty[String])(parseRequiredChecks)
+-            clock.realTimeInstant.flatMap { now =>
+-              val overlay = RequiredChecksOverlay(required, now)
+-              cache.put(key, overlay).as(Right(overlay))
+-            }
++          case Right(Some(json)) =>
++            val required = parseRequiredChecks(json)
++            storeOverlay(key, RequiredChecksOverlay(required, _, OverlaySource.Protected))
++          case Right(None) =>
++            // 404 from `gh api …/branch-protection/required_status_checks` — no protection on this base.
++            storeOverlay(key, RequiredChecksOverlay(Set.empty, _, OverlaySource.Unprotected))
+           case Left(_: GhError.Unauthorized) =>
+             // Pragmatic fallback per C6: caller lacks `admin:repo`, treat as unprotected. Slice 4 logs the
+-            // `harness.protection_unauthorized` audit event; this is intentionally not a [[BranchError]].
+-            clock.realTimeInstant.flatMap { now =>
+-              val overlay = RequiredChecksOverlay(Set.empty, now)
+-              cache.put(key, overlay).as(Right(overlay))
+-            }
++            // `harness.protection_unauthorized` audit event off [[OverlaySource.Unauthorized]]; this is
++            // intentionally not a [[BranchError]] so a missing repo-admin permission doesn't block `forge run`.
++            storeOverlay(key, RequiredChecksOverlay(Set.empty, _, OverlaySource.Unauthorized))
+           case Left(err: GhError.RateLimited) => IO.pure(Left(BranchError.RateLimited(err.retryAfter)))
+           case Left(err) => IO.pure(Left(BranchError.GhFailure(err)))
+         }
+     }
+ 
++  private def storeOverlay(
++      key: CacheKey,
++      build: java.time.Instant => RequiredChecksOverlay
++  ): IO[Either[BranchError, RequiredChecksOverlay]] =
++    clock.realTimeInstant.flatMap { now =>
++      val overlay = build(now)
++      cache.put(key, overlay).as(Right(overlay))
++    }
++
+   // --- preflight helpers ----------------------------------------------------
+ 
+   private def preflightCleanOnly(name: String): IO[PreflightReport] =
+diff --git a/modules/forge-git/src/main/scala/io/forge/git/branch/protection/BranchProtectionCache.scala b/modules/forge-git/src/main/scala/io/forge/git/branch/protection/BranchProtectionCache.scala
+index 48fbac3..0e93bdb 100644
+--- a/modules/forge-git/src/main/scala/io/forge/git/branch/protection/BranchProtectionCache.scala
++++ b/modules/forge-git/src/main/scala/io/forge/git/branch/protection/BranchProtectionCache.scala
+@@ -16,10 +16,36 @@ import scala.concurrent.duration.{DurationLong, FiniteDuration}
+   */
+ final case class CacheKey(feature: FeatureId, base: BranchName, epoch: Long)
+ 
++/** Discriminator for how the overlay was obtained. Slice-4 audit-log writers map each variant onto a `gh.action` /
++  * `harness.*` entry — in particular `Unauthorized` is the §C6 pragmatic fallback the audit log records as
++  * `harness.protection_unauthorized`. Without the discriminator on [[RequiredChecksOverlay]], Slice 4 cannot
++  * distinguish "no branch protection set up on `base`" (`Unprotected`, 404 from `gh api`) from "caller lacks
++  * `admin:repo`" (`Unauthorized`) — both surface as an empty required set otherwise.
++  */
++enum OverlaySource:
++  /** `gh api …/branch-protection/required_status_checks` returned a JSON payload — `required` is the genuine
++    * branch-protection contract. The audit log records this case via normal `gh.action` entries.
++    */
++  case Protected
++
++  /** `gh api …` returned 404 — no branch protection on this base. `required` is empty by definition. */
++  case Unprotected
++
++  /** `gh api …` returned 401/403 — caller lacks `admin:repo` on the repo. Slice 3's [[RealBranchManager]] treats this
++    * as "no required checks" pragmatically (so `forge run` doesn't block on missing privileges); Slice 4 logs
++    * `harness.protection_unauthorized` to make the fallback auditable.
++    */
++  case Unauthorized
++
+ /** Cached required-checks overlay value. `required` is the union of branch-protection-required check names; `fetchedAt`
+-  * is the read timestamp used for TTL eviction.
++  * is the read timestamp used for TTL eviction; `source` tells Slice 4 which `gh api` outcome produced this overlay so
++  * `harness.protection_unauthorized` can be emitted only when the fallback actually fires (see [[OverlaySource]]).
+   */
+-final case class RequiredChecksOverlay(required: Set[String], fetchedAt: Instant)
++final case class RequiredChecksOverlay(
++    required: Set[String],
++    fetchedAt: Instant,
++    source: OverlaySource = OverlaySource.Protected
++)
+ 
+ /** PR-C C5 — pluggable storage seam. Slice 3 ships [[InMemoryBranchProtectionCache]] only; on-disk persistence is filed
+   * as carry-forward **S3-2** (no caller in Slice 3 needs it).
+diff --git a/modules/forge-git/src/main/scala/io/forge/git/cli/RealGhClient.scala b/modules/forge-git/src/main/scala/io/forge/git/cli/RealGhClient.scala
+index e2ba34a..b133df3 100644
+--- a/modules/forge-git/src/main/scala/io/forge/git/cli/RealGhClient.scala
++++ b/modules/forge-git/src/main/scala/io/forge/git/cli/RealGhClient.scala
+@@ -59,12 +59,7 @@ final class RealGhClient(repoRoot: os.Path, env: Map[String, String] = Map.empty
+     invoke(Vector("gh", "pr", "diff", pr.value.toString))
+ 
+   override def apiBranchProtection(base: BranchName): IO[Either[GhError, Option[ujson.Value]]] =
+-    invoke(Vector("gh", "api", RealGhClient.branchProtectionApiPath(base))).map {
+-      case Left(GhError.NotFound(_)) => Right(None)
+-      case Left(GhError.Unauthorized(_)) => Right(None)
+-      case Left(other) => Left(other)
+-      case Right(stdout) => parseJson("branch-protection", stdout).map(Some(_))
+-    }
++    invoke(Vector("gh", "api", RealGhClient.branchProtectionApiPath(base))).map(RealGhClient.mapApiBranchProtection)
+ 
+   /** **IT-ONLY.** `gh pr merge <pr> --<mode>` — drives a sacrificial-repo merge from the integration test in `forge-it`
+     * (`BranchManagerIntegrationSuite`). Not on [[GhClient]] by design: v1.2 §11 keeps "piece PRs are merged by the
+@@ -86,9 +81,7 @@ final class RealGhClient(repoRoot: os.Path, env: Map[String, String] = Map.empty
+       RealGhClient.classify(res.exitCode, res.out.text(), res.err.text())
+     }
+ 
+-  private def parseJson(stage: String, raw: String): Either[GhError, ujson.Value] =
+-    try Right(ujson.read(raw))
+-    catch case t: Throwable => Left(GhError.ParseFailure(stage, t, raw))
++  private def parseJson(stage: String, raw: String): Either[GhError, ujson.Value] = RealGhClient.parseJson(stage, raw)
+ 
+   private def parsePrCreateUrl(raw: String): Either[GhError, PrNumber] =
+     val trimmed = raw.trim
+@@ -113,6 +106,32 @@ object RealGhClient:
+     */
+   val PrUrlPattern: Regex = """^https?://[^/]+/[^/]+/[^/]+/pull/(\d+)\s*$""".r
+ 
++  /** §9 C6 / Slice-3 review fix: map a finished `gh api …/branch-protection/required_status_checks` call into the
++    * `apiBranchProtection` return shape.
++    *
++    *   - **404 (`NotFound`) ⇒ `Right(None)`** — no branch protection on this base. `RealBranchManager` collapses this
++    *     to an `OverlaySource.Unprotected`-tagged empty overlay.
++    *   - **Any other `Left(GhError)` ⇒ `Left(other)`**, including 401/403 (`Unauthorized`). Slice 4's audit-log writer
++    *     needs the distinction between "branch unprotected" (404 above) and "caller lacks `admin:repo`" (401/403); the
++    *     earlier version of this mapping flattened both to `Right(None)`, making the Slice-4 distinction impossible.
++    *     `RealBranchManager.requiredChecksOverlay` catches `Left(GhError.Unauthorized)` and produces an
++    *     `OverlaySource.Unauthorized`-tagged overlay; `harness.protection_unauthorized` is emitted off that variant.
++    *   - **`Right(stdout)` ⇒ parse JSON**, wrap as `Some`. Parse failure surfaces as `Left(ParseFailure)`.
++    *
++    * Visible for testing: `BranchProtectionCacheSuite` exercises every branch, in particular pinning the
++    * Unauthorized-stays-Left contract so a future change can't silently re-introduce the flattening.
++    */
++  def mapApiBranchProtection(result: Either[GhError, String]): Either[GhError, Option[ujson.Value]] =
++    result match
++      case Left(GhError.NotFound(_)) => Right(None)
++      case Left(other) => Left(other)
++      case Right(stdout) => parseJson("branch-protection", stdout).map(Some(_))
++
++  /** Pure JSON parse, lifted into the companion so [[mapApiBranchProtection]] doesn't need an instance to call. */
++  def parseJson(stage: String, raw: String): Either[GhError, ujson.Value] =
++    try Right(ujson.read(raw))
++    catch case t: Throwable => Left(GhError.ParseFailure(stage, t, raw))
++
+   /** Build the `gh api` path for a branch's required-status-checks endpoint. The base name is URL-encoded so that
+     * release-style names with `/` (e.g. `release/1.0`) map to a single path segment (`release%2F1.0`) and don't get
+     * split into nested API parts by the GitHub router. `{owner}` and `{repo}` stay as `gh` template tokens — `gh` fills
+diff --git a/modules/forge-git/src/test/scala/io/forge/git/branch/BranchProtectionCacheSuite.scala b/modules/forge-git/src/test/scala/io/forge/git/branch/BranchProtectionCacheSuite.scala
+index 801edf0..daacdb2 100644
+--- a/modules/forge-git/src/test/scala/io/forge/git/branch/BranchProtectionCacheSuite.scala
++++ b/modules/forge-git/src/test/scala/io/forge/git/branch/BranchProtectionCacheSuite.scala
+@@ -2,7 +2,7 @@ package io.forge.git.branch
+ 
+ import cats.effect.{IO, Ref}
+ import io.forge.core.{BranchName, FeatureId}
+-import io.forge.git.branch.protection.{CacheKey, InMemoryBranchProtectionCache, RequiredChecksOverlay}
++import io.forge.git.branch.protection.{CacheKey, InMemoryBranchProtectionCache, OverlaySource, RequiredChecksOverlay}
+ import io.forge.git.cli.GhError
+ import io.forge.git.cli.fake.{FakeGhClient, FakeGitClient}
+ import munit.CatsEffectSuite
+@@ -83,7 +83,7 @@ class BranchProtectionCacheSuite extends CatsEffectSuite:
+       assertEquals(fresh, Some(overlay.copy(fetchedAt = now)))
+       assertEquals(stale, None)
+ 
+-  test("requiredChecksOverlay — cache miss → fetch → cache hit on second call"):
++  test("requiredChecksOverlay — cache miss → fetch → cache hit on second call (source = Protected)"):
+     val payload = ujson.Obj(
+       "contexts" -> ujson.Arr(ujson.Str("ci/build")),
+       "checks" -> ujson.Arr(ujson.Obj("context" -> ujson.Str("ci/test")))
+@@ -100,12 +100,16 @@ class BranchProtectionCacheSuite extends CatsEffectSuite:
+       second <- bm.requiredChecksOverlay(feature, base, epoch = 1L)
+     yield
+       first match
+-        case Right(o) => assertEquals(o.required, Set("ci/build", "ci/test"))
++        case Right(o) =>
++          assertEquals(o.required, Set("ci/build", "ci/test"))
++          assertEquals(o.source, OverlaySource.Protected)
+         case other => fail(s"expected Right(overlay), got $other")
+       assertEquals(first, second)
+       assertEquals(fetchCount.get(), 1)
+ 
+-  test("requiredChecksOverlay — Unauthorized → empty overlay fallback (C6 pragmatic choice)"):
++  test("requiredChecksOverlay — Unauthorized → empty overlay tagged Unauthorized (C6 pragmatic fallback)"):
++    // The fallback is the same shape as the 404/Unprotected path (empty required set), but [[OverlaySource]] keeps
++    // them distinct so Slice 4 can emit `harness.protection_unauthorized` only when the fallback actually fires.
+     val gh = FakeGhClient.builder
+       .apiBranchProtection(Left(GhError.Unauthorized("admin:repo required")))
+       .build
+@@ -114,7 +118,9 @@ class BranchProtectionCacheSuite extends CatsEffectSuite:
+       bm = BranchManagerFixture.manager(FakeGitClient.builder.build, gh, cache)
+       r <- bm.requiredChecksOverlay(feature, base, epoch = 0L)
+     yield r match
+-      case Right(overlay) => assertEquals(overlay.required, Set.empty[String])
++      case Right(overlay) =>
++        assertEquals(overlay.required, Set.empty[String])
++        assertEquals(overlay.source, OverlaySource.Unauthorized)
+       case other => fail(s"expected Right(empty overlay), got $other")
+ 
+   test("requiredChecksOverlay — RateLimited surfaces as BranchError.RateLimited"):
+@@ -129,12 +135,47 @@ class BranchProtectionCacheSuite extends CatsEffectSuite:
+       case Left(BranchError.RateLimited(Some(d))) => assertEquals(d, 42.seconds)
+       case other => fail(s"expected RateLimited, got $other")
+ 
+-  test("requiredChecksOverlay — None payload (404 unprotected) → empty required set"):
++  test("requiredChecksOverlay — None payload (404 unprotected) → empty required set tagged Unprotected"):
+     val gh = FakeGhClient.builder.apiBranchProtection(Right(None)).build
+     for
+       cache <- InMemoryBranchProtectionCache()
+       bm = BranchManagerFixture.manager(FakeGitClient.builder.build, gh, cache)
+       r <- bm.requiredChecksOverlay(feature, base, epoch = 0L)
+     yield r match
+-      case Right(overlay) => assertEquals(overlay.required, Set.empty[String])
++      case Right(overlay) =>
++        assertEquals(overlay.required, Set.empty[String])
++        assertEquals(overlay.source, OverlaySource.Unprotected)
+       case other => fail(s"expected Right(empty overlay), got $other")
++
++  test("RealGhClient.mapApiBranchProtection — NotFound flattens to Right(None) (Unprotected)"):
++    val result = io.forge.git.cli.RealGhClient.mapApiBranchProtection(Left(GhError.NotFound("HTTP 404: Not Found")))
++    IO.pure(assertEquals(result, Right(None)))
++
++  test("RealGhClient.mapApiBranchProtection — Unauthorized stays Left (regression: not flattened to None)"):
++    // Pins the slice-3 review fix. An earlier version of this mapping flattened 401/403 to `Right(None)`, which made
++    // `RealBranchManager`'s Unauthorized branch unreachable in production and erased the Slice-4 distinction between
++    // "no branch protection" and "caller lacks admin:repo".
++    val result = io.forge.git.cli.RealGhClient.mapApiBranchProtection(Left(GhError.Unauthorized("admin:repo required")))
++    IO.pure(result match
++      case Left(_: GhError.Unauthorized) => ()
++      case other => fail(s"expected Left(Unauthorized), got $other")
++    )
++
++  test("RealGhClient.mapApiBranchProtection — RateLimited stays Left (passthrough)"):
++    val rl = GhError.RateLimited(Some(30.seconds), "rate limit exceeded")
++    val result = io.forge.git.cli.RealGhClient.mapApiBranchProtection(Left(rl))
++    IO.pure(assertEquals(result, Left(rl)))
++
++  test("RealGhClient.mapApiBranchProtection — Right(json stdout) wraps as Right(Some(json))"):
++    val result = io.forge.git.cli.RealGhClient.mapApiBranchProtection(Right("""{"contexts": ["ci/build"]}"""))
++    IO.pure(result match
++      case Right(Some(json)) => assertEquals(json("contexts")(0).str, "ci/build")
++      case other => fail(s"expected Right(Some(json)), got $other")
++    )
++
++  test("RealGhClient.mapApiBranchProtection — Right(malformed stdout) surfaces as Left(ParseFailure)"):
++    val result = io.forge.git.cli.RealGhClient.mapApiBranchProtection(Right("not json {"))
++    IO.pure(result match
++      case Left(GhError.ParseFailure("branch-protection", _, _)) => ()
++      case other => fail(s"expected Left(ParseFailure), got $other")
++    )
