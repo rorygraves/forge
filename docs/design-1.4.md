@@ -327,14 +327,17 @@ wrapper therefore wraps what's there:
     is passed through unchanged; the orchestrator (Slice 1.4b
     Task 1.4.10) routes each per §7.5 / §7.6 (process failures
     retryable, others not).
-- [x] **B2.** `RealReviewerCall(connector: Connector, clock:
-  Clock[IO])` — wraps the three `connector.review*` methods.
-  The wall-clock cap is enforced via `IO.race` (above);
-  `connector.review*`'s IO is run under `.attempt` to catch
-  `ReviewerError` subclasses and turn them into the
-  `AdapterFailure` channel. Connector resource lifetime
-  ownership: connector is constructed once per orchestrator
-  run (Slice 1.4b Task 1.4.10), not per reviewer call.
+- [x] **B2.** `RealReviewerCall(connector: Connector)` — wraps
+  the three `connector.review*` methods. The wall-clock cap is
+  enforced via `IO.race(IO.sleep(limits.wallClockTimeout),
+  attempted)`; `connector.review*`'s IO is run under `.attempt`
+  to catch `ReviewerError` subclasses and turn them into the
+  `AdapterFailure` channel. No explicit `Clock[IO]` parameter:
+  `IO.sleep` already routes through the cats-effect runtime's
+  clock, which `TestControl.executeEmbed` substitutes
+  deterministically in the unit suite (B4). Connector resource
+  lifetime ownership: connector is constructed once per
+  orchestrator run (Slice 1.4b Task 1.4.10), not per reviewer call.
 - [x] **B3.** **`ReviewerCall` boundary is `ReviewerOutcome`.**
   Task 1.4.2 does **not** emit `MonitorOutcome.SettleTimeout`
   directly — `MonitorOutcome` is Slice 1.3 `SessionMonitor`'s
