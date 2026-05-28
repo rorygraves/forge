@@ -2255,6 +2255,30 @@ ticks off only after Task 1.4.17 lands.
   tightening must be confirmed by the full live 6×20 batch (G3/G4/G5)
   before C15 closes; if Claude pairs still miss the bar, G4 prompt
   tightening is the next lever (don't loosen the decoder).
+- 2026-05-29 — Task 1.4.7 first real N=20 measurement + rational fix
+  (C18 follow-up). Ran the pairs incrementally rather than the full
+  6×20 at once (maintainer steer). design-review/claude, refine/claude
+  and all codex pairs cleared at small N; **pr-review/claude measured
+  18/20** — one short of the bar, two `StructuredOutputMissing` that
+  salvage couldn't recover (bare `{`, not prose-wrapped). Diagnosed
+  without guessing (maintainer steer: "verify truncation, don't
+  band-aid"): added an opt-in raw-envelope dump
+  (`FORGE_REVIEWER_RAW_DUMP_DIR`) + a `resultDiagnostic`
+  (len/stop_reason/output_tokens/brace-balance/raw-control-chars) on
+  the failure `Left`. Offline analysis of a captured batch **ruled out
+  truncation** (every envelope parsed whole → not our draining; every
+  `stop_reason=end_turn` → model never cut off; brace-balanced; ~11.8k
+  output tokens with no cap), and a local `ujson` probe confirmed
+  `ujson` rejects raw control chars inside strings. Root cause:
+  **literal newlines inside a multi-line `summary`**. Fix:
+  `parseResultPayload` now escapes control chars *inside string
+  literals* (`normalizeControlCharsInStrings`) before re-parsing and
+  salvaging — tolerant of the model's formatting **without** the
+  rejected band-aid of forcing a one-line summary; an unescaped `"`
+  remains an unrepairable (rare) schema-fail surfaced with its reason.
+  `ClaudeConnectorSuite` 31 → 36. Remaining: re-measure
+  pr-review/claude at N=20 under the fix; **C15 stays open until all
+  six pairs clear ≥19/20.**
 
 ## 4. Carry-forward (inherited + new)
 

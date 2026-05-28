@@ -421,24 +421,78 @@ object ClaudeConnector:
                 case Some(resultStr) =>
                   parseResultPayload(resultStr, obj)
 
-  /** Parse the `result` string into the schema-conformant object. Tries a clean parse first (Claude 2.1.153 shape); on
-    * failure salvages the first balanced JSON object from prose / a Markdown fence (Claude 2.1.156, **C18**). The
-    * salvaged candidate is still parsed by `ujson`, so a non-JSON or malformed object surfaces `Left` exactly as
-    * before. The failure `Left` carries a [[resultDiagnostic]] computed from the envelope so a schema-fail says *why*
-    * (truncation vs raw control chars vs other escaping) without a re-run — see **C18**.
+  /** Parse the `result` string into the schema-conformant object, most-trusting first:
+    *   1. clean `ujson.read` (Claude 2.1.153 shape — bare JSON document); 2. re-escape raw control chars inside string
+    *      literals, then re-read (Claude 2.1.156 emits literal newlines in multi-line `summary` fields, which JSON
+    *      forbids inside strings — **C18**); 3. salvage the first balanced object out of prose / a Markdown fence, on
+    *      the normalised string (prose wrapping).
+    *
+    * Every candidate is parsed by `ujson`, so a genuinely non-JSON or malformed payload still surfaces `Left`. The
+    * failure `Left` carries the underlying `ujson` reason plus a [[resultDiagnostic]] computed from the envelope, so a
+    * schema-fail says *why* (truncation vs raw control chars vs unescaped quote) without a re-run.
     */
   private def parseResultPayload(resultStr: String, envelopeObj: collection.Map[String, Value]): Either[String, Value] =
-    try Right(ujson.read(resultStr))
-    catch
-      case _: ujson.ParsingFailedException =>
-        salvageJsonObject(resultStr) match
-          case Some(v) => Right(v)
-          case None =>
-            Left(
-              "Claude result envelope had no 'structured_output' field and its 'result' string was not valid JSON " +
-                s"(nor a salvageable JSON object). ${resultDiagnostic(resultStr, envelopeObj)} payload head: " +
-                truncate(resultStr)
-            )
+    attemptRead(resultStr) match
+      case Right(v) => Right(v)
+      case Left(rawErr) =>
+        // Claude 2.1.156 (C18): --json-schema no longer hard-enforces, so the model sometimes emits raw control chars
+        // (literal newlines/tabs in a multi-line `summary`) that JSON forbids inside strings. Escape control chars that
+        // occur *inside* string literals and retry; then fall back to salvaging an object out of prose wrapping.
+        val normalized = normalizeControlCharsInStrings(resultStr)
+        attemptRead(normalized) match
+          case Right(v) => Right(v)
+          case Left(_) =>
+            salvageJsonObject(normalized) match
+              case Some(v) => Right(v)
+              case None =>
+                Left(
+                  "Claude result envelope had no 'structured_output' field and its 'result' string was not valid JSON " +
+                    s"(nor a salvageable JSON object). underlying: $rawErr. " +
+                    s"${resultDiagnostic(resultStr, envelopeObj)} payload head: ${truncate(resultStr)}"
+                )
+
+  private def attemptRead(s: String): Either[String, Value] =
+    try Right(ujson.read(s))
+    catch case e: ujson.ParsingFailedException => Left(e.getMessage)
+
+  /** Escape raw control characters (U+0000–U+001F) that appear *inside* JSON string literals, leaving everything else
+    * (including whitespace between tokens) untouched. Claude 2.1.156 sometimes emits a multi-line `summary` with
+    * literal newlines, which `ujson` rejects ("control char in string"); re-escaping them inside strings makes the
+    * payload parseable without altering its content or constraining review length (**C18**). String/escape-state aware
+    * so an already-escaped `\\n` and control chars in prose *outside* strings are left as-is.
+    */
+  private[agents] def normalizeControlCharsInStrings(s: String): String =
+    val sb = new StringBuilder(s.length + 16)
+    var inStr = false
+    var escaped = false
+    var i = 0
+    while i < s.length do
+      val c = s.charAt(i)
+      if escaped then
+        sb.append(c)
+        escaped = false
+      else if inStr then
+        if c == '\\' then
+          sb.append(c)
+          escaped = true
+        else if c == '"' then
+          sb.append(c)
+          inStr = false
+        else if c < ' ' then sb.append(escapeControl(c))
+        else sb.append(c)
+      else
+        if c == '"' then inStr = true
+        sb.append(c)
+      i += 1
+    sb.toString
+
+  private def escapeControl(c: Char): String = c match
+    case '\n' => "\\n"
+    case '\r' => "\\r"
+    case '\t' => "\\t"
+    case '\b' => "\\b"
+    case '\f' => "\\f"
+    case _ => f"\\u${c.toInt}%04x"
 
   /** Diagnostic for a `result`-string parse failure. The signals localise the cause without eyeballing the raw bytes:
     *   - `stopReason=max_tokens` (Anthropic) → the **model** was cut off mid-output → genuine truncation.

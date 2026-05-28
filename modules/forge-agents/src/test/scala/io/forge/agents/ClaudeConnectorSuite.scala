@@ -349,6 +349,52 @@ class ClaudeConnectorSuite extends munit.FunSuite:
   test("salvageJsonObject: prose with no JSON object at all returns None"):
     assertEquals(ClaudeConnector.salvageJsonObject("I cannot comply with that."), None)
 
+  test("extractStructuredOutput: Claude 2.1.156 — recovers raw newlines/tabs inside a multi-line summary (C18)"):
+    // The dominant pr-review/claude failure: a bare object whose `summary` carries literal newlines/tabs. ujson rejects
+    // raw control chars in strings; normalising them inside string literals makes it parse. Build the envelope with
+    // ujson.Obj so `result` is a Str holding a *literal* LF/TAB — the exact shape obj("result").str yields at runtime.
+    val rawResult =
+      "{\"verdict\":\"approve\",\"blockers\":[],\"questions\":[],\"summary\":\"Line one.\nLine two with a tab\there.\"}"
+    val envelope: ujson.Value =
+      ujson.Obj("type" -> ujson.Str("result"), "is_error" -> ujson.Bool(false), "result" -> ujson.Str(rawResult))
+    val result = ClaudeConnector.extractStructuredOutput(envelope)
+    assert(result.isRight, clue = result)
+    assertEquals(result.toOption.flatMap(_.obj.get("verdict")).flatMap(_.strOpt), Some("approve"))
+    assertEquals(
+      result.toOption.flatMap(_.obj.get("summary")).flatMap(_.strOpt),
+      Some("Line one.\nLine two with a tab\there.")
+    )
+
+  test("extractStructuredOutput: Claude 2.1.156 — prose prefix AND in-string newline together (C18)"):
+    val rawResult =
+      "Here is my review:\n\n{\"verdict\":\"request_changes\",\"blockers\":[],\"questions\":[],\"summary\":\"First.\nSecond.\"}"
+    val envelope: ujson.Value = ujson.Obj("is_error" -> ujson.Bool(false), "result" -> ujson.Str(rawResult))
+    val result = ClaudeConnector.extractStructuredOutput(envelope)
+    assert(result.isRight, clue = result)
+    assertEquals(result.toOption.flatMap(_.obj.get("verdict")).flatMap(_.strOpt), Some("request_changes"))
+
+  test("extractStructuredOutput: unescaped quote inside a string is NOT silently recovered; Left names the reason"):
+    // The one failure mode the normaliser deliberately cannot repair (ambiguous). It must surface as Left (schema-fail),
+    // and the detail must carry the underlying ujson reason + the diagnostic so the batch is self-explaining.
+    val rawResult = "{\"verdict\":\"approve\",\"summary\":\"the \"default\" option\"}"
+    val envelope: ujson.Value = ujson.Obj("is_error" -> ujson.Bool(false), "result" -> ujson.Str(rawResult))
+    val result = ClaudeConnector.extractStructuredOutput(envelope)
+    assert(result.isLeft, clue = result)
+    assert(result.left.exists(_.contains("underlying:")), clue = result)
+    assert(result.left.exists(_.contains("[diag")), clue = result)
+
+  test("normalizeControlCharsInStrings: escapes control chars inside strings, leaves them outside untouched"):
+    // Inside a string: literal newline → \n. Outside (between tokens): left as-is so it can't smuggle structure in.
+    val in = "prose\nhere {\"a\":\"x\ny\"}"
+    val out = ClaudeConnector.normalizeControlCharsInStrings(in)
+    assertEquals(out, "prose\nhere {\"a\":\"x\\ny\"}")
+    // The object portion is now parseable; the leading prose newline is preserved verbatim.
+    assert(ClaudeConnector.salvageJsonObject(out).isDefined)
+
+  test("normalizeControlCharsInStrings: an already-escaped \\n is left intact (no double escaping)"):
+    val in = "{\"a\":\"x\\ny\"}"
+    assertEquals(ClaudeConnector.normalizeControlCharsInStrings(in), in)
+
   test("reviewer end-to-end against a fake CLI: schema-conformant envelope decoded to DesignReview"):
     // Fake `claude` = a small shell script that echoes a Slice 0 §3.1 shape envelope and exits 0. Sandboxed from the
     // real binary — verifies the full reviewer plumbing (argv → spawn → collect → extract → decode) works without
