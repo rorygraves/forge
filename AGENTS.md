@@ -20,7 +20,7 @@ fix this file.
 
 - **Slice 0 (CLI validation) — complete.** Findings folded into design
   v1.1 and carried forward into v1.2.
-- **Slice 1 (`forge-agents` — connectors) — ✅ closed 2026-05-26.**
+- **Slice 1.1 (`forge-agents` — connectors) — ✅ closed 2026-05-26.**
   `forge-agents` ships both connectors against the v1.2 §7.1
   trait: deterministic event parsers
   (`AskUserQuestion(toolUseId: Option[String])` carries the
@@ -45,17 +45,17 @@ fix this file.
   `ClaudeStreamingSpecSuite`, Codex headless smoke,
   `CodexStreamingSpecSuite`, and `CodexHaltWithQuestionReliabilitySuite`
   (opt-in via `FORGE_IT_RUN_RELIABILITY=1`). **Carry-forward to
-  v1.3 / Slice 4** (see [`docs/design-rationale.md`](docs/design-rationale.md)
+  v1.3 / Slice 1.4** (see [`docs/design-rationale.md`](docs/design-rationale.md)
   and [`docs/roadmap.md`](docs/roadmap.md) §7.2): **C14** —
   `CodexConnector.resumeStreamingSpec` can't honour §7.10(a)
   system-prompt prepending under the shared trait signature
   (orchestrator-side resume code, lands with Slice 2 FSM, must be
   written aware of it); **C15** — PR-D (≥19/20 native schema
-  regression suite) deferred to the reviewer-asset PR in Slice 4 (it
+  regression suite) deferred to the reviewer-asset PR in Slice 1.4 (it
   needs shipped schemas + reviewer system prompts to run). The
   orchestrator-side `HaltWithQuestion` re-spawn loop also lands with
   Slice 2 FSM — that's an orchestrator concern, not a connector one.
-- **Slice 2 (`forge-core` — FSM, Feature, ActionLog, StateCache) —
+- **Slice 1.2 (`forge-core` — FSM, Feature, ActionLog, StateCache) —
   ✅ closed 2026-05-26.** `forge-core` ships the `ForgePaths` helper
   (build-gated smell test for `".forge` literals outside the helper),
   the relocated manifest data types under `io.forge.core.manifest`
@@ -72,12 +72,12 @@ fix this file.
   4, and `RebuildState.run` with a pure `reconcile` over the four
   §11.5 partial-merge sub-cases. Property-test suite covers §17
   slice-2 invariants 1–13; invariant 14's writer side is deferred to
-  Slice 4 (**S2-5**). PR-A through PR-G in `design-2.2.md` are
-  landed. **Carry-forward to v1.3 / Slice 4** (see
+  Slice 1.4 (**S2-5**). PR-A through PR-G in `design-2.2.md` are
+  landed. **Carry-forward to v1.3 / Slice 1.4** (see
   [`docs/design-rationale.md`](docs/design-rationale.md) and
   [`docs/roadmap.md`](docs/roadmap.md) §7.2): **S2-1** through
   **S2-10**, plus the Slice-1 carry-forwards **C14** and **C15**.
-- **Slice 3 (`forge-git` — BranchManager + PRWatcher; `forge-app` —
+- **Slice 1.3 (`forge-git` — BranchManager + PRWatcher; `forge-app` —
   ProcessLock + SessionMonitor) — ✅ closed 2026-05-27.**
   `forge-git` ships `GhClient` / `GitClient` traits with
   `os-lib`-backed `RealGhClient` / `RealGitClient` (one-shot
@@ -114,7 +114,7 @@ fix this file.
   an end-of-turn flush, kill-failure resilience via
   `killError: Option[String]` on `SettleTimeout` /
   `TurnBudgetBreached`, scope limited to the four driver phases per
-  **S3-5** / S2-8 — reviewer/refine deferred to Slice 4A). PR-A
+  **S3-5** / S2-8 — reviewer/refine deferred to Slice 1.4a). PR-A
   through PR-H in `design-2.3.md` are landed. Real-`gh` + real-`git`
   integration coverage in `forge-it`: `BranchManagerIntegrationSuite`
   (opt-in via `FORGE_IT_GH_REPO`) drives clone → bootstrap-main →
@@ -122,12 +122,12 @@ fix this file.
   → prMerge → pollOnce(Merged); `ProcessLockMultiJvmSuite` (opt-in
   via `FORGE_IT_RUN_PROCLOCK`) covers the three cross-JVM
   `FileProcessLock` scenarios (live `Held`, crash-stale recovery,
-  `forceRelease` live-refusal). **Carry-forward to v1.3 / Slice 4**
+  `forceRelease` live-refusal). **Carry-forward to v1.3 / Slice 1.4**
   (see [`docs/design-rationale.md`](docs/design-rationale.md) and
   [`docs/roadmap.md`](docs/roadmap.md) §7.2): **S3-1** through
   **S3-8**, plus the Slice-1/2 carry-forwards **C14**, **C15**,
   and **S2-1** through **S2-10**.
-- Slices 4–5 scoped in design §17.
+- Slices 1.4 and 2.1 (TUI) scoped in design §17.
 - Phase 4 (Forge-instance pivot: multi-repo, daemon, parallel,
   containerised) is post-v1 and needs its own design doc before any
   code lands. See [`docs/roadmap.md`](docs/roadmap.md).
@@ -137,54 +137,229 @@ Where to look first when starting a task:
 | Question | File |
 |---|---|
 | What's the v1 contract? | `docs/forge-design-1.2.md` |
-| What's actively being worked on right now? | `docs/design-<section>.md` for the open roadmap section (see "Per-section implementation plans" below) |
+| What's actively being worked on right now? | `docs/design-<slice-id>.md` for the open Slice (see "Per-section implementation plans" below) |
 | Why was X decided that way? | `docs/design-rationale.md` |
 | What's the phase plan beyond v1? | `docs/roadmap.md` |
 | What did Slice 0 actually find? | `docs/slice-0/slice-0-report.md` |
 | What did Slice 1 find before v1.2 folded it in? | `docs/slice-1/slice-1-findings.md` (now superseded by v1.2) |
 
+## Work breakdown numbering
+
+Work is broken down hierarchically. Three levels carry IDs; the fourth
+is free-form checklists. The scheme is dotted-decimal (WBS — Work
+Breakdown Structure, the PM standard).
+
+| Level | Name | ID shape | Example |
+|---|---|---|---|
+| 1 | **Phase** | `N` | `1` = Phase 1 (Testability MVP); `4` = Phase 4 (Forge-instance pivot) |
+| 2 | **Slice** | `N.M` | `1.2` = Phase 1 Slice 2 (`forge-core` / FSM); `1.4` = Phase 1 Slice 1.4 (orchestrator) |
+| 3 | **Task** | `N.M.K` | `1.4.1` = Phase 1, Slice 1.4, Task 1 (reviewer schemas + system prompts) |
+| 4 | (sub-task) | none | free-form checklist within a Task |
+
+Names map to existing vocabulary: Phase and Slice are unchanged; "Task"
+replaces the older "Sub-PR" label (which collided with GitHub PRs).
+
+### Prefix-qualifier rule
+
+In prose, always lead with the level name on first mention in a
+document: **"Slice 1.4"**, **"Task 1.4.2"**. The bare numeric form
+(`1.4`, `1.4.2`) is only valid inside a "Slice ID" / "Task ID" column
+or when context already pins the level. Section markers from
+`forge-design-1.X.md` keep their `§` prefix (e.g. `§7.1`, `§11.3 step 5`)
+so spec references stay distinct from breakdown IDs.
+
+### Retroactive bisection
+
+If a Slice or Task needs to be split *after* it opens (work surfaced
+implicit halves, design proved larger than expected), append a letter
+suffix:
+
+- Slice 1.4 splits → **Slice 1.4a** + **Slice 1.4b**. Later sibling
+  Slices (1.5, 1.6, …) keep their numbers.
+- Task 1.4.7 splits → **Task 1.4.7a** + **Task 1.4.7b**. Same rule.
+
+Do not *plan* bisection. If a Slice is large enough that you know up
+front it's two halves, give them their own IDs (1.4 + 1.5). Letter
+suffixes are for splits that emerge during work, because they preserve
+the position of later siblings.
+
+### Sub-task checklists (level 4)
+
+Inside a Task, atomic items are free-form checkboxes — no numeric ID:
+
+```
+### Task 1.4.1 — Reviewer schemas + system prompts under ~/.forge/
+
+- [x] In-tree asset layout under `assets/reviewer/`:
+  - schemas/design-review.json, code-review.json, refine.json
+  - prompts/design-review.{claude,codex}.md, …
+- [x] `io.forge.app.bootstrap.AssetInstaller` — installIfMissing(…)
+- [x] Unit suite under modules/forge-app/src/test/scala/…
+- [x] Wire design-1.4.md into the parent docs
+- [x] Landing checklist (compile clean, tests green, scalafmt clean)
+```
+
+Cite a sub-task by Task ID + description, not by position
+("Task 1.4.1's `AssetInstaller` item"). The numbered `A1, A2` style
+the codebase used historically is retired — descriptions disambiguate
+better than position counters.
+
+### Carry-forward replacement (no parallel code series)
+
+Items that defer from one Slice to a later Slice are **not** given
+codes like `C14` or `S2-5`. Instead:
+
+1. **While Slice N.M is active**, deferrals live in
+   `design-N.Mb.md §4 Carry-forward` as plain prose items. Each names
+   *what* defers and *where* it's expected to land
+   (e.g. "Slice 1.5 reviewer assets" before Slice 1.5 has opened).
+2. **When Slice N.M+1 opens**, the `design-N.(M+1).md` author pulls
+   items from the predecessor's §4 and incorporates them as **numbered
+   Tasks** in the new plan. The §4 entry is then annotated
+   "→ became Task N.(M+1).K".
+3. **Historical codes** (C14, C15, S2-1 … S2-10, S3-1 … S3-8) stay
+   in committed history and existing docs — they are references to
+   past work, not active identifiers. Do not retroactively renumber
+   them; do not create new ones.
+
+The roadmap + the active `design-N.M.md` are the single source of
+truth for "what's left." No parallel coding scheme to maintain, no
+mapping table.
+
+### File naming
+
+`design-N.M.md` matches the Slice ID. Slice 1.4 → `docs/design-1.4.md`.
+When a Slice closes, its design file stays in-tree as the audit
+trail. The historical filenames `design-2.1.md` … `design-2.3.md`
+predate this convention; they remain as-is (closed audit trails) and
+are not renamed.
+
 ## Per-section implementation plans
 
-Each in-progress roadmap section (`docs/roadmap.md` §2.1, §2.2, …) has a
-companion `docs/design-<section>.md` carrying the detailed implementation
-plan and the checklist used to track progress. Three docs in three
-layers — read top-down on a new task:
+Each in-progress roadmap Slice (`docs/roadmap.md` §2.1, §2.2, …) has a
+companion `docs/design-<slice-id>.md` (e.g. `design-1.4.md` for Slice
+1.4) carrying the detailed implementation plan and the checklist used
+to track progress. Three docs in three layers — read top-down on a new
+task:
 
 | Layer | File | Purpose | Lifecycle |
 |---|---|---|---|
 | Contract | `docs/forge-design-1.2.md` | What the system is *for*; signatures and invariants. | Standalone revisions (`forge-design-1.x.md`) when corrections land. |
 | Phase plan | `docs/roadmap.md` | Direction, exit criteria, gates between phases. | Stays terse; ticks bullets `[~]` → `[x]` only after a section's code review passes. |
-| Implementation plan | `docs/design-<section>.md` | Per-task checklist for one roadmap section, broken into named sub-PRs. | Created when work on the section starts; lives until the section closes; ticks granular checkboxes as items land. |
+| Implementation plan | `docs/design-<slice-id>.md` | Per-Task checklist for one Slice, broken into numbered Tasks. | Created when work on the Slice starts; lives until the Slice closes; ticks granular checkboxes as items land. |
 
 ### Workflow
 
-1. **Starting a new section** — create `docs/design-<section>.md`
-   (mirror the structure of `docs/design-2.1.md`). Break the roadmap
-   bullet list into named sub-PRs (A, B, C…) and within each, atomic
-   checkbox items (A1, A2, …). Cross-reference v1.2 spec sections and
-   design-rationale entries that bear on each item.
-2. **Mid-section** — tick items off as they land. Add a dated entry to
-   the doc's `§3. Status log` whenever a sub-PR closes.
-3. **Closing a section** — only after every sub-PR has landed *and* a
-   code review on the section as a whole has passed, flip the roadmap
+1. **Starting a new Slice** — create `docs/design-<slice-id>.md`
+   (mirror the structure of an existing design file). Break the
+   roadmap bullet list into numbered **Tasks** (1.N.1, 1.N.2, …) and
+   within each, free-form checkbox items (no numeric ID). Cross-
+   reference v1.2 spec sections and design-rationale entries that bear
+   on each item. **Task 1.N.1 should prefer a thin runnable slice over
+   a doc-only opener** — see "Run code early" below.
+2. **Mid-Slice** — tick items off as they land. Add a dated entry to
+   the doc's `§3. Status log` whenever a Task closes. **Do not flip
+   `[ ]` → `[x]` in the same commit as a change still under review.**
+3. **Per-Task coherence-sweep checklist** — before declaring a Task
+   "✅ landed" (i.e. before the landing checklist passes and the
+   header flip happens), tick the items below. They are the most
+   repeatedly-burned-by gaps across Slices 1.1–1.4 and exist to
+   compress the review-round count:
+
+   - [ ] **Grep sweep on every new/changed type, signature, or state
+     name.** Every reference across this design doc, the active spec
+     revision, later Task plans, exit criterion (§0), status log
+     (§3), and dependent-Task handoffs points at the *post-change*
+     shape. No stale wording survives from the prior contract.
+   - [ ] **Sibling diff.** For every new file, locate its closest
+     sibling in the existing codebase and read both side-by-side.
+     For every modified handler/branch, ask "is the analogous branch
+     in this file or a peer file handled the same way?"
+   - [ ] **Invariants live at the helper.** Every invariant added is
+     enforced at the constructor / helper / transition function that
+     all paths funnel through — not inline at the cited call site.
+     Sibling code paths feeding the same data are checked too.
+   - [ ] **Real external shapes captured.** Any new decoder, schema,
+     flag table, or wire assertion against an external tool (gh,
+     claude, codex, pricing JSON) is grounded in a captured sample
+     (fixture under `docs/slice-N/fixtures/`, design-rationale
+     snippet, or `--help` capture) — not derived from the spec.
+   - [ ] **Tests mirror the closest existing idiom.** Subprocess /
+     streaming / async-resource tests follow the
+     close-then-drain pattern unless headless `-p '<prompt>'` mode.
+     Fake-CLI scripts mirror real-CLI blocking behaviour.
+   - [ ] **Carry-forward placed.** Anything deferred from this Task
+     is filed in `§4 Carry-forward` as a plain prose item naming the
+     destination Slice. No new C-series or SN-M codes — see
+     "Carry-forward replacement" above. Cross-cutting items that
+     also need spec-text edits get a cross-reference in
+     `docs/design-rationale.md`. "We deviate from spec §X because…"
+     in code comments is a flag, not a resolution.
+
+4. **Closing a Slice** — only after every Task has landed *and* a
+   code review on the Slice as a whole has passed, flip the roadmap
    bullet from `[~]` to `[x]`. The roadmap is the contract that the
-   section is done; design-`<section>`.md is the audit trail.
+   Slice is done; `design-<slice-id>.md` is the audit trail. The
+   close-out Task must walk the `§4 Carry-forward` list and place
+   each item somewhere durable (next-Slice numbered Task, tracking
+   issue, design-rationale deferred decision).
 
-### Active design-`<section>`.md files
+### Run code early — thin runnable Task 1 over doc-only opener
 
-- [`docs/design-2.4.md`](docs/design-2.4.md) — Slice 4 (Phase-1 MVP gate;
-  reviewer assets + `forge-specs` (4A) → headless orchestrator + REPL
-  (4B)). Opened 2026-05-27. PR-A (reviewer schemas + system prompts under
-  `~/.forge/`) is the entry point.
+The lesson from Slices 1.1–1.4 is unambiguous: Slices whose Task 1
+shipped **executing code** against the riskiest contract settled in
+1–2 review rounds; Slices whose Task 1 was a doc-pass (or a wide
+design extension without code) settled in 4–5 rounds, with each round
+surfacing the next implication of the previous round's fix.
+
+When opening a Slice:
+
+- Identify the riskiest contract — the FSM signature, the connector
+  wire shape, the JSON schema the reviewer must satisfy, the
+  pagination cursor invariant. The thing that, if wrong, invalidates
+  the rest of the Slice.
+- Make Task 1 a **thin slice that exercises it**: a 50-line spike, a
+  property-test harness against an existing module, a captured
+  real-CLI fixture plus the decoder that consumes it, a single
+  end-to-end test against a stub. Just enough to run.
+- Subsequent Tasks can do the breadth work, and they have real
+  fixtures + a proved-out contract to ground on.
+- The design doc still leads — but it absorbs feedback from running
+  code, rather than absorbing it from review rounds.
+
+This does not replace the design doc; it reorders the work inside
+each Slice. The reviewer can argue with a paragraph for three rounds;
+they can't argue with a green test.
+
+### Escalating after two same-contract rounds
+
+If two consecutive review rounds flag the same underlying contract
+(same FSM signature, same trait method, same error channel, same
+state name) in different cells, stop patching. Write a one-paragraph
+contract-reconciliation note in `§3 Status log` enumerating every
+affected surface — producers, consumers, cross-references, dependent
+Task handoffs — then patch all in one diff. Worked examples:
+`design-2.2.md` (Slice 1.2) ran 5 rounds where rounds 2–5 were all
+implications of round 1's signature change; `design-1.4.md`
+(Slice 1.4, formerly `design-2.4.md`) ran 4 rounds in the same shape.
+
+### Active design-`<slice-id>`.md files
+
+- [`docs/design-1.4.md`](docs/design-1.4.md) — Slice 1.4 (Phase-1 MVP
+  gate; reviewer assets + `forge-specs` (Slice 1.4a) → headless
+  orchestrator + REPL (Slice 1.4b)). Opened 2026-05-27. Task 1.4.1
+  (reviewer schemas + system prompts under `~/.forge/`) is the entry
+  point.
 
 Recently-closed audit trails: [`docs/design-2.1.md`](docs/design-2.1.md)
-(Slice 1, closed 2026-05-26), [`docs/design-2.2.md`](docs/design-2.2.md)
-(Slice 2, closed 2026-05-26), [`docs/design-2.3.md`](docs/design-2.3.md)
-(Slice 3, closed 2026-05-27).
+(Slice 1.1, closed 2026-05-26), [`docs/design-2.2.md`](docs/design-2.2.md)
+(Slice 1.2, closed 2026-05-26), [`docs/design-2.3.md`](docs/design-2.3.md)
+(Slice 1.3, closed 2026-05-27). Historical files retain their
+`design-2.N.md` filenames; they are sealed audit trails.
 
-Don't pre-write design-`<section>`.md files for sections that aren't
+Don't pre-write design-`<slice-id>`.md files for Slices that aren't
 being actively worked. They drift; the roadmap is enough until the
-section opens.
+Slice opens.
 
 ## Code conventions
 
@@ -212,13 +387,13 @@ Reference file for the style we're aiming at:
 
 | Module | Owns | Lands in |
 |---|---|---|
-| `forge-core` | FSM, `Feature`, `ActionLog`, `StateCache`, `RebuildState`, `Manifest` / `ManifestPatch` / `Piece` / `PieceStatus`, `PrSnapshot` ADT, `ForgePaths`, domain model, `Mode`, `Ids`, `Question`, `FeatureIdSlugger`, `Cost` / `CostTotals` | Slice 2 (manifest types relocated here per **S2-1**; `PrSnapshot` here per §3.2, correcting an earlier `AGENTS.md` row that placed it under `forge-git` — **S2-4**) |
-| `forge-agents` | `Connector`, `AgentSession`, `StreamingSession`, Claude/Codex adapters, `Reviews`, `Prompts` | Slice 1 |
-| `forge-specs` | `SpecStore`, `DocSync`, `ChangeCollector` | Slice 4 |
-| `forge-git` | `BranchManager`, `PRWatcher` | Slice 3 |
-| `forge-tui` | termflow app, panes, key bindings | Slice 5 |
-| `forge-app` | `ProcessLock`, `SessionMonitor` (Slice 3); `main`, wiring, CLI (Slice 4) | Slice 3+ |
-| `forge-it` | Integration tests against real `claude`, `codex`, `gh` | Slice 1+ |
+| `forge-core` | FSM, `Feature`, `ActionLog`, `StateCache`, `RebuildState`, `Manifest` / `ManifestPatch` / `Piece` / `PieceStatus`, `PrSnapshot` ADT, `ForgePaths`, domain model, `Mode`, `Ids`, `Question`, `FeatureIdSlugger`, `Cost` / `CostTotals` | Slice 1.2 (manifest types relocated here per **S2-1**; `PrSnapshot` here per §3.2, correcting an earlier `AGENTS.md` row that placed it under `forge-git` — **S2-4**) |
+| `forge-agents` | `Connector`, `AgentSession`, `StreamingSession`, Claude/Codex adapters, `Reviews`, `Prompts` | Slice 1.1 |
+| `forge-specs` | `SpecStore`, `DocSync`, `ChangeCollector` | Slice 1.4 |
+| `forge-git` | `BranchManager`, `PRWatcher` | Slice 1.3 |
+| `forge-tui` | termflow app, panes, key bindings | Slice 2.1 (TUI; was "Slice 5" pre-WBS) |
+| `forge-app` | `ProcessLock`, `SessionMonitor` (Slice 1.3); `main`, wiring, CLI (Slice 1.4) | Slice 1.3+ |
+| `forge-it` | Integration tests against real `claude`, `codex`, `gh` | Slice 1.1+ |
 
 A change that spans multiple modules usually means a slice boundary
 needs revisiting — surface that in the PR rather than papering over it.

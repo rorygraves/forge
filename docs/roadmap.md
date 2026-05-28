@@ -6,30 +6,30 @@
 > §17 of the design); later phases capture direction and have not yet been
 > turned into specs.
 >
-> **Status:** draft v0.8 — 2026-05-27. **Slices 1, 2, and 3 closed.**
-> Slice 1 (PR-A → PR-E in [`design-2.1.md`](design-2.1.md)) ships
+> **Status:** draft v0.8 — 2026-05-27. **Slices 1.1, 1.2, and 1.3 closed.**
+> Slice 1.1 (Task 1.1.1 → Task 1.1.5 in [`design-2.1.md`](design-2.1.md)) ships
 > both connectors against the v1.2 §7.1 streaming-spec trait with
-> real-CLI integration tests in `forge-it`. Slice 2 (PR-A → PR-G in
+> real-CLI integration tests in `forge-it`. Slice 1.2 (Task 1.2.1 → Task 1.2.7 in
 > [`design-2.2.md`](design-2.2.md)) ships `forge-core` — `ForgePaths`
 > + relocated manifest types, `FsmState`/`FsmEvent`/`Feature`,
 > `Fsm.transition` per §11, `FileActionLog` + `Feature.foldEvents`,
 > `FileStateCache` + `RebuildState.run`, and a property-test suite
-> covering the §17 slice-2 invariants. Slice 3 (PR-A → PR-H in
+> covering the §17 slice-2 invariants. Slice 1.3 (Task 1.3.1 → Task 1.3.8 in
 > [`design-2.3.md`](design-2.3.md)) ships `forge-git` (`GhClient` /
 > `GitClient` one-shot CLI seams, `PrSnapshotDecoder` + `PollBaseline`
 > with `BaselineCursor(at, seenIds)`, `BranchManager` +
 > `BranchProtectionCache`, `PRWatcher`) and `forge-app` (`ProcessLock`,
-> `SessionMonitor`) — every component the Slice-4 orchestrator needs
+> `SessionMonitor`) — every component the Slice 1.4 orchestrator needs
 > to produce `FsmEvent`s from the outside world. Carry-forwards to
-> v1.3 / Slice 4: **C14**, **C15**, **S2-1** through **S2-10**, and
+> v1.3 / Slice 1.4: **C14**, **C15**, **S2-1** through **S2-10**, and
 > **S3-1** through **S3-8** (each with a durable home in
 > [`design-rationale.md`](design-rationale.md) or §7.2 below — §7.2
 > is grouped by what closing each item requires). Next active slice:
-> 4, split dependency-shaped per v0.7 into **4A** (reviewer assets,
-> `forge-specs` repopulation, PR-D regression gate) → **4B**
+> 4, split dependency-shaped per v0.7 into **Slice 1.4a** (reviewer assets,
+> `forge-specs` repopulation, Task 1.4.7 regression gate) → **Slice 1.4b**
 > (orchestrator loop, CLI, self-hosting gate). MVP-gate recommendation
 > stays as v0.7: pick a contained, low-variance first feature, not
-> "Forge builds its own Slice 5 (TUI)".
+> "Forge builds its own Slice 2.1 (TUI)".
 
 ## 0. How to read this
 
@@ -64,7 +64,7 @@ self-hosting moment — not "all the commands compile."
 Maps 1:1 to design §17 slices 1–4. Nothing to invent at the spec level;
 risks are integration-shaped.
 
-### 2.1 Slice 1 — Agent connectors
+### 2.1 Slice 1.1 — Agent connectors
 
 `forge-agents` standalone with CLI demo + integration tests.
 
@@ -80,7 +80,7 @@ risks are integration-shaped.
 - [x] Codex sticky-settings rule (`CodexSessionSettings` value type +
   `isCompatibleForResume`, §7.10(c)).
 - [x] `ClaudeConnector` and `CodexConnector`, both
-  `schemaMechanism = Native`. Slice 1 covered: event parsers,
+  `schemaMechanism = Native`. Slice 1.1 covered: event parsers,
   `Subprocess` + `StreamingDriver` plumbing (`send` JSON-encoder hook,
   `UserMessage` mirror event, `initialUserInput`, `encodeAnswer` hooks
   per v1.2 §7.1), Claude + Codex headless driver methods, Layer 5
@@ -97,7 +97,7 @@ risks are integration-shaped.
   `cats.effect.std.Mutex`, single shared events Channel with
   resume-turn Init filtered, thread-id mismatch raises, per-turn
   failure surfaces non-zero exit / missing Result to the caller).
-  Closed 2026-05-26 by [`design-2.1.md`](design-2.1.md) PR-A → PR-E.
+  Closed 2026-05-26 by [`design-2.1.md`](design-2.1.md) Task 1.1.1 → Task 1.1.5.
 - [x] `HaltWithQuestion` parsing + re-spawn loop for Codex. Envelope
   decoder (`HaltWithQuestion.detect` / `tryParse`) lands in this
   slice; the orchestrator-side re-spawn loop lands with slice 2
@@ -108,20 +108,21 @@ risks are integration-shaped.
   `AskUserQuestion`), Codex headless smoke, `CodexStreamingSpecSuite`,
   and `CodexHaltWithQuestionReliabilitySuite` (opt-in via
   `FORGE_IT_RUN_RELIABILITY=1`) land in `forge-it`. The reviewer
-  ≥19/20 native schema regression suite (PR-D) is deferred to the
+  ≥19/20 native schema regression suite (Slice 1.1 PR-D historical; deferred to Task 1.4.7) is deferred to the
   reviewer-asset PR per design-rationale **C15**; fake-CLI
-  end-to-end reviewer coverage in `*ConnectorSuite` is the Slice-1
+  end-to-end reviewer coverage in `*ConnectorSuite` is the Slice 1.1
   bar.
 
-✅ **Slice 1 closed 2026-05-26.** Detailed history of how it got
-there (PR-A through PR-E) lives in
+✅ **Slice 1.1 closed 2026-05-26.** Detailed history of how it got
+there (Task 1.1.1 through Task 1.1.5) lives in
 [`design-2.1.md`](design-2.1.md) §3 (status log) and §4
 (carry-forward to v1.3). Carry-forward bullets — **C14** (Codex
-`resumeStreamingSpec` system-prompt prepending) and **C15** (PR-D
-deferred to Slice 4 reviewer-asset PR) — have durable homes in
+`resumeStreamingSpec` system-prompt prepending) and **C15**
+(Slice 1.1's PR-D regression suite deferred to Slice 1.4 — lands
+as Task 1.4.7) — have durable homes in
 [`design-rationale.md`](design-rationale.md) and §7.2 below.
 
-### 2.2 Slice 2 — FSM, Feature, ActionLog, StateCache
+### 2.2 Slice 1.2 — FSM, Feature, ActionLog, StateCache
 
 - [x] `ForgePaths(repoRoot)` owns every `.forge/` location; build-gated
   smell test (`ForgePathsSuite` `os.walk` sweep) blocks new
@@ -130,7 +131,7 @@ deferred to Slice 4 reviewer-asset PR) — have durable homes in
   (`io.forge.core.manifest`); spec deviation tracked as **S2-1** in
   [`design-rationale.md`](design-rationale.md).
 - [x] `FsmState` / `FsmEvent` / `Feature` / `ResumeHint` / `Action`
-  domain model with codecs (PR-B). `PrSnapshot` ADT and core-side
+  domain model with codecs (Task 1.2.2). `PrSnapshot` ADT and core-side
   reviewer-verdict projections live in `forge-core` per v1.2 §3.2.
 - [x] `Fsm.transition(feature, event, config): (Feature,
   Vector[ActionDraft])` — pure, covers every §11 lifecycle rule.
@@ -143,15 +144,15 @@ deferred to Slice 4 reviewer-asset PR) — have durable homes in
 - [x] `RebuildState.run(featureId, paths, manifestStore, log, cache)`
   with pure `reconcile` over the four §11.5 partial-merge sub-cases.
 - [x] Property-test suite covers §17 slice-2 invariants 1–13; invariant
-  14's writer-side test is deferred to Slice 4 (S2-5).
+  14's writer-side test is deferred to Slice 1.4 (S2-5).
 
-✅ **Slice 2 closed 2026-05-26.** Detailed history of how it got
-there (PR-A through PR-G) lives in
+✅ **Slice 1.2 closed 2026-05-26.** Detailed history of how it got
+there (Task 1.2.1 through Task 1.2.7) lives in
 [`design-2.2.md`](design-2.2.md) §3 (status log) and §4
 (carry-forward to v1.3). Carry-forward bullets — **S2-1** (manifest
 relocation), **S2-2** (FsmEvent ADT shape), **S2-3** (ActionLog
 durability), **S2-4** (PrSnapshot ownership in `AGENTS.md`), **S2-5**
-(writer-side atomic-merge test, Slice 4), **S2-6**
+(writer-side atomic-merge test, Slice 1.4), **S2-6**
 (`designPrFeedbackRound` projection), **S2-7** (`fsm.transition`
 payload encoding), **S2-8** (`SettleTimeout` reviewer/refine phase
 coverage), **S2-9** (`verifyAgainstLog` cache-write skip on
@@ -159,7 +160,7 @@ Consistent), **S2-10** (`audit.piece_merged` payload key tightened
 to `"p"` only) — have durable homes in
 [`design-rationale.md`](design-rationale.md) and §7.2 below.
 
-### 2.3 Slice 3 — BranchManager, PRWatcher, ProcessLock, SessionMonitor
+### 2.3 Slice 1.3 — BranchManager, PRWatcher, ProcessLock, SessionMonitor
 
 - [x] `forge-git` module skeleton — `GhClient` / `GitClient` traits
   with `os-lib`-backed `RealGhClient` / `RealGitClient` one-shot CLI
@@ -215,7 +216,7 @@ to `"p"` only) — have durable homes in
   via `killError: Option[String]` on `SettleTimeout` /
   `TurnBudgetBreached`. Scope is the four driver phases
   (`Spec`, `DesignRevision`, `Implement`, `Fixup`); reviewer/refine
-  phases deferred to Slice 4A per **S3-5** / S2-8. Trait abstractions
+  phases deferred to Slice 1.4a per **S3-5** / S2-8. Trait abstractions
   on `GhClient` / `GitClient` filed as **S3-3** (testability seam).
 - [x] Fake-`gh` unit coverage — `PrSnapshotDecoderSuite` against 11
   fixture JSON files under `gh-pr-view/` plus inline negative cases,
@@ -235,28 +236,28 @@ to `"p"` only) — have durable homes in
   prMerge → pollOnce(Merged) against real `gh` + `git`. IT surfaced
   the `reviewDecision: ""` decoder quirk now pinned as **S3-8**.
 
-✅ **Slice 3 closed 2026-05-27.** Detailed history of how it got
-there (PR-A through PR-H) lives in
+✅ **Slice 1.3 closed 2026-05-27.** Detailed history of how it got
+there (Task 1.3.1 through Task 1.3.8) lives in
 [`design-2.3.md`](design-2.3.md) §3 (status log) and §4
 (carry-forward to v1.3). Carry-forward bullets — **S3-1** through
 **S3-8** — have durable homes in
 [`design-rationale.md`](design-rationale.md) and §7.2 below.
 
-### 2.4 Slice 4 — Reviewer assets + `forge-specs` (4A) → headless orchestrator + REPL (4B)
+### 2.4 Slice 1.4 — Reviewer assets + `forge-specs` (Slice 1.4a) → headless orchestrator + REPL (Slice 1.4b)
 
-🟢 **Slice 4 open — 2026-05-27.** Implementation plan lives in
-[`design-2.4.md`](design-2.4.md) (PR-A through PR-Q across 4A + 4B).
-PR-A (reviewer schemas + system prompts under `~/.forge/`) is the
-entry point. The §2.4 bullets below stay `[~]` until PR-Q lands; the
-audit trail in `design-2.4.md` ticks per-sub-PR checklists as items
+🟢 **Slice 1.4 open — 2026-05-27.** Implementation plan lives in
+[`design-1.4.md`](design-1.4.md) (Task 1.4.1 through Task 1.4.17 across Slice 1.4a + Slice 1.4b).
+Task 1.4.1 (reviewer schemas + system prompts under `~/.forge/`) is the
+entry point. The §2.4 bullets below stay `[~]` until Task 1.4.17 lands; the
+audit trail in `design-1.4.md` ticks per-sub-PR checklists as items
 land.
 
-Slice 4 is the largest of Phase 1 and has accreted a meaningful set of
-implicit deliverables. Split dependency-shaped: 4A ships the writable
-foundation, 4B builds the orchestrator on top. **TUI deferred to
+Slice 1.4 is the largest of Phase 1 and has accreted a meaningful set of
+implicit deliverables. Split dependency-shaped: Slice 1.4a ships the writable
+foundation, Slice 1.4b builds the orchestrator on top. **TUI deferred to
 Slice 5.**
 
-**4A — reviewer assets, `forge-specs` repopulation, regression gate.**
+**Slice 1.4a — reviewer assets, `forge-specs` repopulation, regression gate.**
 
 - Reviewer schemas under
   `~/.forge/schemas/{design-review,code-review,refine}.json` per v1.2
@@ -272,15 +273,15 @@ Slice 5.**
   `forge-specs`.
 - `ChangeCollector` (Allow/Deny/Ask classification per §10.1) in
   `forge-specs`.
-- **PR-D regression suite (C15)** — ≥19/20 native schema bar on
+- **Task 1.4.7 regression suite (C15)** — ≥19/20 native schema bar on
   `reviewDesign` / `reviewPr` / `refine` against each connector.
-  Gating check on 4A close. Failure → schema/prompt tightening
-  inside 4A, not deferred further.
+  Gating check on Slice 1.4a close. Failure → schema/prompt tightening
+  inside Slice 1.4a, not deferred further.
 
-**4B — orchestrator loop, CLI, self-hosting gate.**
+**Slice 1.4b — orchestrator loop, CLI, self-hosting gate.**
 
 - Headless feature loop wiring §11 lifecycle steps through the
-  Slice-2 FSM and the Slice-3 watchers/lock/monitor.
+  Slice 1.2 FSM and the Slice 1.3 watchers/lock/monitor.
 - Line-mode REPL (no TUI) for the §17 command set: `forge new`,
   `forge spec`, `forge run`, `forge status`, `forge resume`,
   `forge reconcile`, `forge refresh-cache`, `forge abandon`,
@@ -298,16 +299,16 @@ Slice 5.**
   conversion to `HarnessError`.
 - **S2-9 `verifyAgainstLog` skip-on-consistent** — measure perf
   under orchestrator load; fix if it fires hot.
-- **S2-3 `ActionLog` sync trade-off** — only act if 4B surfaces
+- **S2-3 `ActionLog` sync trade-off** — only act if Slice 1.4b surfaces
   a per-batch perf cliff under real load.
-- **Targeted polish (§2.5)** lands as part of 4B, not as a
+- **Targeted polish (§2.5)** lands as part of Slice 1.4b, not as a
   separate slice.
 
-**MVP gate (4B exit, Phase 1 exit gate):** drive a small, concrete,
+**MVP gate (Slice 1.4b exit, Phase 1 exit gate):** drive a small, concrete,
 low-variance feature through Forge end-to-end. Pick a contained
 target — a small `forge-git` helper, a narrow `forge-app`
 reporting/replay feature, or one of the v1.3 spec-text corrections
-with tests. **Do not** pick "have Forge build its own Slice 5 (TUI)" —
+with tests. **Do not** pick "have Forge build its own Slice 2.1 (TUI)" —
 TUI is a subjective UX-iteration loop, the wrong shape for a first
 self-hosted run.
 
@@ -326,8 +327,8 @@ without them:
 ### 2.6 Architectural seams to leave open in Phase 1
 
 We know Phase 4 is coming; leaving seams costs almost nothing now. Both
-of the explicit seams below are folded into design §17 (Slice 1
-role-trait, Slice 2 paths helper) so they ship as part of the v1 work
+of the explicit seams below are folded into design §17 (Slice 1.1
+role-trait, Slice 1.2 paths helper) so they ship as part of the v1 work
 rather than as a separate "Phase 4 prep" pass:
 
 - **Paths helper (design §17 Slice 2).** Every `.forge/` location
@@ -364,7 +365,7 @@ for any new feature on this repo.
 
 Maps to design §17 slice 5 plus the polish that only real use surfaces.
 
-### 3.1 Slice 5 — TUI
+### 3.1 Slice 2.1 — TUI
 
 Termflow + Elm architecture. Panes per §3.1: status, active (streaming /
 log tail / Q&A / idle). Subjective; iterate based on what feels wrong
@@ -606,7 +607,7 @@ deferred to Phase 3+.
    pairings.
 2. **`.forge/state/` and `.forge/log/` location.** Committed audit/specs
    stay in-repo (correct, §4). Local state/log paths get routed through
-   a helper from Slice 2 onward (see §2.6 and design §17 Slice 2) so
+   a helper from Slice 1.2 onward (see §2.6 and design §17 Slice 2) so
    Phase 4 can re-root them at an instance directory without touching
    every callsite.
 
@@ -616,18 +617,18 @@ Surface here so they don't get lost between sub-PRs. Each one has an
 explicit deferred-decision entry in
 [`design-rationale.md`](design-rationale.md); the durable home for
 "what v1.3 must close" lives there. Items are grouped by what closing
-each one actually requires — Slice 4 needs to walk all four buckets
+each one actually requires — Slice 1.4 needs to walk all four buckets
 before flipping §2.4 from `[~]` to `[x]`.
 
 #### 7.2.1 Spec-text edits (close in the v1.3 revision)
 
 These need wording or example changes in `forge-design-1.3.md`; they
-do not block Slice 4 code.
+do not block Slice 1.4 code.
 
 - **S2-1 — Manifest data types live in `forge-core`, not `forge-specs`.**
   v1.3 §3.2 needs the re-attribution. Implementation already correct.
-- **S2-2 — `FsmEvent` ADT shape not enumerated in v1.2.** Slice-2
-  PR-B settled the 20-variant list. v1.3 should lift the variants
+- **S2-2 — `FsmEvent` ADT shape not enumerated in v1.2.** Slice 1.2
+  Task 1.2.2 settled the 20-variant list. v1.3 should lift the variants
   into §6 or §11 as appropriate.
 - **S2-6 — `Feature.designPrFeedbackRound: Int` projection not in
   v1.2 §6.** v1.3 §6 needs the field added to `Feature` (and
@@ -641,55 +642,55 @@ do not block Slice 4 code.
   (`{ p, prNumber, mergeCommit, mergedAt }`).
 - **C14 (spec half) — §7.10(a) "applies to resume" claim.** v1.3
   must either drop the claim or widen the trait signature to carry
-  `systemPromptPath`. Coupled to the Slice-4 orchestrator
+  `systemPromptPath`. Coupled to the Slice 1.4 orchestrator
   decision below.
 - **S3-6 — `gh pr create` has no `--json` flag.** v1.3
   design-rationale BM8 needs the wording corrected to name the
   stdout-URL parse contract (`gh pr create … | parse /pull/<n>/`);
   optionally name a two-call fallback (`gh pr create … && gh pr
   view <url> --json number`) for installations behind a
-  strict-no-stdout proxy. Slice 3 already ships the URL-regex
+  strict-no-stdout proxy. Slice 1.3 already ships the URL-regex
   parser.
 - **S3-7 — `PollBaseline` cursors are
   `BaselineCursor(at: Instant, seenIds: Set[String])`; empty-body
   posts are dropped at decode time.** v1.3 design-rationale RL2 and
   v1.2 §6 / §9 need the cursor shape, the same-second `seenIds`
   tie-breaker (one-second timestamp resolution on `gh`), and the
-  empty-body filter on `unseenComments` documented. Slice 3 already
+  empty-body filter on `unseenComments` documented. Slice 1.3 already
   ships the round-2 contract.
 - **S3-8 — `reviewDecision: ""` (empty string) decodes as `None`.**
   v1.3 §9 should note the `gh` null-flattening quirk on the
-  `reviewDecision` field alongside the field listing. Slice 3
+  `reviewDecision` field alongside the field listing. Slice 1.3
   already pins the contract via `open-fresh-no-reviews.json` +
   unit test.
 
-#### 7.2.2 Slice 4 implementation / test gates (must land before §2.4 closes)
+#### 7.2.2 Slice 1.4 implementation / test gates (must land before §2.4 closes)
 
-These need code in Slice 4, not just spec text. Each is a gating
-deliverable on the relevant sub-PR (4A or 4B per §2.4).
+These need code in Slice 1.4, not just spec text. Each is a gating
+deliverable on the relevant sub-PR (Slice 1.4a or Slice 1.4b per §2.4).
 
-- **C14 (orchestrator half).** Slice 4B orchestrator's resume path
+- **C14 (orchestrator half).** Slice 1.4b orchestrator's resume path
   either re-issues Codex role framing in the resume message, or
   (if v1.3 chose to widen the trait) calls the widened signature.
   The two halves of C14 ship coupled.
-- **C15 — Native schema regression suite (PR-D).** ≥19/20 bar on
+- **C15 — Native schema regression suite (lands as Task 1.4.7).** ≥19/20 bar on
   `reviewDesign` / `reviewPr` / `refine` for each connector, gated
-  on shipped reviewer assets in Slice 4A. Path is
+  on shipped reviewer assets in Slice 1.4a. Path is
   `~/.forge/schemas/{design-review,code-review,refine}.json`
   (matches code; design-rationale C15 wording corrected).
 - **S2-5 — Writer-side atomic-merge ordering test.** Asserted
-  against the orchestrator-loop sub-PR in Slice 4B: orchestrator
+  against the orchestrator-loop sub-PR in Slice 1.4b: orchestrator
   atomically persists `manifest.json` before the FSM transition
   action and the state-cache write (§11.5 step 1 writer side).
 - **S2-8 — `SettleTimeout` reviewer/refine coverage decision.**
-  Slice 4 picks: explicit `Fsm.transition` handlers for
+  Slice 1.4 picks: explicit `Fsm.transition` handlers for
   `SessionPhase.{DesignReview, CodeReview, Refine}` (with
   `ResumeHintCoverageSuite` rows) **or** documented
   orchestrator-side conversion of these timeouts to `HarnessError`.
 
-#### 7.2.3 Conditional watch items (fix only if Slice 4 measures the cost)
+#### 7.2.3 Conditional watch items (fix only if Slice 1.4 measures the cost)
 
-These do not need work unless Slice 4 surfaces the named cost cliff.
+These do not need work unless Slice 1.4 surfaces the named cost cliff.
 If they stay quiet under real load, they roll into v1.3 as documented
 defaults, not code changes.
 
@@ -705,14 +706,14 @@ defaults, not code changes.
 - **S3-2 — `BranchProtectionCache` is process-local in-memory.**
   Default behaviour: no on-disk persistence; epoch bumps on every
   `forge resume` re-fetch from `gh api` (~150ms per resume). Watch
-  item only — if Slice 4 surfaces a need to persist the cache
-  across orchestrator restarts, S3-2 reopens as a Slice-4 watch
+  item only — if Slice 1.4 surfaces a need to persist the cache
+  across orchestrator restarts, S3-2 reopens as a Slice 1.4 watch
   item.
 - **S3-4 — `PRWatcher.PollResult.RateLimited` is a non-failing
   stream event with a three-consecutive-rate-limit cliff.** The
   watcher emits `RateLimited(retryAfter)` once per back-off and
   promotes the Nth consecutive into `Failed(GhError.RateLimited)`.
-  Watch item only — if Slice 4 wants a tighter contract (e.g.
+  Watch item only — if Slice 1.4 wants a tighter contract (e.g.
   first rate-limit becomes a hard `Failed`, or the threshold
   becomes config-shaped), S3-4 is the anchor.
 
@@ -720,16 +721,16 @@ defaults, not code changes.
 
 - **S2-4 — `PrSnapshot` ownership doc mismatch.** v1.2 §3.2 was
   already correct; the `AGENTS.md` module-layout table was the
-  outlier and was corrected by PR-G G3. Closed.
+  outlier and was corrected by Task 1.2.7 G3. Closed.
 - **S3-1 — `forge-git` invokes `gh` / `git` via `os-lib` directly,
   not `forge-agents.Subprocess`.** Module-layout call: one-shot CLI
-  invocations don't need the streaming wrapper Slice 1 introduced
+  invocations don't need the streaming wrapper Slice 1.1 introduced
   for the long-lived Claude / Codex sessions. No v1.3 §3.2 / §3.3
   edit needed; design-rationale S3-1 captures the reasoning so a
   future contributor doesn't re-derive it.
 - **S3-3 — `GhClient` / `GitClient` trait abstractions.** v1.2 §9
   lists `BranchManager` / `PRWatcher` methods but doesn't mandate
-  an inner abstraction; Slice 3 introduces traits + `Real…` impls +
+  an inner abstraction; Slice 1.3 introduces traits + `Real…` impls +
   `Fake…` test fixtures purely as a testability seam so the §9 /
   §11.3 / §11.4 / §11.5 logic exercises don't need a real `gh`
   binary. No v1.3 spec change needed.
@@ -737,7 +738,7 @@ defaults, not code changes.
   Mirrors **S2-8** on the SessionMonitor side: the four driver
   phases are the only ones with a `Stream[IO, AgentEvent]` to
   watch; reviewer/refine are one-shot adapter calls whose
-  wall-clock caps live in Slice 4A's reviewer-asset wrappers. No
+  wall-clock caps live in Slice 1.4a's reviewer-asset wrappers. No
   separate v1.3 spec change — S2-8's resolution covers both
   sides.
 

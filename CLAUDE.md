@@ -8,36 +8,36 @@ that first; everything below is Claude-Code-specific.
 - **Implementation contract:** [`docs/forge-design-1.2.md`](docs/forge-design-1.2.md). The 1.1 revision is kept in-tree as an evolution record but is superseded.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
 - **Active implementation plan:**
-  [`docs/design-2.4.md`](docs/design-2.4.md) — Slice 4 (Phase-1 MVP
-  gate). Opened 2026-05-27. PR-A (reviewer schemas + system prompts
+  [`docs/design-1.4.md`](docs/design-1.4.md) — Slice 1.4 (Phase-1 MVP
+  gate). Opened 2026-05-27. Task 1.4.1 (reviewer schemas + system prompts
   under `~/.forge/`) is landing now. The most recent closed audit
-  trails are [`docs/design-2.3.md`](docs/design-2.3.md) (Slice 3,
+  trails are [`docs/design-2.3.md`](docs/design-2.3.md) (Slice 1.3,
   closed 2026-05-27), [`docs/design-2.2.md`](docs/design-2.2.md)
-  (Slice 2), and [`docs/design-2.1.md`](docs/design-2.1.md) (Slice
-  1). See `AGENTS.md` §"Per-section implementation plans" for the
-  pattern (sub-PR breakdown with checkbox items).
-- **Current state:** Slices 1, 2, and 3 ✅ closed 2026-05-27.
-  Slice 4 🟢 open 2026-05-27.
-  Slice 1 shipped both connectors against v1.2 §7.1 with real-CLI
-  integration coverage in `forge-it`. Slice 2 shipped `forge-core` —
+  (Slice 1.2), and [`docs/design-2.1.md`](docs/design-2.1.md) (Slice
+  1.1). See `AGENTS.md` §"Per-section implementation plans" for the
+  pattern (Task breakdown with checkbox items).
+- **Current state:** Slices 1.1, 1.2, and 1.3 ✅ closed 2026-05-27.
+  Slice 1.4 🟢 open 2026-05-27.
+  Slice 1.1 shipped both connectors against v1.2 §7.1 with real-CLI
+  integration coverage in `forge-it`. Slice 1.2 shipped `forge-core` —
   `ForgePaths`, relocated manifest data types,
   `FsmState` / `FsmEvent` / `Feature` / `ResumeHint` / `Action`
   domain model, the pure `Fsm.transition` covering every §11
   lifecycle rule, `FileActionLog` + `Feature.foldEvents`,
-  `FileStateCache` + `RebuildState.run`. Slice 3 shipped
+  `FileStateCache` + `RebuildState.run`. Slice 1.3 shipped
   `forge-git` (`GhClient` / `GitClient` one-shot CLI seams,
   `PrSnapshotDecoder` + `BaselineCursor(at, seenIds)`,
   `BranchManager` + `BranchProtectionCache`, `PRWatcher`) and
   `forge-app` (`ProcessLock`, `SessionMonitor`) — every component
-  the Slice-4 orchestrator needs to produce `FsmEvent`s from the
+  the Slice 1.4 orchestrator needs to produce `FsmEvent`s from the
   outside world. Test scope: `forge-core` 358, `forge-agents` 181,
   `forge-git` 163, `forge-app` 46, `forge-it` 10 default-on + 5
-  opt-in. **Carry-forward** to v1.3 / Slice 4 (see
+  opt-in. **Carry-forward** to v1.3 / Slice 1.4 (see
   [`docs/design-rationale.md`](docs/design-rationale.md) and
   [`docs/roadmap.md`](docs/roadmap.md) §7.2): **C14** (Codex
-  `resumeStreamingSpec` system-prompt prepending), **C15** (PR-D
-  ≥19/20 native schema regression suite deferred to the
-  reviewer-asset PR in Slice 4), **S2-1** through **S2-10**, and
+  `resumeStreamingSpec` system-prompt prepending), **C15**
+  (Slice 1.1's PR-D ≥19/20 native schema regression suite deferred
+  to Slice 1.4 — lands as Task 1.4.7), **S2-1** through **S2-10**, and
   **S3-1** through **S3-8**.
 - **Two architectural seams to preserve in v1 work:**
   - `ForgePaths` helper — no `.forge/...` literals outside it. Enforced
@@ -90,10 +90,13 @@ their CLIs. A few cross-cutting points that show up while working on
 - **Default to small, contract-conformant edits.** The v1.2 spec is
   long but settled; surprises usually mean a misread of the spec,
   not a needed change.
-- **Tick the active design-`<section>`.md as items land.** When you
-  complete a sub-PR item (e.g. `A5` in `design-2.1.md`), flip its
-  checkbox in the same change and add a one-line dated entry under
-  `§3. Status log`. Don't tick the roadmap bullet — that happens only
+- **Tick the active design-`<section>`.md as items land — but not
+  during a review round.** When you complete a Task item (e.g. `A5`
+  in `design-2.1.md`), flip its checkbox in the same change and add a
+  one-line dated entry under `§3. Status log`. Do **not** flip `[ ]`
+  → `[x]` in the same commit as a change that is still under review;
+  premature ticks mask outstanding issues and force a "round N+1 to
+  un-tick" later. Don't tick the roadmap bullet — that happens only
   after a code review on the whole section. See `AGENTS.md`
   §"Per-section implementation plans".
 - **Spec edits go to the next revision file.** Don't edit
@@ -136,9 +139,9 @@ human + agent reviewers.
   convention is `FORGE_IT_RUN_*`; document the gate in the suite
   docstring's "Opt-in by default" line. See
   `CodexHaltWithQuestionReliabilitySuite` for the pattern. Applies to
-  PR-D (reviewer regression) before it lands.
+  Task 1.4.7 (reviewer regression) before it lands.
 
-- **Consistency sweep before declaring a sub-PR item done.** For each
+- **Consistency sweep before declaring a Task item done.** For each
   new file, diff lifecycle / error handling / invariant checks against
   the closest sibling. For each invariant assertion, grep for every
   code path that touches the underlying datum and confirm the check
@@ -172,9 +175,10 @@ human + agent reviewers.
   the section close can't bury it. The C14 entry is the worked
   example.
 
-- **Section closures must explicitly carry deferrals forward.** PR-E
-  (or equivalent close-out PRs) cannot flip a roadmap `[~]` to `[x]`
-  without first walking the active `design-<section>.md`
+- **Section closures must explicitly carry deferrals forward.** The
+  close-out Task (the last numbered Task in a Slice) cannot flip a
+  roadmap `[~]` to `[x]` without first walking the active
+  `design-<slice-id>.md`
   "Carry-forward" list and placing each item somewhere durable
   (roadmap v1.3 bucket, tracking issue, or design-rationale deferred
   decision). The close-out checklist should make this a gating step,
@@ -185,5 +189,58 @@ human + agent reviewers.
   concrete options + a recommendation rather than silently expanding.
   Even in auto mode. The codex 0.130→0.133 flag drift discovery is
   the worked example.
+
+- **Run code earlier — prefer a thin runnable slice over a thicker
+  design pass.** When opening a new section, the first Task should
+  put *executing* code (or a real-CLI capture, or a property-test
+  harness against an existing module) in front of the riskiest
+  contract, not just refine the design doc. A 50-line spike that
+  proves the FSM signature or the connector wire shape catches more
+  bugs than another paragraph of prose, and gives later Tasks real
+  fixtures to ground on. Two ways this pays off: (a) the design-doc
+  review rounds compress, because the contract has already been
+  exercised; (b) the "real shape" rule below is satisfied as a
+  byproduct. Design-doc cycles that ran 4–5 rounds (design-2.2,
+  design-1.4) had no runnable code until late; Slices where Task 1
+  shipped exercisable code (Slice 1.1, Slice 1.3) settled in 1–2 rounds.
+  This does **not** license skipping the design doc — it licenses
+  reordering, so the design absorbs feedback from running code.
+
+- **Capture real external shapes before writing decoders / schemas /
+  flag tables.** Before writing code that parses output from an
+  external tool (`gh`, `claude`, `codex`, OpenAI pricing JSON, etc.)
+  or that asserts which CLI flags exist, capture a real sample:
+  `gh ... --json ... > docs/slice-N/fixtures/...`, `claude --help`,
+  the live pricing page. Pin the capture as a fixture or a
+  design-rationale snippet. Never derive field or flag names from
+  the spec, from a prior version, or from another tool — they drift.
+  Worked examples: the `gh 2.83.1` decoder that asserted on a
+  `databaseId` field gh no longer emits; the `runStreamingSpec`
+  variant that omitted `-p / --print` even though `claude --help`
+  documents it; OpenAI prices invented from memory landing in a
+  fixture. This rule extends [`io-integration-tests`] — that one is
+  about subprocess *lifecycle*; this one is about *wire shape*.
+
+- **Two rounds on the same contract → reconciliation note, not
+  another patch.** If two consecutive review rounds flag the same
+  underlying contract (the same FSM signature, the same trait
+  method, the same error channel) in different cells, stop
+  patching. Write a one-paragraph contract-reconciliation note
+  enumerating every affected surface — producers, consumers,
+  cross-references, dependent tests, exit criterion, status log,
+  later Task handoffs — then patch all in one diff. The cost of
+  the note is one paragraph; the cost of not writing it is round 3
+  and round 4. Worked example: `design-2.2.md` ran 5 rounds where
+  rounds 2–5 were all implications of round 1's signature change;
+  `design-1.4.md` ran 4 rounds with the same shape.
+
+- **`AskUserQuestion` is licensed mid-round, not just at scope-set.**
+  When a review round surfaces a finding whose fix could be either
+  "patch the cited cell" or "rewrite the surrounding contract,"
+  ask. Two options + a recommendation, in `AskUserQuestion`. One
+  question replaces 1–2 review rounds. The prior rule against
+  silent scope expansion already covers this; this bullet is an
+  explicit reminder that the same tool applies inside an active
+  review cycle, not only at the start of new work.
 
 Everything else: see [`AGENTS.md`](AGENTS.md).

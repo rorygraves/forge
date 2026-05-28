@@ -1890,7 +1890,7 @@ ticks the section.
   orchestrator atomically persists `manifest.json` before the
   state-cache write) needs an orchestrator under test, which lands
   with Slice 4's headless feature loop. **Status:** PR-G G5 walks
-  this forward; the Slice-4 `design-2.4.md` carry-forward list
+  this forward; the Slice-4 `design-1.4.md` carry-forward list
   picks it up as a gating test on the relevant sub-PR.
 - **S2-6 — `Feature.designPrFeedbackRound: Int` projection not in
   v1.2 §6** (PR-C review round 1). v1.2 §11.3 says

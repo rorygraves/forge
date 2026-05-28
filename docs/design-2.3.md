@@ -1225,7 +1225,7 @@ via env var.
       phases — alignment with **S2-8**) — filed in PR-F.
   `roadmap.md` §7.2 mirrors every S3-* entry with a Slice-4 pointer.
 - [x] **H6.** This file flipped from "active" to "audit trail" (status
-  header at the top of §0 reflects ✅ closed). `design-2.4.md`
+  header at the top of §0 reflects ✅ closed). `design-1.4.md`
   opens when Slice 4 starts (and inherits §4 below as its starting
   carry-forward list).
 
@@ -1629,7 +1629,7 @@ after PR-H lands.
   §4's expected-vs-actual list (the H1 review found no surprises;
   expected and actual sets matched 1:1). Final test scope unchanged
   from PR-G: `forge-core` 358, `forge-agents` 181, `forge-git` 163,
-  `forge-app` 46, `forge-it` 10 default-on + 5 opt-in. `design-2.4.md`
+  `forge-app` 46, `forge-it` 10 default-on + 5 opt-in. `design-1.4.md`
   opens when Slice 4A starts; it inherits §4's reconciled
   carry-forward list as its starting set.
 
