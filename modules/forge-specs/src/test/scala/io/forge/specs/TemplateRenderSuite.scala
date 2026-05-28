@@ -14,8 +14,10 @@ import java.nio.charset.StandardCharsets
   * reconcile` (Task 1.4.15) parses, fails here loudly instead of shipping a silently-changed PR body / decomposition
   * doc.
   *
-  * Regenerating goldens: run `FORGE_UPDATE_GOLDEN=1 sbt "project forge-specs" "testOnly *TemplateRenderSuite"` (or
-  * delete a stale golden — a missing golden is written rather than asserted). Inspect the diff before committing.
+  * Regenerating goldens: run `FORGE_UPDATE_GOLDEN=1 sbt "project forge-specs" "testOnly *TemplateRenderSuite"`, then
+  * inspect the diff before committing. Regeneration is the *only* path that writes a golden — without the env var a
+  * missing golden is a **failure**, not a silent write. That keeps the gate honest: adding (or renaming) a template in
+  * `Templates` without committing its golden fails CI rather than passing while mutating the working tree.
   */
 class TemplateRenderSuite extends munit.FunSuite:
 
@@ -38,12 +40,16 @@ class TemplateRenderSuite extends munit.FunSuite:
   private def checkGolden(name: String): Unit =
     val rendered = render(name)
     val goldenFile = goldenDir / s"$name.golden"
-    if updateGolden || !os.exists(goldenFile) then
+    if updateGolden then
+      // Regeneration is opt-in and the only path that writes a golden — never on a normal test run.
       os.makeDir.all(goldenDir)
       os.write.over(goldenFile, rendered)
-      // Not a failure: first-run / regeneration writes the golden so the author can inspect + commit it. CI checks out
-      // the committed goldens, so this branch only runs locally while authoring a template change.
       println(s"[TemplateRenderSuite] wrote golden $goldenFile (${rendered.length} chars)")
+    else if !os.exists(goldenFile) then
+      fail(
+        s"golden $goldenFile is missing — a template was added to Templates without committing its golden. " +
+          "Regenerate with FORGE_UPDATE_GOLDEN=1 and commit the result."
+      )
     else
       assertEquals(
         rendered,

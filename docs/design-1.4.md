@@ -651,9 +651,12 @@ the orchestrator depends on. Task 1.4.1 landed the in-tree
   shipped templates against one fixed fixture context and
   compares byte-for-byte to a checked-in golden under
   `src/test/resources/golden/<template>.golden`. Regeneration
-  is `FORGE_UPDATE_GOLDEN=1` (a missing golden is written
-  rather than asserted, so first-run authoring is ergonomic;
-  CI checks out the committed goldens). This complements
+  is opt-in via `FORGE_UPDATE_GOLDEN=1` and is the only path
+  that writes a golden; without the env var a **missing**
+  golden is a failure, not a silent write, so adding or
+  renaming a template in `Templates` without committing its
+  golden fails CI rather than passing while mutating the
+  working tree (review-round-1 finding). This complements
   `ShippedTemplateRenderSuite` (which proves the renderer
   *can* handle every construct) by pinning the exact rendered
   *output* — most importantly the §5.3 marker shape.
@@ -2077,8 +2080,8 @@ ticks off only after Task 1.4.17 lands.
   seven templates against one fixed context and compares
   byte-for-byte to checked-in goldens under
   `src/test/resources/golden/`; `FORGE_UPDATE_GOLDEN=1`
-  regenerates (missing golden is written, not asserted — CI
-  uses committed goldens). Complements
+  regenerates and is the only write path — a missing golden
+  fails rather than silently writing. Complements
   `ShippedTemplateRenderSuite` (renderer can-handle guard) by
   pinning exact output, most importantly the §5.3 marker shape.
   `forge-specs` test count 123 → 132 (+7 golden, +1 DocSync
