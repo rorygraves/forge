@@ -654,6 +654,11 @@
 **Rejected:** "Body generated from pieces/<p.id>.md + acceptance" hand-wave.
 **In v1.1:** §11.4 step 6.
 
+### T2. Templates are rendered by a hand-rolled Handlebars-subset renderer, not a third-party engine
+**Decision (Slice 1.4a, Task 1.4.4):** `forge-specs` renders `decomposition.md.hbs` (and, later, the other `.hbs` templates) via `io.forge.specs.HandlebarsLite` — a ~250-line renderer supporting the construct set the shipped templates actually use: `{{path}}` interpolation with dotted paths, `{{#if}}`, `{{#each}}` (rebinding `this`), named helpers (`statusBadge`), `{{!-- --}}` comments, and mustache standalone-line trimming. Keeps `forge-specs` at its `osLib` + `upickle` dependency floor.
+**Rejected:** Adding the Java `com.github.jknack:handlebars` engine. Full Handlebars compliance and robustness to arbitrary operator-customised templates, but a new third-party dependency (plus transitives) and a Java API to wrap, for one render path over templates Forge itself ships. The Scala `handlebars.scala` was a non-starter — Scala-2-only, won't build on 3.5.2.
+**Escape hatch:** If a future template needs constructs beyond the subset, swap in the rejected dependency — the renderer's `RenderError.{Parse,Eval}` channel and the `HandlebarsLite.render(template, root, helpers)` signature are the seam to preserve. This is a v1 module-layout call with no spec implication.
+
 ---
 
 ## Rate limiting & poll persistence

@@ -430,7 +430,7 @@ module with the persistence wrappers it actually owns.
   reader-side atomic-merge invariant — the writer side here is
   **S2-5**'s anchor (closure happens at Slice 1.4b Task 1.4.11).
 
-### Task 1.4.4 — `DocSync` (decomposition.md re-render)
+### Task 1.4.4 — `DocSync` (decomposition.md re-render)  ✅ landed 2026-05-28
 
 Per **M1** / §5.3 — `manifest.json` is the machine source of
 truth; `decomposition.md` is a rendered view. `forge reconcile`
@@ -438,7 +438,7 @@ inverse path is via the HTML-comment editable regions (Slice 1.1
 hasn't shipped that direction yet — it's a Slice 1.4b / Task 1.4.15
 polish item).
 
-- [ ] **D1.** `io.forge.specs.DocSync` trait:
+- [x] **D1.** `io.forge.specs.DocSync` trait:
   ```scala
   trait DocSync:
     def renderDecomposition(feature: FeatureId): IO[Either[DocSyncError, String]]
@@ -448,17 +448,17 @@ polish item).
   the `~/.forge/templates/decomposition.md.hbs` template,
   writes via Task 1.4.3's `SpecStore.saveDecomposition` (atomic
   temp+rename+fsync; same shape as `saveManifest`).
-- [ ] **D2.** Template engine choice — Handlebars-Scala (the
+- [x] **D2.** Template engine choice — Handlebars-Scala (the
   `decomposition.md.hbs` extension implies Handlebars) or a
   hand-rolled mustache-shaped renderer. Decision recorded in
   Task 1.4.4 against `design-rationale.md` as a v1 module-layout
   call (no spec implication). Lightweight is fine; the
   template doesn't have conditionals beyond piece-status
   badges.
-- [ ] **D3.** `DocSyncError` sealed trait —
+- [x] **D3.** `DocSyncError` sealed trait —
   `TemplateMissing(path)`, `TemplateMalformed(path, cause)`,
   `RenderFailure(cause)`, `SpecStoreFailure(spec: SpecStoreError)`.
-- [ ] **D4.** Unit suite — `DocSyncSuite` against fixture
+- [x] **D4.** Unit suite — `DocSyncSuite` against fixture
   manifests in `modules/forge-specs/src/test/resources/`:
   - Round-trip: render → write → re-read → byte-identical
     second render (idempotence).
@@ -1807,6 +1807,49 @@ ticks off only after Task 1.4.17 lands.
   committed manifest survives intact on a rejected overwrite).
   `forge-specs` test count 17 → 22. Baselines preserved;
   `sbt compile test` and `sbt scalafmtCheckAll` clean.
+- 2026-05-28 — Task 1.4.4 landed. Shipped the manifest →
+  `decomposition.md` render path per **M1** / §5.3. New
+  surface in `io.forge.specs`: `DocSync` trait
+  (`renderDecomposition` / `writeDecomposition`, both
+  `IO[Either[DocSyncError, _]]`), `FileDocSync(paths, store)`
+  (reads the template from `ForgePaths.userTemplatesDir`, the
+  manifest via the injected `SpecStore`, writes the render
+  back through `SpecStore.saveDecomposition` so the
+  atomic-write invariant is shared), `DocSyncError =
+  TemplateMissing | TemplateMalformed | RenderFailure |
+  SpecStoreFailure`, and the template engine itself,
+  `HandlebarsLite`. **D2 decision** (filed as
+  `design-rationale.md` §"PR body & templates" **T2**): a
+  hand-rolled Handlebars-subset renderer rather than a
+  third-party engine, keeping `forge-specs` at its `osLib` +
+  `upickle` floor. `HandlebarsLite` supports `{{path}}`
+  (dotted), `{{#if}}`, `{{#each}}` (rebinding `this`), named
+  helpers (`statusBadge`), `{{!-- --}}` comments, and
+  mustache standalone-line trimming; failures surface as
+  `RenderError.{Parse, Eval}`, which `FileDocSync` maps to
+  `TemplateMalformed` / `RenderFailure`. `renderDecomposition`
+  is pure over the manifest, so the byte-identical re-render
+  property `forge reconcile` (Task 1.4.15) depends on holds by
+  construction. Test coverage: `HandlebarsLiteSuite` (27
+  cases — each construct, each failure mode, standalone
+  trimming) and `DocSyncSuite` (9 cases — idempotent
+  render→write→re-read→re-render, per-`PieceStatus` badge,
+  the `feature.designPr` `{{#if}}` branch, and all four
+  error channels). `DocSyncSuite` renders the **shipped**
+  `assets/templates/decomposition.md.hbs`, wired onto the
+  `forge-specs` test classpath via a one-line
+  `Test / unmanagedResourceDirectories += .../assets` in
+  build.sbt (mirrors `forge-app`'s `Compile` wiring), so the
+  renderer can't drift from the real template. **Deviation
+  from D4 wording:** manifests are built inline via the same
+  helper shape as `FileSpecStoreSuite` (the sibling idiom)
+  rather than JSON fixtures under `test/resources/` — the
+  manifest contract stays type-checked and there's no fixture
+  to drift. `forge-specs` test count 22 → 58; baselines
+  preserved (`forge-core` 358, `forge-agents` 181,
+  `forge-git` 168, `forge-app` 94). `sbt clean compile test`
+  and `sbt scalafmtCheckAll` clean under `-Xfatal-warnings`;
+  `forge-it` still compiles.
 
 ## 4. Carry-forward (inherited + new)
 

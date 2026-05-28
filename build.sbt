@@ -69,7 +69,10 @@ lazy val `forge-specs` = (project in file("modules/forge-specs"))
   .dependsOn(`forge-core`)
   .settings(commonSettings)
   .settings(
-    libraryDependencies ++= Seq(osLib, upickle)
+    libraryDependencies ++= Seq(osLib, upickle),
+    // Slice 4 Task 1.4.4: expose the shipped `assets/templates/...` on the test classpath so DocSyncSuite renders the
+    // real `decomposition.md.hbs` (no drift between the rendered fixture and what AssetInstaller actually ships).
+    Test / unmanagedResourceDirectories += (LocalRootProject / baseDirectory).value / "assets"
   )
 
 // TUI deferred to Slice 5; termflow 0.1.0-SNAPSHOT will be a publishLocal dep when available.
