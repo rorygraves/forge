@@ -238,7 +238,7 @@ under `assets/reviewer/` in-tree, with an installer wired into
   - This file's Task 1.4.1 header flipped to "✅ landed" and a §3
     status-log entry added.
 
-### Task 1.4.2 — Reviewer-call wrappers + wall-clock cap (closes S2-8 / S3-5 partially)
+### Task 1.4.2 — Reviewer-call wrappers + wall-clock cap (closes S2-8 / S3-5 partially)  ✅ landed 2026-05-28
 
 Slice 1.3's `SessionMonitor` deliberately excluded the
 reviewer/refine phases (§17 slice 3 — only the four driver
@@ -264,7 +264,7 @@ existing connector suite plus the Task 1.4.7 regression suite, for
 no measurable gain on a one-shot blocking adapter call. The
 wrapper therefore wraps what's there:
 
-- [ ] **B1.** `io.forge.app.reviewer.ReviewerCall` trait:
+- [x] **B1.** `io.forge.app.reviewer.ReviewerCall` trait:
   ```scala
   trait ReviewerCall:
     def designReview(input: DesignReviewInput,
@@ -327,7 +327,7 @@ wrapper therefore wraps what's there:
     is passed through unchanged; the orchestrator (Slice 1.4b
     Task 1.4.10) routes each per §7.5 / §7.6 (process failures
     retryable, others not).
-- [ ] **B2.** `RealReviewerCall(connector: Connector, clock:
+- [x] **B2.** `RealReviewerCall(connector: Connector, clock:
   Clock[IO])` — wraps the three `connector.review*` methods.
   The wall-clock cap is enforced via `IO.race` (above);
   `connector.review*`'s IO is run under `.attempt` to catch
@@ -335,7 +335,7 @@ wrapper therefore wraps what's there:
   `AdapterFailure` channel. Connector resource lifetime
   ownership: connector is constructed once per orchestrator
   run (Slice 1.4b Task 1.4.10), not per reviewer call.
-- [ ] **B3.** **`ReviewerCall` boundary is `ReviewerOutcome`.**
+- [x] **B3.** **`ReviewerCall` boundary is `ReviewerOutcome`.**
   Task 1.4.2 does **not** emit `MonitorOutcome.SettleTimeout`
   directly — `MonitorOutcome` is Slice 1.3 `SessionMonitor`'s
   driver-phase surface and the reviewer wrapper has no
@@ -356,7 +356,7 @@ wrapper therefore wraps what's there:
   FSM handlers and the `ResumeHintCoverageSuite` rows. File
   the decision against **S2-8** in `design-rationale.md` once
   taken.
-- [ ] **B4.** Unit suite under
+- [x] **B4.** Unit suite under
   `modules/forge-app/src/test/scala/io/forge/app/reviewer/`:
   - `ReviewerCallWallClockSuite` — `TestControl`-driven; cap
     elapses → `Timeout` returned. Fake connector exposes an
@@ -1706,6 +1706,43 @@ ticks off only after Task 1.4.17 lands.
   rather than a misleading success. `forge-app` test count
   46 → 82 (Task 1.4.1 landing was 46 → 63; review round 1 added
   +19 cases). All baselines preserved.
+- 2026-05-28 — Task 1.4.2 landed. Shipped the
+  `io.forge.app.reviewer` boundary that wraps the three
+  one-shot `Connector.reviewDesign` / `reviewPr` / `refine`
+  calls in a wall-clock cap. New surface: `ReviewerCall`
+  trait + `ReviewerLimits(wallClockTimeout)` +
+  `ReviewerOutcome[+A] = Settled(A) | Timeout |
+  AdapterFailure(ReviewerError)`, plus `RealReviewerCall`
+  that runs each connector method under `.attempt` (so
+  `ReviewerError` sub-variants surface in the
+  `AdapterFailure` channel with identity preserved per
+  §7.6) and races it against `IO.sleep(cap)` —
+  `Timeout` wins on a stall, cancelling the in-flight
+  reviewer fiber, with subprocess cleanup left to the
+  enclosing connector `Resource` finalizer (no observable
+  kill channel surfaced — see new carry-forward **S4-3**).
+  Non-`ReviewerError` `Throwable`s propagate unchanged.
+  **B3 decision (orchestrator mapping of `Timeout`)** —
+  filed option (a) against **S2-8** in
+  `design-rationale.md`: orchestrator (Task 1.4.10) will map
+  `ReviewerOutcome.Timeout` to
+  `FsmEvent.SettleTimeout(SessionPhase.{DesignReview,
+  CodeReview, Refine}, reason)`, and Task 1.4.12 lands the
+  matching `Fsm.transition` handlers + `ResumeHintCoverageSuite`
+  rows. `MonitorOutcome` deliberately untouched — that's
+  Slice 1.3 `SessionMonitor`'s driver-phase surface.
+  Test coverage: `ReviewerCallWallClockSuite` (4 cases,
+  `TestControl`-driven — `IO.never` for each of the three
+  reviewer methods → `Timeout` with the reviewer fiber's
+  `onCancel` Ref flipped, plus a "settles before cap"
+  race-loser case) and `ReviewerCallHappySuite` (8 cases
+  — `Settled` for each method, each of the four
+  `ReviewerError` sub-variants → `AdapterFailure` with
+  variant identity preserved, plus a non-`ReviewerError`
+  propagation case). `forge-app` test count 82 → 94.
+  Baselines preserved (`forge-core` 358, `forge-agents`
+  181, `forge-git` 168); `sbt clean compile test` and
+  `sbt scalafmtCheckAll` clean; `forge-it` still compiles.
 
 ## 4. Carry-forward (inherited + new)
 
