@@ -1981,6 +1981,29 @@ ticks off only after Task 1.4.17 lands.
   `forge-app` 94). `sbt clean compile test` and
   `sbt scalafmtCheckAll` clean under `-Xfatal-warnings`;
   `forge-it` compiles.
+- 2026-05-28 — Task 1.4.5 review round 1 landed (2 findings, both
+  on the `Ask` surface the orchestrator (Task 1.4.10) will consume).
+  **F1 (default-Deny was unstructured):** the `Ask` `Question`
+  emitted `options = Vector("Allow", "Deny")` but nothing encoded
+  the §10.1 "default option Deny" — a Q&A pane had no structured
+  way to know the safe answer. Per `AskUserQuestion` (chose
+  structured field over option-ordering convention), added a
+  trailing `defaultOption: Option[String] = None` to `forge-core`
+  `Question` (driver-originated questions stay `None` — the wire
+  shape has no default; the trailing default means **zero** changes
+  to the `ReviewDecoders` / `HaltWithQuestion` call sites) and set
+  `Some("Deny")` on the ChangeCollector `Ask`. **F2 (`Ask` dropped
+  the file↔question association):** `Ask(questions: Vector[Question],
+  included)` forced the orchestrator to reconstruct which file each
+  question was about from input ordering or by parsing the path out
+  of the question text. Changed to
+  `Ask(asked: Vector[(FileChange, Question)], included)` so the
+  answer maps straight back to the file it stages and into the stage
+  plan. `ChangeCollectorStrictAskSuite` now asserts the
+  file-pairing, ordering, and `defaultOption == Some("Deny")`.
+  `forge-specs` 123 (count unchanged); all baselines preserved;
+  `sbt clean compile test`, `sbt scalafmtCheckAll`, `forge-it`
+  compile all clean.
 
 ## 4. Carry-forward (inherited + new)
 

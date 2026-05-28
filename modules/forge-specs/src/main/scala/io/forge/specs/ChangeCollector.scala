@@ -32,13 +32,14 @@ trait ChangeCollector:
   *   - [[Allow]] — every change may be staged.
   *   - [[Deny]] — at least one change is forbidden; carries every `(change, reason)` pair so the operator message can
   *     name them. `reason` is the matched deny pattern (rule 1) or a rule descriptor (rules 2–4).
-  *   - [[Ask]] — strict mode (rule 5) surfaced at least one borderline path; `questions` is one per asked path (default
-  *     option `Deny`, applied by the orchestrator on no-answer), `included` is the set that passed cleanly.
+  *   - [[Ask]] — strict mode (rule 5) surfaced at least one borderline path; `asked` pairs each borderline
+  *     [[FileChange]] with its [[Question]] (whose `defaultOption` is `Some("Deny")`) so the orchestrator can map an
+  *     answer straight back to the file it would stage, and `included` is the set that passed cleanly.
   */
 enum Classification:
   case Allow(included: Vector[FileChange])
   case Deny(denied: Vector[(FileChange, String)])
-  case Ask(questions: Vector[Question], included: Vector[FileChange])
+  case Ask(asked: Vector[(FileChange, Question)], included: Vector[FileChange])
 
 /** Default [[ChangeCollector]] implementing the §10.1 decision rules verbatim (E5).
   *
@@ -63,9 +64,9 @@ final class DefaultChangeCollector extends ChangeCollector:
       val denied = verdicts.collect { case (c, FileVerdict.Deny(reason)) => c -> reason }
       if denied.nonEmpty then Classification.Deny(denied)
       else
-        val asks = verdicts.collect { case (c, FileVerdict.Ask(q)) => c -> q }
+        val asked = verdicts.collect { case (c, FileVerdict.Ask(q)) => c -> q }
         val allowed = verdicts.collect { case (c, FileVerdict.Allow) => c }
-        if asks.nonEmpty then Classification.Ask(asks.map(_._2), allowed)
+        if asked.nonEmpty then Classification.Ask(asked, allowed)
         else Classification.Allow(allowed)
     }
 
@@ -96,7 +97,8 @@ final class DefaultChangeCollector extends ChangeCollector:
         s"Stage '$relStr'? It is not covered by staging.allowPatterns and strict mode (requireExplicitAllow) is on.",
       options = Vector("Allow", "Deny"),
       allowFreeText = false,
-      severity = QuestionSeverity.Blocking
+      severity = QuestionSeverity.Blocking,
+      defaultOption = Some("Deny") // §10.1 — the safe default when the human gives no answer
     )
 
   /** First pattern in `patterns` that matches `relStr` (a `/`-separated repo-relative path), or `None`. */
