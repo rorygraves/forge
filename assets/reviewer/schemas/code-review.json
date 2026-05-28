@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://forge.io/schemas/code-review.json",
+  "title": "PrReview",
+  "description": "Schema for forge code-review outputs (§7.1 / §10.2). Mirrors PrReview / ReviewBlocker in forge-agents/Reviews.scala. Used by both reviewer connectors via Claude --json-schema and Codex --output-schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "blockers", "summary"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["approve", "request_changes"],
+      "description": "Top-level review outcome."
+    },
+    "blockers": {
+      "type": "array",
+      "description": "Inline blockers tied to specific lines or files; empty when verdict=approve.",
+      "items": { "$ref": "#/$defs/blocker" }
+    },
+    "summary": {
+      "type": "string",
+      "description": "Human-readable summary; rendered as the top-level review comment."
+    }
+  },
+  "$defs": {
+    "blocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary"],
+      "properties": {
+        "summary": { "type": "string" },
+        "path": { "type": ["string", "null"] },
+        "line": { "type": ["integer", "null"], "minimum": 1 },
+        "anchorText": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

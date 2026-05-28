@@ -165,7 +165,7 @@ sub-PR is the durable home for each inherited item.
 
 ### 4A — Reviewer assets, `forge-specs` repopulation, regression gate
 
-### 1.1 PR A — Reviewer schemas + system prompts under `~/.forge/`
+### 1.1 PR A — Reviewer schemas + system prompts under `~/.forge/`  ✅ landed 2026-05-28
 
 The reviewer-asset shipping foundation. Slice 1 wired
 `ReviewerAssets(PerMethod(schema, systemPrompt))` through both
@@ -175,7 +175,7 @@ under `assets/reviewer/` in-tree, with an installer wired into
 `forge-app`'s bootstrap so first-run populates
 `~/.forge/{schemas,prompts}/` from the in-tree copies.
 
-- [ ] **A1.** In-tree asset layout under
+- [x] **A1.** In-tree asset layout under
   `assets/reviewer/`:
   - `schemas/design-review.json`, `code-review.json`,
     `refine.json` — JSON Schemas matching the
@@ -197,7 +197,7 @@ under `assets/reviewer/` in-tree, with an installer wired into
     `decomposition.md.hbs`, `design-pr-feedback-r<n>-answers.md.hbs`,
     `spec-answers.md.hbs`, `impl-answers.md.hbs`,
     `fixup-r<attempt>-answers.md.hbs` per §11.4 / §7.7 / §14.3.
-- [ ] **A2.** `io.forge.app.bootstrap.AssetInstaller` —
+- [x] **A2.** `io.forge.app.bootstrap.AssetInstaller` —
   `installIfMissing(home: os.Path, paths: ForgePaths): IO[Vector[InstalledAsset]]`.
   Copies in-tree assets into `~/.forge/schemas/`,
   `~/.forge/prompts/`, `~/.forge/templates/` on first run; no-op
@@ -205,7 +205,7 @@ under `assets/reviewer/` in-tree, with an installer wired into
   Per-asset `InstalledAsset(source, dest, action: Installed |
   Skipped)` so the bootstrap can log what it did. Lives in
   `forge-app` (where the entry point will live in PR-I).
-- [ ] **A3.** Unit suite under
+- [x] **A3.** Unit suite under
   `modules/forge-app/src/test/scala/io/forge/app/bootstrap/`:
   - `AssetInstallerSuite` — first-run installs every asset;
     re-run skips existing files; permission-error surfaces as
@@ -217,7 +217,7 @@ under `assets/reviewer/` in-tree, with an installer wired into
     field listed in the Scala ADT appears in the schema's
     `required` array. Catches drift where someone adds a Scala
     field but forgets to update the JSON Schema.
-- [ ] **A4.** Wire `design-2.4.md` into the parent docs:
+- [x] **A4.** Wire `design-2.4.md` into the parent docs:
   - `AGENTS.md` §"Active design-`<section>`.md files" — replace
     *(none currently open)* with the design-2.4.md pointer.
   - `CLAUDE.md` TL;DR "Active implementation plan" — replace
@@ -226,7 +226,7 @@ under `assets/reviewer/` in-tree, with an installer wired into
   - `roadmap.md` §2.4 — add a 🟢 "Slice 4 open — 2026-05-27"
     status block pointing at `design-2.4.md` with PR-A as the
     entry point. Mirror Slice 3's open-section pattern.
-- [ ] **A5.** PR-A landing checklist:
+- [x] **A5.** PR-A landing checklist:
   - `sbt clean compile` clean under `-Xfatal-warnings`.
   - `sbt test` green; baseline test counts from Slice 3 close
     (`forge-core` 358 / `forge-agents` 181 / `forge-git` 168
@@ -1651,6 +1651,38 @@ ticks off only after PR-Q lands.
   test surface grew by two suites
   (`OrchestratorPostSettleSynthesisSuite`,
   `OrchestratorRestartSuite`).
+- 2026-05-28 — PR-A landed. Shipped in-tree reviewer assets
+  under `assets/reviewer/{schemas,prompts}/` (3 JSON Schemas,
+  6 reviewer system prompts) and `assets/templates/` (6
+  templates per §11.4 / §7.7 / §14.3). `forge-app`'s sbt
+  build now adds the repo-root `assets/` as an unmanaged
+  resources directory so the leaves appear on the forge-app
+  classpath at the same relative paths. `ForgePaths` grew
+  three accessors — `userSchemasDir` / `userPromptsDir` /
+  `userTemplatesDir` — so the install destinations route
+  through the seam helper (no new `".forge` literals outside
+  `ForgePaths.scala`).
+  `io.forge.app.bootstrap.AssetInstaller.installIfMissing(paths)`
+  copies each shipped resource into the matching
+  `~/.forge/{schemas,prompts,templates}/` destination on
+  first run, returning a per-asset `InstalledAsset(source,
+  dest, Installed | Skipped)` record; existing destination
+  files are preserved (operator customisation respected) and
+  the first filesystem failure short-circuits with a typed
+  `WriteFailed(dest, cause)`. Test coverage:
+  `AssetInstallerSuite` (4 cases — first-run installs,
+  idempotent re-run, partial pre-population, write failure →
+  typed error) plus three schema-shape suites
+  (`DesignReviewSchemaShapeSuite` /
+  `PrReviewSchemaShapeSuite` / `RefineSchemaShapeSuite`, 13
+  cases total) asserting every Scala ADT field maps to a
+  schema property and required field where applicable,
+  including the conditional `patch`-required branch on
+  `refine.json` when `outcome == update_plan`. `forge-app`
+  test count grew from 46 → 63; baselines for `forge-core`
+  (358), `forge-agents` (181), `forge-git` (168) preserved.
+  `sbt scalafmtCheckAll` clean; `sbt clean compile` clean
+  under `-Xfatal-warnings`; `forge-it` still compiles.
 
 ## 4. Carry-forward (inherited + new)
 

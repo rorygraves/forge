@@ -1,0 +1,25 @@
+{{!--
+  design-pr-feedback-r<n>-answers.md.hbs — §11.3 step 2 audit of human
+  answers given during design-PR feedback resolution. PR-A ships the
+  round-1 instance as the canonical example; the orchestrator
+  parameterises the filename by `round` at render time.
+
+  Variables:
+    feature.id
+    prNumber
+    round             — 1-indexed feedback round
+    capturedAt
+    qa                — vector of { question, answer, severity }
+--}}
+# Design PR feedback (round {{round}}) — {{feature.id}}
+
+*Captured {{capturedAt}}, against design PR #{{prNumber}}.*
+
+{{#each qa}}
+## Q{{@index}}. {{this.question}}
+
+> Severity: {{this.severity}}
+
+{{this.answer}}
+
+{{/each}}

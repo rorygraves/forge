@@ -244,6 +244,13 @@ there (PR-A through PR-H) lives in
 
 ### 2.4 Slice 4 — Reviewer assets + `forge-specs` (4A) → headless orchestrator + REPL (4B)
 
+🟢 **Slice 4 open — 2026-05-27.** Implementation plan lives in
+[`design-2.4.md`](design-2.4.md) (PR-A through PR-Q across 4A + 4B).
+PR-A (reviewer schemas + system prompts under `~/.forge/`) is the
+entry point. The §2.4 bullets below stay `[~]` until PR-Q lands; the
+audit trail in `design-2.4.md` ticks per-sub-PR checklists as items
+land.
+
 Slice 4 is the largest of Phase 1 and has accreted a meaningful set of
 implicit deliverables. Split dependency-shaped: 4A ships the writable
 foundation, 4B builds the orchestrator on top. **TUI deferred to

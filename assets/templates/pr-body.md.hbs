@@ -1,0 +1,42 @@
+{{!--
+  pr-body.md.hbs — §11.4 step 6 piece PR body template.
+
+  Variables:
+    feature.id, feature.title, feature.designPr
+    piece.id, piece.order, piece.title, piece.summary
+    piece.spec        — full piece spec markdown
+    piece.attempts    — fix-up attempt count
+    auditSummary      — one-line per relevant audit action
+    mergedPieces      — vector of {id, title} merged so far
+--}}
+# {{piece.title}}
+
+> Piece **{{piece.id}}** of feature [{{feature.title}}](../specs/{{feature.id}}/design.md).
+{{#if feature.designPr}}
+> Design PR: #{{feature.designPr}}
+{{/if}}
+
+## Summary
+
+{{piece.summary}}
+
+## Spec
+
+{{piece.spec}}
+
+{{#if mergedPieces.length}}
+
+## Pieces already merged
+
+{{#each mergedPieces}}
+- `{{this.id}}` — {{this.title}}
+{{/each}}
+
+{{/if}}
+## Audit
+
+{{auditSummary}}
+
+---
+
+*Opened by [Forge](https://github.com/anthropics/forge). Reviewed by the cross-model reviewer; merged by a human after CI passes.*

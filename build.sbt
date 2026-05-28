@@ -81,7 +81,11 @@ lazy val `forge-app` = (project in file("modules/forge-app"))
   .dependsOn(`forge-core`, `forge-agents`, `forge-git`, `forge-specs`, `forge-tui`)
   .settings(commonSettings)
   .settings(
-    libraryDependencies ++= Seq(catsEffect, fs2Core, osLib, catsEffectTestkit)
+    libraryDependencies ++= Seq(catsEffect, fs2Core, osLib, catsEffectTestkit),
+    // Slice 4 PR-A: ship the in-tree reviewer assets (`assets/reviewer/{schemas,prompts}/...`,
+    // `assets/templates/...`) on the forge-app classpath. AssetInstaller reads them from there
+    // and copies into the user's `~/.forge/` on first run.
+    Compile / unmanagedResourceDirectories += (LocalRootProject / baseDirectory).value / "assets"
   )
 
 // Integration tests against real claude/codex/gh CLIs. Built last (Slice 1+). Intentionally NOT in root's

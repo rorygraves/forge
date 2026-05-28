@@ -1,0 +1,22 @@
+{{!--
+  fixup-r<attempt>-answers.md.hbs — §11.6 audit of human answers given
+  during a fix-up session (driver paused on AskUserQuestion). PR-A ships
+  the attempt-1 instance; orchestrator parameterises by `attempt`.
+
+  Variables:
+    feature.id, piece.id, prNumber, attempt
+    capturedAt
+    qa                — vector of { question, answer, severity }
+--}}
+# Fix-up Q&A (attempt {{attempt}}) — {{feature.id}} / {{piece.id}}
+
+*Captured {{capturedAt}}, against PR #{{prNumber}}.*
+
+{{#each qa}}
+## Q{{@index}}. {{this.question}}
+
+> Severity: {{this.severity}}
+
+{{this.answer}}
+
+{{/each}}

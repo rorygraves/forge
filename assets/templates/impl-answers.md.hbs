@@ -1,0 +1,20 @@
+{{!--
+  impl-answers.md.hbs — §11.4 step 4 audit of human answers given during
+  implementation (the driver paused on AskUserQuestion).
+
+  Variables:
+    feature.id, piece.id, capturedAt
+    qa                — vector of { question, answer, severity }
+--}}
+# Implementation Q&A — {{feature.id}} / {{piece.id}}
+
+*Captured {{capturedAt}}.*
+
+{{#each qa}}
+## Q{{@index}}. {{this.question}}
+
+> Severity: {{this.severity}}
+
+{{this.answer}}
+
+{{/each}}

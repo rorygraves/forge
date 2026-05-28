@@ -58,6 +58,17 @@ final class ForgePaths(val repoRoot: os.Path, val home: os.Path = os.home):
   /** `.forge/state/.lock.json` — lock holder metadata (§13). */
   val lockMetadataFile: os.Path = repoForgeDir / "state" / ".lock.json"
 
+  // --- per-user reviewer assets (§10.2 / §14.3 / §17 slice 4 PR-A) ---
+
+  /** `~/.forge/schemas/` — per-user reviewer JSON Schemas (one per §7.1 reviewer method). */
+  val userSchemasDir: os.Path = userForgeDir / "schemas"
+
+  /** `~/.forge/prompts/` — per-user reviewer + driver system-prompt files (per CLI × method). */
+  val userPromptsDir: os.Path = userForgeDir / "prompts"
+
+  /** `~/.forge/templates/` — per-user PR-body / decomposition / answer templates (§11.4 / §7.7 / §14.3). */
+  val userTemplatesDir: os.Path = userForgeDir / "templates"
+
   // --- prices (§7.10(b)) ---
 
   /** `~/.forge/prices.json` — per-user model price table. */

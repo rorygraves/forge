@@ -1,0 +1,20 @@
+{{!--
+  spec-answers.md.hbs — §11.1 step 5 audit of human answers during interactive spec.
+
+  Variables:
+    feature.id
+    capturedAt        — ISO instant
+    qa                — vector of { question, answer, severity }
+--}}
+# Spec Q&A — {{feature.id}}
+
+*Captured {{capturedAt}}.*
+
+{{#each qa}}
+## Q{{@index}}. {{this.question}}
+
+> Severity: {{this.severity}}
+
+{{this.answer}}
+
+{{/each}}

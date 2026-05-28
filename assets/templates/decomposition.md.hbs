@@ -1,0 +1,44 @@
+{{!--
+  decomposition.md.hbs — §5.3 / M1 / M2 rendered view of manifest.json.
+
+  Variables:
+    feature.id, feature.title
+    feature.baseBranch, feature.branchPrefix
+    feature.designPr  (optional)
+    pieces            — vector of {id, order, title, summary, status, prNumber?, mergeCommit?}
+
+  M2: the "Pieces" section between the BEGIN/END markers below is the
+  editable region `forge reconcile` reads back. Edits outside that
+  region are refused.
+--}}
+# {{feature.title}}
+
+> Feature **{{feature.id}}** — base branch `{{feature.baseBranch}}`,
+> branch prefix `{{feature.branchPrefix}}`.
+{{#if feature.designPr}}
+> Design PR: #{{feature.designPr}}
+{{/if}}
+
+<!-- forge:decomposition:begin -->
+## Pieces
+
+{{#each pieces}}
+### {{this.order}}. `{{this.id}}` — {{this.title}} {{statusBadge this.status}}
+
+{{this.summary}}
+
+{{#if this.prNumber}}
+- PR: #{{this.prNumber}}
+{{/if}}
+{{#if this.mergeCommit}}
+- Merge commit: `{{this.mergeCommit}}`
+{{/if}}
+
+{{/each}}
+<!-- forge:decomposition:end -->
+
+---
+
+*Rendered by [Forge](https://github.com/anthropics/forge) from
+`manifest.json`. Edit the pieces section between the markers above and
+run `forge reconcile {{feature.id}}` to apply.*

@@ -172,8 +172,10 @@ layers — read top-down on a new task:
 
 ### Active design-`<section>`.md files
 
-*(none currently open — Slice 4 opens its own `docs/design-2.4.md`
-when work starts.)*
+- [`docs/design-2.4.md`](docs/design-2.4.md) — Slice 4 (Phase-1 MVP gate;
+  reviewer assets + `forge-specs` (4A) → headless orchestrator + REPL
+  (4B)). Opened 2026-05-27. PR-A (reviewer schemas + system prompts under
+  `~/.forge/`) is the entry point.
 
 Recently-closed audit trails: [`docs/design-2.1.md`](docs/design-2.1.md)
 (Slice 1, closed 2026-05-26), [`docs/design-2.2.md`](docs/design-2.2.md)

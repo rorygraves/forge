@@ -7,15 +7,17 @@ that first; everything below is Claude-Code-specific.
 
 - **Implementation contract:** [`docs/forge-design-1.2.md`](docs/forge-design-1.2.md). The 1.1 revision is kept in-tree as an evolution record but is superseded.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
-- **Active implementation plan:** *(none currently open — Slice 4
-  opens `docs/design-2.4.md` when work starts.)* The most recent
-  closed audit trails are [`docs/design-2.3.md`](docs/design-2.3.md)
-  (Slice 3, closed 2026-05-27),
-  [`docs/design-2.2.md`](docs/design-2.2.md) (Slice 2), and
-  [`docs/design-2.1.md`](docs/design-2.1.md) (Slice 1). See
-  `AGENTS.md` §"Per-section implementation plans" for the pattern
-  (sub-PR breakdown with checkbox items).
+- **Active implementation plan:**
+  [`docs/design-2.4.md`](docs/design-2.4.md) — Slice 4 (Phase-1 MVP
+  gate). Opened 2026-05-27. PR-A (reviewer schemas + system prompts
+  under `~/.forge/`) is landing now. The most recent closed audit
+  trails are [`docs/design-2.3.md`](docs/design-2.3.md) (Slice 3,
+  closed 2026-05-27), [`docs/design-2.2.md`](docs/design-2.2.md)
+  (Slice 2), and [`docs/design-2.1.md`](docs/design-2.1.md) (Slice
+  1). See `AGENTS.md` §"Per-section implementation plans" for the
+  pattern (sub-PR breakdown with checkbox items).
 - **Current state:** Slices 1, 2, and 3 ✅ closed 2026-05-27.
+  Slice 4 🟢 open 2026-05-27.
   Slice 1 shipped both connectors against v1.2 §7.1 with real-CLI
   integration coverage in `forge-it`. Slice 2 shipped `forge-core` —
   `ForgePaths`, relocated manifest data types,

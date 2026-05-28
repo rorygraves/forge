@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://forge.io/schemas/refine.json",
+  "title": "RefineResult",
+  "description": "Schema for forge refine outputs (§14.3). Mirrors RefineResult in forge-agents/Reviews.scala. The `patch` field is required iff outcome == 'update_plan'.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["outcome", "reason"],
+  "properties": {
+    "outcome": {
+      "type": "string",
+      "enum": ["no_change", "update_plan", "reopen_design"],
+      "description": "Per §14.3: NoChange leaves the manifest untouched; UpdatePlan carries a ManifestPatch; ReopenDesign sends the feature back to DesignReviewing."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Human-readable rationale for the chosen outcome."
+    },
+    "patch": {
+      "type": "object",
+      "description": "Manifest patch in §5.4 shape; required when outcome == 'update_plan', ignored otherwise."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "outcome": { "const": "update_plan" } } },
+      "then": { "required": ["patch"] }
+    }
+  ]
+}
