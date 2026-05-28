@@ -21,7 +21,7 @@ class ShippedTemplateRenderSuite extends munit.FunSuite:
     finally in.close()
 
   private def render(name: String, ctx: Value.Obj): String =
-    HandlebarsLite.render(template(name), ctx, FileDocSync.helpers) match
+    HandlebarsLite.render(template(name), ctx, TemplateHelpers.all) match
       case Right(s) => s
       case Left(e) => fail(s"$name failed to render: $e")
 
@@ -101,7 +101,7 @@ class ShippedTemplateRenderSuite extends munit.FunSuite:
     val out = render("pr-body.md.hbs", context(Vector.empty))
     assert(!out.contains("Pieces already merged"), out)
 
-  test("answer template @index numbers questions 0-based across the qa loop"):
+  test("answer template numbers questions 1-based via questionNumber(@index)"):
     val out = render("spec-answers.md.hbs", context(Vector.empty))
-    assert(out.contains("## Q0. Why?"), out)
-    assert(out.contains("## Q1. How?"), out)
+    assert(out.contains("## Q1. Why?"), out)
+    assert(out.contains("## Q2. How?"), out)

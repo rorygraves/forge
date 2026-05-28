@@ -1896,6 +1896,22 @@ ticks off only after Task 1.4.17 lands.
   `forge-specs` test count 58 → 76; baselines preserved.
   `sbt clean compile test` and `sbt scalafmtCheckAll` clean;
   `forge-it` compiles.
+- 2026-05-28 — Task 1.4.4 review round 1 follow-up (indexing
+  UX). Kept `{{@index}}` 0-based in the renderer (matches
+  Handlebars; no surprise) but stopped shipping `Q0` in the
+  human-facing answer files: added a `questionNumber` helper
+  (0-based `@index` → 1-based display) and moved the helper
+  registry into a shared `io.forge.specs.TemplateHelpers`
+  (`statusBadge` + `questionNumber`) that `FileDocSync` and
+  the future orchestrator answer-renderer both draw from. The
+  four `*-answers.md.hbs` templates now use
+  `## Q{{questionNumber @index}}.`; `ShippedTemplateRenderSuite`
+  asserts `Q1`/`Q2` (was `Q0`/`Q1`), and `HandlebarsLiteSuite`
+  gains a helper-applied-to-`@index` row. Deliberately did
+  **not** add `{{@index + 1}}` expression support — that
+  expands the template language for no real gain.
+  `forge-specs` test count 76 → 77. Clean compile / test /
+  scalafmt; `forge-it` compiles.
 
 ## 4. Carry-forward (inherited + new)
 

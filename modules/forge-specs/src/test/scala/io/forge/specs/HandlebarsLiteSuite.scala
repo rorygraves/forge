@@ -108,6 +108,11 @@ class HandlebarsLiteSuite extends munit.FunSuite:
     val root: Value.Obj = Obj(Map("p" -> Obj(Map("status" -> Str("merged")))))
     assertEquals(render("{{badge p.status}}", root, helpers), "[merged]")
 
+  test("a helper can be applied to the @index loop variable"):
+    val helpers = Map[String, String => String]("inc" -> (s => (s.toInt + 1).toString))
+    val root: Value.Obj = Obj(Map("xs" -> Arr(Vector(Obj(Map.empty), Obj(Map.empty)))))
+    assertEquals(render("{{#each xs}}{{inc @index}} {{/each}}", root, helpers), "1 2 ")
+
   test("an unknown helper is an Eval error"):
     renderErr("{{frobnicate x}}", Obj(Map("x" -> Str("v")))) match
       case RenderError.Eval(_) => ()

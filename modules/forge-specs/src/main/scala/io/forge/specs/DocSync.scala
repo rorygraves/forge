@@ -50,7 +50,7 @@ final class FileDocSync(paths: ForgePaths, store: SpecStore) extends DocSync:
       if !os.exists(templateFile) then Left(DocSyncError.TemplateMissing(templateFile))
       else
         readTemplate().flatMap { source =>
-          HandlebarsLite.render(source, FileDocSync.context(manifest), FileDocSync.helpers) match
+          HandlebarsLite.render(source, FileDocSync.context(manifest), TemplateHelpers.all) match
             case Right(out) => Right(out)
             case Left(HandlebarsLite.RenderError.Parse(msg)) =>
               Left(DocSyncError.TemplateMalformed(templateFile, new IllegalStateException(msg)))
@@ -64,17 +64,6 @@ final class FileDocSync(paths: ForgePaths, store: SpecStore) extends DocSync:
     catch case NonFatal(t) => Left(DocSyncError.RenderFailure(t))
 
 object FileDocSync:
-
-  /** The `{{statusBadge this.status}}` helper. Plain inline-code badges (no emoji) so the rendered markdown is stable
-    * for the `forge reconcile` byte-diff and renders cleanly in any markdown viewer.
-    */
-  private[specs] def statusBadge(status: String): String = status match
-    case "pending" => "`pending`"
-    case "in_progress" => "`in progress`"
-    case "merged" => "`merged`"
-    case other => s"`$other`"
-
-  private[specs] val helpers: Map[String, String => String] = Map("statusBadge" -> statusBadge)
 
   /** Builds the render context the `decomposition.md.hbs` template binds against: `feature.*` at the root and a
     * `pieces` array of per-piece objects. Optional manifest fields map to `Absent` so the template's `{{#if}}` guards
