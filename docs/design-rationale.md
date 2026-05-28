@@ -526,6 +526,12 @@
 **Rejected:** Allow-list defaults like `allowNewFilesUnder: ["app/", "src/", "test/"]`. Scala-centric — Python/Go repos without `src/` would refuse every new file. Safety net becomes a wall.
 **In v1.1:** §10.1.
 
+### CC4. Pattern matching uses `java.nio.file.PathMatcher` glob, with a `**/`-prefix workaround
+**Decision (Slice 1.4 Task 1.4.5 E2):** Match `staging.{deny,allow}Patterns` with the built-in `FileSystems.getDefault.getPathMatcher("glob:<pattern>")` (zero new deps) against the repo-relative path. **Workaround:** Java's glob treats a leading `**/` as requiring ≥1 directory segment before the `/`, so `**/.env` matches `config/.env` but **not** a repo-root `.env` (empirically verified — a security hole, since `**/.env` is a §18 default deny pattern meant to block secrets anywhere). For any `**/`-prefixed pattern the matcher therefore also compiles the prefix-stripped variant (`.env`), so the pattern matches the file at depth 0 *and* nested. `classify` is pure over `(repoRoot, Vector[FileChange], StagingConfig)` — no filesystem or git access — so a malformed operator glob surfaces as the `getPathMatcher` `PatternSyntaxException` raised into the `IO`, not a typed error (config validation is the Task 1.4.9 loader's job).
+**Rejected:** (b) os-lib's native `**` matching and (c) a hand-rolled matcher — both more code / risk than the stdlib glob plus a one-line prefix workaround.
+**Reason rule 4 (gitignore) needs a `FileChange.gitIgnored` flag:** the pure classifier can't shell out to `git check-ignore` (`forge-specs` has no `forge-git` dep), so the orchestrator (Task 1.4.10), which owns the git seam, populates the bit from `git status --porcelain --ignored`. The carve-out ("unless under `.forge/specs/...`") routes through `ForgePaths.specsRoot` (new accessor) so no `.forge` literal escapes the path seam.
+**In v1.2:** §10.1 / §18.
+
 ---
 
 ## Budget enforcement

@@ -22,8 +22,11 @@ final class ForgePaths(val repoRoot: os.Path, val home: os.Path = os.home):
 
   // --- per-feature spec assets (committed) ---
 
+  /** `.forge/specs/` — root of the committed per-feature spec tree. */
+  val specsRoot: os.Path = repoForgeDir / "specs"
+
   /** `.forge/specs/<feature>/` — committed feature spec directory. */
-  def featureSpecDir(id: FeatureId): os.Path = repoForgeDir / "specs" / id.value
+  def featureSpecDir(id: FeatureId): os.Path = specsRoot / id.value
 
   /** `.forge/specs/<feature>/design.md`. */
   def design(id: FeatureId): os.Path = featureSpecDir(id) / "design.md"

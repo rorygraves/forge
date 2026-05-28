@@ -467,13 +467,13 @@ polish item).
   - Missing template surfaces `TemplateMissing` not a generic
     `IoFailure`.
 
-### Task 1.4.5 — `ChangeCollector` (Allow / Deny / Ask)
+### Task 1.4.5 — `ChangeCollector` (Allow / Deny / Ask)  ✅ landed 2026-05-28
 
 Per §10.1. The decision-rich piece: deny-pattern globbing,
 allow-pattern overlay, the "Ask" path that bridges into the
 driver's `AskUserQuestion` mechanism.
 
-- [ ] **E1.** `io.forge.specs.ChangeCollector` trait:
+- [x] **E1.** `io.forge.specs.ChangeCollector` trait:
   ```scala
   trait ChangeCollector:
     def classify(repoRoot: os.Path,
@@ -492,14 +492,26 @@ driver's `AskUserQuestion` mechanism.
   returns Boolean only; Task 1.4.5 extends `GitClient` if needed
   with a `changedFiles` method, or reads the porcelain
   output directly via `os.proc`).
-- [ ] **E2.** Pattern matching — adopt one of (a)
+  **As landed:** `classify` *consumes* `Vector[FileChange]`, so
+  the porcelain → `FileChange` production stays with the
+  orchestrator (Task 1.4.10) — `GitClient` was **not** extended.
+  `FileChange` gained a `gitIgnored: Boolean = false` field
+  (deviation from the E1 sketch) because the pure, git-less
+  classifier needs it to apply rule 4; the orchestrator
+  populates it from `git status --porcelain --ignored`. See
+  design-rationale **CC4**.
+- [x] **E2.** Pattern matching — adopt one of (a)
   `java.nio.file.PathMatcher` glob syntax (built-in;
   `glob:**/.env` matches v1.2 §18 patterns), (b)
   `os-lib`'s native `**` matching, or (c) a hand-rolled
   matcher. v1.2 §18 patterns use `**` for any-depth and
   `*` for single-segment — picking (a) keeps zero new
   deps. Decision recorded in Task 1.4.5.
-- [ ] **E3.** `StagingConfig` shape per v1.2 §18:
+  **As landed:** chose (a) plus a `**/`-prefix workaround —
+  Java's glob `**/.env` does **not** match a repo-root `.env`
+  (empirically verified), so each `**/`-prefixed pattern also
+  compiles the prefix-stripped variant. Filed as **CC4**.
+- [x] **E3.** `StagingConfig` shape per v1.2 §18:
   ```scala
   final case class StagingConfig(
     requireExplicitAllow: Boolean,        // default false
@@ -508,13 +520,20 @@ driver's `AskUserQuestion` mechanism.
   ) derives ReadWriter
   ```
   Loaded by the orchestrator from `.forge/config.json` (Task 1.4.9);
-  Task 1.4.5 just consumes it.
-- [ ] **E4.** F7 phase-aware denial — the **classification**
+  Task 1.4.5 just consumes it. **As landed:** defined in
+  `io.forge.specs.StagingConfig` with default args (so a partial
+  `staging` JSON merges the §18 defaults) and a
+  `StagingConfig.DefaultDenyPatterns` companion val as the single
+  source of truth for the §18 deny list (Task 1.4.9's `ForgeConfig`
+  default draws from it).
+- [x] **E4.** F7 phase-aware denial — the **classification**
   produced by ChangeCollector is phase-agnostic; the
   orchestrator (Slice 1.4b Task 1.4.10) wires the result into
   `ResumeHint.ResolveLocalImplementationChanges` (pre-PR) vs
   `RunAnotherFixup` (post-PR) per §11.4 step 6 / §11.6.
-- [ ] **E5.** Decision rules per v1.2 §10.1 (re-stated so the
+  **As landed:** `Classification` carries no phase; the
+  orchestrator owns the `ResumeHint` mapping (no code in Task 1.4.5).
+- [x] **E5.** Decision rules per v1.2 §10.1 (re-stated so the
   implementation tracks the spec verbatim):
   1. Path matches `staging.denyPatterns` → `Deny`.
   2. Path is outside the repo root → `Deny`.
@@ -531,7 +550,17 @@ driver's `AskUserQuestion` mechanism.
   it. The Slice 1.4 review caught an earlier draft that
   conflated "filter" with the spec contract; this rule list
   is the authoritative version.
-- [ ] **E6.** Unit suite under
+  **As landed:** rules evaluate in spec order with two
+  implementation notes: (i) the outside-repo check (rule 2)
+  runs first as a guard so deny-pattern globbing never sees a
+  `../`-escaped path (all of rules 1–4 yield `Deny`, so the
+  reorder changes only the reported *reason*, never the
+  outcome); (ii) batch aggregation is `Deny` > `Ask` > `Allow`
+  — a single denied path blocks the whole stage, and any
+  unresolved `Ask` holds it. The rule-4 carve-out routes
+  through `ForgePaths.specsRoot` (new accessor) to keep the
+  `.forge` path seam intact.
+- [x] **E6.** Unit suite under
   `modules/forge-specs/src/test/scala/io/forge/specs/`:
   - `ChangeCollectorAllowSuite` — clean changes pass through
     (rule 5 lenient default).
@@ -1912,6 +1941,46 @@ ticks off only after Task 1.4.17 lands.
   expands the template language for no real gain.
   `forge-specs` test count 76 → 77. Clean compile / test /
   scalafmt; `forge-it` compiles.
+- 2026-05-28 — Task 1.4.5 landed. Shipped `io.forge.specs.ChangeCollector`
+  — the §10.1 Allow / Deny / Ask classifier — plus `StagingConfig`
+  and `FileChange` / `FileChangeKind`. `ChangeCollector.classify`
+  is **pure** over `(repoRoot, Vector[FileChange], StagingConfig)`
+  (no filesystem / git access); `DefaultChangeCollector`
+  implements the five §10.1 rules with two notes: (i) the
+  outside-repo guard (rule 2) runs first so deny-pattern globbing
+  never sees a `../`-escaped path — all of rules 1–4 yield `Deny`
+  so the reorder only changes the reported reason, not the
+  outcome; (ii) batch aggregation is `Deny` > `Ask` > `Allow`.
+  **E2 decision (filed as design-rationale CC4):** glob matching
+  via `java.nio.file.PathMatcher` (zero new deps) with a
+  `**/`-prefix workaround — Java's glob `**/.env` does **not**
+  match a repo-root `.env` (empirically verified; a security hole
+  since `**/.env` is a §18 default deny), so each `**/`-prefixed
+  pattern also compiles the prefix-stripped variant. **Deviation
+  from the E1 sketch:** `FileChange` gained a
+  `gitIgnored: Boolean = false` field because the git-less
+  classifier can't compute rule 4 itself — the orchestrator
+  (Task 1.4.10), which owns the git seam, populates it from
+  `git status --porcelain --ignored`. The rule-4 carve-out
+  ("unless under `.forge/specs/...`") routes through a new
+  `ForgePaths.specsRoot` accessor so no `.forge` literal escapes
+  the path seam (`ForgePathsSuite`'s `os.walk` sweep stays green);
+  `featureSpecDir` now derives from `specsRoot`. `StagingConfig`
+  uses default args (a partial `staging` JSON merges the §18
+  defaults) and exposes `StagingConfig.DefaultDenyPatterns` as the
+  single source of truth for the §18 deny list (Task 1.4.9's
+  `ForgeConfig` default will draw from it). Test coverage: the
+  five E6 suites — `ChangeCollectorAllowSuite` (4),
+  `ChangeCollectorDenySuite` (36 — every §18 deny pattern at root
+  *and* nested depth, rules 2–4, multi-offender listing),
+  `ChangeCollectorStrictAllowSuite` (2),
+  `ChangeCollectorStrictAskSuite` (2 — well-formed `Question`,
+  mixed allow/ask set), `ChangeCollectorDenyPrecedesAllowSuite`
+  (2). `forge-specs` test count 77 → 123; baselines preserved
+  (`forge-core` 358, `forge-agents` 181, `forge-git` 168,
+  `forge-app` 94). `sbt clean compile test` and
+  `sbt scalafmtCheckAll` clean under `-Xfatal-warnings`;
+  `forge-it` compiles.
 
 ## 4. Carry-forward (inherited + new)
 
