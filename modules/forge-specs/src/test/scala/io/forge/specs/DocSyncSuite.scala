@@ -9,8 +9,15 @@ import java.nio.charset.StandardCharsets
 import java.time.Instant
 
 /** Task 1.4.4 D4 — `FileDocSync` against the **shipped** `decomposition.md.hbs` (loaded from the test classpath via the
-  * `assets/` unmanaged resource dir wired in build.sbt), so a drift between the renderer and the real template is
-  * caught here rather than at first run.
+  * `assets/` unmanaged resource dir wired in build.sbt), so the renderer can't drift from the template `AssetInstaller`
+  * actually installs.
+  *
+  * **Scope note:** the shipped template is still Task 1.4.1's placeholder — it carries coarse
+  * `forge:decomposition:begin/end` comment markers, NOT §5.3's reconcile marker set (`forge:order-start`/`-end`,
+  * per-piece `forge:piece`, `forge:editable-summary`, `forge:status`). Shipping the §5.3-complete template is Task
+  * 1.4.6 F2's job; `forge reconcile` parsing of those regions is Task 1.4.15. This suite verifies DocSync's render /
+  * write / error behaviour and that the renderer passes comment markers through verbatim — it does NOT assert the §5.3
+  * reconcile contract.
   *
   * Covers: idempotent render → write → re-read → re-render (byte-identical), the per-`PieceStatus` badge, the
   * `feature.designPr` `{{#if}}` branch, and the four `DocSyncError` channels (`TemplateMissing`, `TemplateMalformed`,
@@ -112,7 +119,7 @@ class DocSyncSuite extends munit.FunSuite:
 
   // --- D4: per-PieceStatus badge ---------------------------------------------
 
-  tempFixture.test("each PieceStatus renders its badge and the editable-region markers"): root =>
+  tempFixture.test("each PieceStatus renders its badge; comment markers pass through verbatim"): root =>
     val (paths, store, sync) = docSync(root)
     installTemplate(paths)
     store.saveManifest(FeatureA, mixedManifest).unsafeRunSync()
@@ -120,6 +127,8 @@ class DocSyncSuite extends munit.FunSuite:
     assert(out.contains("`merged`"), out)
     assert(out.contains("`in progress`"), out)
     assert(out.contains("`pending`"), out)
+    // Renderer preserves HTML-comment markers verbatim. These are Task 1.4.1's coarse placeholders, NOT §5.3's
+    // forge:order-start/piece/editable-summary/status reconcile markers (Task 1.4.6 F2) — see the suite scope note.
     assert(out.contains("<!-- forge:decomposition:begin -->"), out)
     assert(out.contains("<!-- forge:decomposition:end -->"), out)
     // The merged piece's optional PR / merge-commit lines render; the pending piece's do not.

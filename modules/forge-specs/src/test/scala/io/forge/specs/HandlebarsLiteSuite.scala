@@ -76,6 +76,27 @@ class HandlebarsLiteSuite extends munit.FunSuite:
     )
     assertEquals(render("{{#each items}}{{this.n}}{{#if this.flag}}!{{/if}} {{/each}}", root), "a! b ")
 
+  // --- array .length / @index ------------------------------------------------
+
+  test(".length on an array resolves to the element count"):
+    val root: Value.Obj = Obj(Map("xs" -> Arr(Vector(Str("a"), Str("b"), Str("c")))))
+    assertEquals(render("{{xs.length}}", root), "3")
+
+  test("#if x.length is truthy for a non-empty array"):
+    val root: Value.Obj = Obj(Map("xs" -> Arr(Vector(Str("a")))))
+    assertEquals(render("{{#if xs.length}}some{{/if}}", root), "some")
+
+  test("#if x.length is falsy for an empty array (numeric 0)"):
+    val root: Value.Obj = Obj(Map("xs" -> Arr(Vector.empty)))
+    assertEquals(render("a{{#if xs.length}}some{{/if}}b", root), "ab")
+
+  test("@index exposes the 0-based loop index inside #each"):
+    val root: Value.Obj = Obj(Map("xs" -> Arr(Vector(Obj(Map("n" -> Str("a"))), Obj(Map("n" -> Str("b")))))))
+    assertEquals(render("{{#each xs}}{{@index}}:{{this.n}} {{/each}}", root), "0:a 1:b ")
+
+  test("@index outside any #each resolves to empty"):
+    assertEquals(render("[{{@index}}]", Obj(Map.empty)), "[]")
+
   // --- helpers ---------------------------------------------------------------
 
   test("a two-token interpolation invokes a registered helper"):
@@ -143,5 +164,25 @@ class HandlebarsLiteSuite extends munit.FunSuite:
 
   test("an unknown block helper is a Parse error"):
     renderErr("{{#wat}}{{/wat}}") match
+      case RenderError.Parse(_) => ()
+      case other => fail(s"expected Parse, got $other")
+
+  test("an #if with no argument is a Parse error"):
+    renderErr("{{#if}}body{{/if}}") match
+      case RenderError.Parse(_) => ()
+      case other => fail(s"expected Parse, got $other")
+
+  test("an #each with no argument is a Parse error"):
+    renderErr("{{#each}}body{{/each}}") match
+      case RenderError.Parse(_) => ()
+      case other => fail(s"expected Parse, got $other")
+
+  test("an empty {{}} tag is a Parse error"):
+    renderErr("a{{}}b") match
+      case RenderError.Parse(_) => ()
+      case other => fail(s"expected Parse, got $other")
+
+  test("a whitespace-only {{ }} tag is a Parse error"):
+    renderErr("a{{   }}b") match
       case RenderError.Parse(_) => ()
       case other => fail(s"expected Parse, got $other")

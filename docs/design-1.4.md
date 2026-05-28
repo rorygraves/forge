@@ -567,7 +567,15 @@ the orchestrator depends on. Task 1.4.1 landed the in-tree
 - [ ] **F2.** `decomposition.md.hbs` — Already touched by
   Task 1.4.4's renderer. Task 1.4.6 ships the actual v1 template content
   (status badges, piece headers, editable-region HTML
-  comments per **M2** / §5.3).
+  comments per **M2** / §5.3). **Gap from Task 1.4.4:** the
+  Task 1.4.1 placeholder ships coarse
+  `forge:decomposition:begin/end` markers, **not** §5.3's
+  reconcile marker set (`forge:order-start`/`-end`, per-piece
+  `forge:piece`, `forge:editable-summary`, `forge:status`).
+  F2 must replace them with the §5.3 markers **and** tighten
+  `DocSyncSuite` (which today only checks comment-marker
+  passthrough, with a scope note) to assert the §5.3 region
+  shape `forge reconcile` (Task 1.4.15) parses.
 - [ ] **F3.** Per-phase answer templates:
   - `spec-answers.md.hbs` — for §11.1 step 5.
   - `design-review-r<n>-answers.md.hbs` — for §11.2.
@@ -1850,6 +1858,44 @@ ticks off only after Task 1.4.17 lands.
   `forge-git` 168, `forge-app` 94). `sbt clean compile test`
   and `sbt scalafmtCheckAll` clean under `-Xfatal-warnings`;
   `forge-it` still compiles.
+- 2026-05-28 — Task 1.4.4 review round 1 landed (3 findings,
+  all from the "re-walk the contract, don't patch the cited
+  line" discipline — the consistency sweep over *all* shipped
+  templates found a second unsupported construct the review
+  hadn't named). **P2 (markers):** `DocSyncSuite` /
+  status-log over-claimed §5.3-completeness for what is still
+  Task 1.4.1's placeholder template (coarse
+  `forge:decomposition:begin/end`, not §5.3's
+  `forge:order-start`/`piece`/`editable-summary`/`status`
+  reconcile markers). Reworded the suite's scope note + the
+  marker assertion to verify comment-passthrough only, and
+  filed the gap explicitly on Task 1.4.6 **F2** (replace
+  markers + tighten the suite to the §5.3 region shape).
+  Template content untouched (F2 owns it). **P2 (renderer):**
+  the T2 rationale claimed `HandlebarsLite` renders the other
+  shipped templates, but `pr-body.md.hbs` uses
+  `{{#if mergedPieces.length}}` and **all four**
+  `*-answers.md.hbs` use `{{@index}}` — both rendered
+  silently-wrong (not errors). Per the round-decision
+  (`AskUserQuestion`: extend vs defer → **extend**), added
+  `Value.Num`, `array.length` (numeric, `0` falsy), and
+  0-based `{{@index}}` (threaded as a `data` frame through
+  the evaluator and bound per `#each` iteration); templates
+  left untouched. New `ShippedTemplateRenderSuite` renders
+  every shipped template through the renderer so the
+  supported set can't silently drift again. **P3:** empty
+  block args (`{{#if}}` / `{{#each}}`) and empty tags
+  (`{{}}` / `{{ }}`) now surface as `RenderError.Parse`
+  (→ `TemplateMalformed`) rather than resolving to the
+  current scope and rendering — restores the malformed
+  channel for operator-customised templates. Test coverage:
+  `HandlebarsLiteSuite` +9 (`.length`, `@index`, four
+  empty-arg/empty-tag Parse rows), new
+  `ShippedTemplateRenderSuite` (9 — every template renders
+  + the `.length` guard both ways + `@index` numbering).
+  `forge-specs` test count 58 → 76; baselines preserved.
+  `sbt clean compile test` and `sbt scalafmtCheckAll` clean;
+  `forge-it` compiles.
 
 ## 4. Carry-forward (inherited + new)
 
