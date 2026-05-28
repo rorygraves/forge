@@ -26,11 +26,11 @@
     "blocker": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["summary"],
+      "required": ["summary", "path", "line", "anchorText"],
       "properties": {
         "summary": { "type": "string" },
         "path": { "type": ["string", "null"] },
-        "line": { "type": ["integer", "null"], "minimum": 1 },
+        "line": { "type": ["integer", "null"] },
         "anchorText": { "type": ["string", "null"] }
       }
     }

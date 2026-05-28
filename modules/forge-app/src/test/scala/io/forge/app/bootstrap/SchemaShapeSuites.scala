@@ -86,17 +86,19 @@ class DesignReviewSchemaShapeSuite extends munit.FunSuite:
   test("verdict enum matches ReviewVerdict's wire encoding"):
     assertEquals(SchemaResources.verdictEnum(schema), Set("approve", "request_changes"))
 
-  test("blocker $def declares every ReviewBlocker field"):
+  test("blocker $def declares every ReviewBlocker field, all in required (OpenAI strict mode)"):
     val blocker = SchemaResources.defObject(schema, "blocker")
     val expected = Set("summary", "path", "line", "anchorText")
     assertEquals(SchemaResources.propertyFields(blocker), expected)
-    assertEquals(SchemaResources.requiredFields(blocker), Set("summary"))
+    // Codex --output-schema (OpenAI strict mode) requires every property in `required`; optionals are nullable
+    // (path/line/anchorText are `["…","null"]`). See design-rationale C17.
+    assertEquals(SchemaResources.requiredFields(blocker), expected)
 
-  test("question $def declares every Question field"):
+  test("question $def declares every Question field, all in required (OpenAI strict mode)"):
     val question = SchemaResources.defObject(schema, "question")
     val expected = Set("text", "options", "allowFreeText", "severity")
     assertEquals(SchemaResources.propertyFields(question), expected)
-    assertEquals(SchemaResources.requiredFields(question), Set("text", "severity"))
+    assertEquals(SchemaResources.requiredFields(question), expected)
     assertEquals(
       SchemaResources.stringEnum(question, "severity"),
       Set("blocking", "clarifying", "optional")
@@ -117,11 +119,11 @@ class PrReviewSchemaShapeSuite extends munit.FunSuite:
   test("verdict enum matches ReviewVerdict's wire encoding"):
     assertEquals(SchemaResources.verdictEnum(schema), Set("approve", "request_changes"))
 
-  test("blocker $def declares every ReviewBlocker field"):
+  test("blocker $def declares every ReviewBlocker field, all in required (OpenAI strict mode)"):
     val blocker = SchemaResources.defObject(schema, "blocker")
     val expected = Set("summary", "path", "line", "anchorText")
     assertEquals(SchemaResources.propertyFields(blocker), expected)
-    assertEquals(SchemaResources.requiredFields(blocker), Set("summary"))
+    assertEquals(SchemaResources.requiredFields(blocker), expected)
 
 class RefineSchemaShapeSuite extends munit.FunSuite:
 
@@ -133,12 +135,12 @@ class RefineSchemaShapeSuite extends munit.FunSuite:
     val expected = Set("outcome", "reason", "patch")
     assertEquals(SchemaResources.propertyFields(schema), expected)
 
-  test("refine.json marks the always-required RefineResult fields as required"):
-    val required = SchemaResources.requiredFields(schema)
-    assert(required.contains("outcome"), s"expected 'outcome' in $required")
-    assert(required.contains("reason"), s"expected 'reason' in $required")
-    // `patch` is conditionally required via allOf/if-then; not in the top-level required set.
-    assert(!required.contains("patch"), s"'patch' should be conditionally required, not top-level: $required")
+  test("refine.json marks every RefineResult field as required (OpenAI strict mode)"):
+    // OpenAI strict mode (Codex --output-schema) requires every property in `required`. `patch` is therefore
+    // always-required-but-nullable; the "patch present iff outcome == update_plan" invariant moved to
+    // ReviewDecoders.refineResult (design-rationale C17). The schema can no longer express it (if/then/allOf
+    // are forbidden under strict mode).
+    assertEquals(SchemaResources.requiredFields(schema), Set("outcome", "reason", "patch"))
 
   test("outcome enum matches RefineOutcome's wire encoding"):
     assertEquals(
@@ -146,74 +148,43 @@ class RefineSchemaShapeSuite extends munit.FunSuite:
       Set("no_change", "update_plan", "reopen_design")
     )
 
-  test("schema enforces patch presence when outcome == update_plan and forbids it otherwise"):
-    // Two conditional branches: one requires patch when outcome == update_plan, the other forbids patch when
-    // outcome ∈ {no_change, reopen_design}. RefineSchemaValidationSuite exercises the behaviour; this test
-    // pins the structural shape so a future schema edit can't quietly drop a branch.
-    val allOf = schema.value
-      .get("allOf")
+  test("patch is nullable (anyOf manifestPatch | null) and the schema carries no forbidden strict-mode keywords"):
+    // Replaces the former allOf/if-then conditional-patch test: the conditional is decoder-enforced now (C17).
+    // patch must be an anyOf of {manifestPatch ref, null} so Codex strict mode accepts it while update_plan can
+    // still carry a real patch.
+    val patch = schema.value
+      .get("properties")
+      .flatMap(_.objOpt)
+      .flatMap(_.get("patch"))
+      .flatMap(_.objOpt)
+      .getOrElse(throw new AssertionError("missing properties.patch"))
+    val anyOf = patch.value
+      .get("anyOf")
       .flatMap(_.arrOpt)
-      .getOrElse(throw new AssertionError("expected top-level allOf array for conditional patch requirement"))
-
-    val branches = allOf.iterator.flatMap { entry =>
-      val obj: collection.mutable.Map[String, ujson.Value] =
-        entry.objOpt.getOrElse(collection.mutable.Map.empty)
-      val ifOutcome = obj
-        .get("if")
-        .flatMap(_.objOpt)
-        .flatMap(_.get("properties"))
-        .flatMap(_.objOpt)
-        .flatMap(_.get("outcome"))
-        .flatMap(_.objOpt)
-      val outcomeTargets: Set[String] = ifOutcome match
-        case None => Set.empty
-        case Some(o) =>
-          val constHit = o.get("const").flatMap(_.strOpt).toSet
-          val enumHits = o
-            .get("enum")
-            .flatMap(_.arrOpt)
-            .map(_.iterator.flatMap(_.strOpt).toSet)
-            .getOrElse(Set.empty)
-          constHit ++ enumHits
-      val thenObj = obj.get("then").flatMap(_.objOpt)
-      val thenRequiresPatch = thenObj
-        .flatMap(_.get("required"))
-        .flatMap(_.arrOpt)
-        .exists(_.iterator.flatMap(_.strOpt).contains("patch"))
-      val thenForbidsPatch = thenObj
-        .flatMap(_.get("not"))
-        .flatMap(_.objOpt)
-        .flatMap(_.get("required"))
-        .flatMap(_.arrOpt)
-        .exists(_.iterator.flatMap(_.strOpt).contains("patch"))
-      if outcomeTargets.nonEmpty then Some((outcomeTargets, thenRequiresPatch, thenForbidsPatch))
-      else None
-    }.toVector
-
-    val updatePlanRequires = branches.exists { case (targets, requires, _) =>
-      targets == Set("update_plan") && requires
-    }
-    val nonUpdateForbids = branches.exists { case (targets, _, forbids) =>
-      targets == Set("no_change", "reopen_design") && forbids
-    }
-    assert(updatePlanRequires, s"missing branch requiring patch when outcome == update_plan; branches=$branches")
+      .getOrElse(throw new AssertionError("patch must be an anyOf (manifestPatch | null)"))
     assert(
-      nonUpdateForbids,
-      s"missing branch forbidding patch when outcome ∈ {no_change, reopen_design}; branches=$branches"
+      anyOf.iterator.flatMap(_.objOpt).exists(_.get("type").flatMap(_.strOpt).contains("null")),
+      "patch anyOf must include a null branch"
     )
+    // Strict mode forbids these structural/validation keywords anywhere in the schema; guard against reintroduction.
+    val raw = ujson.write(schema)
+    for kw <- Seq("\"oneOf\"", "\"allOf\"", "\"if\"", "\"then\"", "\"not\"", "\"minimum\"", "\"maximum\"") do
+      assert(!raw.contains(kw), s"refine.json must not use $kw (forbidden by Codex OpenAI strict mode; C17)")
 
   test("manifestPatch $def declares ManifestPatch's wire fields"):
     val patchDef = SchemaResources.defObject(schema, "manifestPatch")
     assertEquals(SchemaResources.propertyFields(patchDef), Set("reason", "ops"))
     assertEquals(SchemaResources.requiredFields(patchDef), Set("reason", "ops"))
 
-  test("manifestPatchOp $def uses oneOf with one branch per ManifestPatchOp variant"):
+  test("manifestPatchOp $def uses anyOf with one branch per ManifestPatchOp variant"):
+    // anyOf, not oneOf — Codex strict mode forbids oneOf. The $type const discriminator keeps the branches
+    // mutually exclusive in practice, and ReviewDecoders dispatches on $type.
     val opDef = SchemaResources.defObject(schema, "manifestPatchOp")
-    val oneOf = opDef.value
-      .get("oneOf")
+    val anyOf = opDef.value
+      .get("anyOf")
       .flatMap(_.arrOpt)
-      .getOrElse(throw new AssertionError("manifestPatchOp must use a oneOf branch list"))
-    assertEquals(oneOf.size, 4, s"expected one branch per ManifestPatchOp variant; got ${oneOf.size}")
+      .getOrElse(throw new AssertionError("manifestPatchOp must use an anyOf branch list"))
+    assertEquals(anyOf.size, 4, s"expected one branch per ManifestPatchOp variant; got ${anyOf.size}")
 
   test("each ManifestPatchOp variant $def pins its $type discriminator"):
     val expected = Map(

@@ -2196,6 +2196,36 @@ ticks off only after Task 1.4.17 lands.
   subprocess-timeout cases); other baselines preserved. `sbt test`
   green; `sbt scalafmtCheckAll` clean; `forge-it` compiles. C15
   remains open (full live bar run still pending).
+- 2026-05-28 — Task 1.4.7 review round 1 follow-up: **Codex reviewer
+  path fixed (second connector bug the smoke caught).** The new
+  Codex wiring smoke (Finding 3) 400'd: Codex's `--output-schema`
+  enforces **OpenAI strict mode**, a more restrictive JSON Schema
+  subset than Claude's lenient `--json-schema`. Live `codex exec`
+  surfaced three rules the shipped schemas broke (one at a time):
+  every property must be in `required`; `oneOf`/`allOf`/`if`/`then`
+  forbidden (`anyOf` allowed); a `const`-only property needs a
+  `type`. Reauthored all three shipped schemas in the strict subset —
+  which Claude also accepts, so the §17 "schemas are shared" design is
+  preserved (rejected per-connector schemas; see design-rationale
+  **C17**). Changes: `design-review.json` / `code-review.json` —
+  optional `ReviewBlocker`/`Question` fields added to `required`
+  (already nullable), dropped `minimum`; `refine.json` — `oneOf` →
+  `anyOf`, `$type` const gains `"type":"string"`, and the
+  `allOf`/`if`/`then` "patch iff update_plan" conditional dropped in
+  favour of always-required-nullable `patch`. That §14.3 invariant is
+  unchanged — it was already enforced by `ReviewDecoders.refineResult`
+  (`ReviewDecodersSuite` covers it); the schema conditional was
+  redundant. Verified: manual `codex exec --output-schema` accepts all
+  three (agent_message parses as schema-conformant JSON) + the live
+  Codex wiring smoke. `SchemaShapeSuites` (blocker/question/refine
+  `required` + `anyOf` + forbidden-keyword guard) and
+  `RefineSchemaValidationSuite` (schema-vs-decoder split) updated to
+  the new shape. All baselines preserved (`forge-app` 96,
+  `forge-agents` 185, `forge-core` 358, `forge-git` 168, `forge-specs`
+  132); `sbt test` green; `sbt scalafmtCheckAll` clean; `forge-it`
+  compiles. **C15 now unblocked on both connector paths** (Claude
+  envelope fix **C16** + Codex schema fix **C17**); the full live
+  ≥19/20 batch across all six pairs is the remaining opt-in run.
 
 ## 4. Carry-forward (inherited + new)
 

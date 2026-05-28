@@ -8,14 +8,21 @@ import io.forge.core.manifest.*
 
 import scala.jdk.CollectionConverters.*
 
-/** Validator-backed positive/negative tests for `refine.json` (Slice 4 PR-A review-round-1 P2). Builds real
-  * `RefineResult`-shaped JSON via uPickle — including a full `ManifestPatch` constructed from `ManifestPatchOp`
-  * variants — and runs it through networknt's JSON Schema validator. Catches drift between the schema and the wire
-  * shape uPickle actually emits.
+/** Validator-backed positive/negative tests for `refine.json` (Slice 4 PR-A review-round-1 P2; updated Task 1.4.7
+  * review round 1 for Codex OpenAI-strict-mode compatibility — design-rationale C17). Builds real `RefineResult`-shaped
+  * JSON via uPickle — including a full `ManifestPatch` constructed from `ManifestPatchOp` variants — and runs it
+  * through networknt's JSON Schema validator. Catches drift between the schema and the wire shape uPickle actually
+  * emits.
   *
   * Why a separate suite from [[RefineSchemaShapeSuite]]: the shape suite checks the *schema document's* structure
-  * (required fields present, oneOf branches present); this suite checks that real serialised payloads validate / reject
-  * as the §14.3 contract demands.
+  * (required fields present, anyOf branches present); this suite checks that real serialised payloads validate / reject
+  * as the schema demands.
+  *
+  * **What the schema enforces vs what the decoder enforces (C17).** Under OpenAI strict mode the schema cannot use
+  * `if/then/allOf`, so `patch` is always-required-but-nullable and the schema no longer expresses the §14.3 "patch
+  * present iff outcome == update_plan" invariant. That invariant is enforced by `ReviewDecoders.refineResult` (covered
+  * by `ReviewDecodersSuite`). This suite therefore checks only the structural contract the schema still owns: `patch`
+  * key present, patch shape valid when non-null, `additionalProperties:false`, and the `outcome` enum.
   */
 class RefineSchemaValidationSuite extends munit.FunSuite:
 
@@ -53,9 +60,10 @@ class RefineSchemaValidationSuite extends munit.FunSuite:
   private def manifestPatchJson(ops: ManifestPatchOp*): String =
     upickle.default.write(ManifestPatch(reason = "refinery: rework remaining pieces", ops = ops.toVector))
 
+  // `patch` is always required under strict mode; emit `null` when no patch is supplied.
   private def refineJson(outcome: String, reason: String, patchJson: Option[String] = None): String =
-    val patchField = patchJson.map(p => s""", "patch": $p""").getOrElse("")
-    s"""{ "outcome": "$outcome", "reason": "$reason"$patchField }"""
+    val patch = patchJson.getOrElse("null")
+    s"""{ "outcome": "$outcome", "reason": "$reason", "patch": $patch }"""
 
   // --- happy paths -----------------------------------------------------------
 
@@ -105,25 +113,25 @@ class RefineSchemaValidationSuite extends munit.FunSuite:
     val errs = validate(refineJson("update_plan", "split p2; insert p4", Some(patch)))
     assert(errs.isEmpty, s"unexpected validation errors: $errs\npatch=$patch")
 
-  // --- negative paths (§14.3 invariants) -------------------------------------
+  test("update_plan with patch:null validates at the schema level (non-null is decoder-enforced — C17)"):
+    // Strict mode can't express "patch required iff update_plan", so patch:null is schema-valid for every outcome;
+    // ReviewDecoders.refineResult rejects update_plan + null (ReviewDecodersSuite covers it).
+    val errs = validate(refineJson("update_plan", "model forgot the patch"))
+    assert(errs.isEmpty, s"schema should accept update_plan+null; the non-null check is the decoder's: $errs")
 
-  test("update_plan without patch is rejected (§14.3 invariant: patch required)"):
-    val errs = validate(refineJson("update_plan", "missing patch"))
-    assert(errs.nonEmpty, "expected validation to reject update_plan with no patch")
-
-  test("no_change with a stray patch is rejected (schema must forbid it, not silently drop)"):
+  test("no_change with a real patch validates at the schema level (decoder drops it — C17)"):
     val patch = manifestPatchJson(ManifestPatchOp.RemovePiece(PieceId("p3")))
-    val errs = validate(refineJson("no_change", "fine, but I sent a patch anyway", Some(patch)))
-    assert(errs.nonEmpty, s"expected validation to reject stray patch on no_change; errors=$errs")
+    val errs = validate(refineJson("no_change", "stray patch is schema-legal now; decoder drops it", Some(patch)))
+    assert(errs.isEmpty, s"schema should accept a stray patch; the drop is the decoder's: $errs")
 
-  test("reopen_design with a stray patch is rejected"):
-    val patch = manifestPatchJson(ManifestPatchOp.RemovePiece(PieceId("p3")))
-    val errs = validate(refineJson("reopen_design", "open the design again", Some(patch)))
-    assert(errs.nonEmpty, s"expected validation to reject stray patch on reopen_design; errors=$errs")
+  // --- negative paths (structural contract the schema still owns) -------------
+
+  test("payload missing the required patch key is rejected (strict mode: every property required)"):
+    val errs = validate("""{ "outcome": "no_change", "reason": "no patch key at all" }""")
+    assert(errs.nonEmpty, "expected validation to reject a payload with no 'patch' key")
 
   test("update_plan with a free-form (non-ManifestPatch-shaped) patch is rejected"):
-    // The unconstrained pre-tightening behaviour: a bare {} would pass. After tightening, patch MUST have
-    // reason + ops, and any extra keys are forbidden.
+    // patch is anyOf {manifestPatch, null}; a bare {} is neither (manifestPatch needs reason + ops).
     val errs = validate(refineJson("update_plan", "shape-violating patch", Some("""{}""")))
     assert(errs.nonEmpty, s"expected validation to reject empty-object patch; errors=$errs")
 
@@ -142,6 +150,6 @@ class RefineSchemaValidationSuite extends munit.FunSuite:
     assert(errs.nonEmpty, s"expected validation to reject unknown outcome; errors=$errs")
 
   test("schema rejects additional top-level fields"):
-    val payload = """{ "outcome": "no_change", "reason": "fine", "extra": true }"""
+    val payload = """{ "outcome": "no_change", "reason": "fine", "patch": null, "extra": true }"""
     val errs = validate(payload)
     assert(errs.nonEmpty, s"expected validation to reject extra top-level field; errors=$errs")
