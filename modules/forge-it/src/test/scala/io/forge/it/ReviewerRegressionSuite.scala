@@ -74,6 +74,13 @@ class ReviewerRegressionSuite extends munit.FunSuite:
 
   private val codexModel: String = sys.env.getOrElse("FORGE_IT_CODEX_MODEL", "gpt-5.3-codex")
 
+  /** Claude reviewer model. The reviewer one-shot otherwise inherits the CLI's *default* model, which is volatile (it
+    * tracks the operator's configured default — currently Opus 4.8 at ~$0.40/call). Pin it via `FORGE_IT_CLAUDE_MODEL`
+    * (e.g. `=haiku` for cheap mechanics validation, `=sonnet` for a realistic reviewer) so a batch's cost and its bar
+    * reading are reproducible rather than whatever default happens to be set. Unset ⇒ inherit the CLI default.
+    */
+  private val claudeModel: Option[String] = sys.env.get("FORGE_IT_CLAUDE_MODEL").filter(_.nonEmpty)
+
   // --- knobs ----
 
   /** Samples per pair. Default 20 (the §16 bar's denominator). Override with `FORGE_IT_REGRESSION_SAMPLES=<n>` for a
@@ -121,7 +128,11 @@ class ReviewerRegressionSuite extends munit.FunSuite:
     finally stream.close()
 
   private def claudeConnector: Connector =
-    ClaudeConnector(binary = claudeOnPath.get.toString, reviewerAssets = Some(assetsFor("claude")))
+    ClaudeConnector(
+      binary = claudeOnPath.get.toString,
+      reviewerAssets = Some(assetsFor("claude")),
+      reviewerModel = claudeModel
+    )
 
   private def codexConnector: Connector =
     CodexConnector(

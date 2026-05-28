@@ -41,6 +41,7 @@ final class ClaudeConnector(
     extraEnv: Map[String, String] = Map.empty,
     initTimeout: FiniteDuration = 30.seconds,
     reviewerAssets: Option[ReviewerAssets] = None,
+    reviewerModel: Option[String] = None,
     reviewerTimeout: FiniteDuration = 5.minutes
 ) extends Connector:
 
@@ -160,7 +161,7 @@ final class ClaudeConnector(
         val per = pick(assets)
         for
           schemaContent <- IO.blocking(os.read(per.schema))
-          argv = ClaudeConnector.reviewerArgv(binary, per.systemPrompt, schemaContent, body)
+          argv = ClaudeConnector.reviewerArgv(binary, per.systemPrompt, schemaContent, body, reviewerModel)
           envelope <- Subprocess
             .spawn(argv, cwd = cwd, env = extraEnv)
             .use(sp => ClaudeConnector.collectReviewerEnvelope(sp, reviewerTimeout))
@@ -243,10 +244,12 @@ object ClaudeConnector:
       binary: String,
       systemPromptPath: os.Path,
       schemaContent: String,
-      prompt: String
+      prompt: String,
+      model: Option[String] = None
   ): List[String] =
     (binary :: "-p" :: prompt :: IsolationFlags) ++ ReviewerOutputFlags ++
-      List("--json-schema", schemaContent, "--system-prompt-file", systemPromptPath.toString)
+      List("--json-schema", schemaContent, "--system-prompt-file", systemPromptPath.toString) ++
+      model.toList.flatMap(m => List("--model", m))
 
   /** Wire encoder for streaming-spec / resume sessions: wraps a plain-text user message as the JSON frame
     * `--input-format stream-json` expects. Confirmed against Claude CLI 2.1.150:

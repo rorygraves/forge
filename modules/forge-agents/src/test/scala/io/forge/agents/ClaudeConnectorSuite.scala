@@ -268,6 +268,18 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     // Never include --bare or --input-format stream-json.
     assert(!argv.contains("--bare"), clue = argv)
     assert(!argv.contains("--input-format"), clue = argv)
+    // No --model unless explicitly requested — default inherits the CLI's configured model.
+    assert(!argv.contains("--model"), clue = argv)
+
+  test("reviewerArgv: --model is appended only when a reviewer model is pinned"):
+    val pinned = ClaudeConnector.reviewerArgv(
+      binary = "claude",
+      systemPromptPath = os.Path("/tmp/dr.md"),
+      schemaContent = """{"type":"object"}""",
+      prompt = "review this design",
+      model = Some("haiku")
+    )
+    assert(pinned.containsSlice(List("--model", "haiku")), clue = pinned)
 
   test("extractStructuredOutput: pulls structured_output field from a Slice 0 §3.1 envelope"):
     val envelope = ujson.read(
