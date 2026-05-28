@@ -42,7 +42,9 @@ import scala.concurrent.duration.*
   * **Opt-in by default, very slow.** 6 pairs × 20 samples = 120+ real reviewer calls against full design docs / diffs;
   * a full run is tens of minutes and costs real CLI spend. Even with the binaries on PATH this suite skips unless
   * `FORGE_IT_RUN_REGRESSION=1` is set, matching the `FORGE_IT_RUN_RELIABILITY` gate. Per-connector escape hatches:
-  * `FORGE_IT_SKIP_CLAUDE=1` / `FORGE_IT_SKIP_CODEX=1`.
+  * `FORGE_IT_SKIP_CLAUDE=1` / `FORGE_IT_SKIP_CODEX=1`. For an incremental ramp before the full batch, set
+  * `FORGE_IT_REGRESSION_SAMPLES=<n>` (e.g. `=2`) to run a reduced-scale shakedown across all six pairs with a
+  * proportionally-scaled pass bar — only the default `=20` is the C15-closing measurement (G3).
   */
 class ReviewerRegressionSuite extends munit.FunSuite:
 
@@ -74,8 +76,19 @@ class ReviewerRegressionSuite extends munit.FunSuite:
 
   // --- knobs ----
 
-  private val Samples: Int = 20
-  private val PassingThreshold: Int = 19
+  /** Samples per pair. Default 20 (the §16 bar's denominator). Override with `FORGE_IT_REGRESSION_SAMPLES=<n>` for a
+    * reduced-scale **shakedown** run that exercises all six pairs without the full ~120-call spend — e.g. `=2` runs
+    * 6×2=12 calls to prove the batch machinery end-to-end before committing to the full 20-sample measurement. The
+    * §16 ≥19/20 bar only *holds* at the default 20; a reduced run applies the proportional bar below.
+    */
+  private val Samples: Int =
+    sys.env.get("FORGE_IT_REGRESSION_SAMPLES").flatMap(_.toIntOption).filter(_ > 0).getOrElse(20)
+
+  /** Pass bar scaled to the §16 ≥19/20 = 95% reliability target (ceil), so a reduced-sample shakedown still applies a
+    * proportional bar: N=20 → 19 (the exact §16 bar), N=2 → 2, N=1 → 1. A reduced run is a wiring/early-signal check,
+    * not the C15-closing measurement — only `Samples == 20` meets G3's denominator.
+    */
+  private val PassingThreshold: Int = math.ceil(Samples * 19.0 / 20.0).toInt
   private val ProcessRetries: Int = 1
   private val SettleCap: FiniteDuration = 3.minutes
   private val limits: ReviewerLimits = ReviewerLimits(wallClockTimeout = SettleCap)
@@ -216,6 +229,13 @@ class ReviewerRegressionSuite extends munit.FunSuite:
         case _: ReviewerProcessFailure => Score.ProcessFail
         case _: ReviewerNotConfigured => Score.NotConfigured
 
+  /** Short failure reason for the assert clue — for a schema fail this carries the connector's error detail (which,
+    * post-C18, includes the truncated offending payload), so a failing batch is self-diagnosing without a re-run.
+    */
+  private def detail[A](o: ReviewerOutcome[A]): Option[String] = o match
+    case ReviewerOutcome.AdapterFailure(err) => Some(s"${err.getClass.getSimpleName}: ${err.getMessage}")
+    case _ => None
+
   /** Retry transient (process / timeout) outcomes before scoring — these "don't count against the bar" (G3). A clean
     * decode or a schema failure is final.
     */
@@ -247,6 +267,7 @@ class ReviewerRegressionSuite extends munit.FunSuite:
       clue = s"$label: $notConfigured/${outcomes.size} ReviewerNotConfigured — reviewer assets misconfigured in the " +
         "test harness (not a model result); check the AssetInstaller wiring above."
     )
+    val failureDetails = outcomes.zipWithIndex.flatMap((o, i) => detail(o).map(d => s"#${i + 1} $d"))
     assert(
       passes >= PassingThreshold,
       clue = s"$label native-schema reliability $passes/${outcomes.size} < $PassingThreshold/${outcomes.size} " +
@@ -254,7 +275,8 @@ class ReviewerRegressionSuite extends munit.FunSuite:
         s"schemaFail counts against the bar — tighten the schema/prompt inside 1.4a per Task 1.4.7 G4. " +
         s"processFail/timeout are transient (already retried ${ProcessRetries}×); a nonzero residual points at the " +
         s"environment/network, re-run before tightening. per-sample: " +
-        scores.zipWithIndex.map((s, i) => s"#${i + 1}=$s").mkString(", ")
+        scores.zipWithIndex.map((s, i) => s"#${i + 1}=$s").mkString(", ") +
+        (if failureDetails.nonEmpty then "\nfailure detail: " + failureDetails.mkString("\n  ", "\n  ", "") else "")
     )
 
   // --- wiring smoke (one call; its own cheap gate) ----
