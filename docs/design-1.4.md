@@ -582,18 +582,26 @@ driver's `AskUserQuestion` mechanism.
     matching both `denyPatterns` and `allowPatterns` falls
     to `Deny` (rule 1 dominates rule 5-strict).
 
-### Task 1.4.6 — Templates landing under `~/.forge/templates/`
+### Task 1.4.6 — Templates landing under `~/.forge/templates/`  ✅ landed 2026-05-28
 
 Land the v1 PR-body / decomposition / answer-template files
 the orchestrator depends on. Task 1.4.1 landed the in-tree
 `assets/templates/` copies; Task 1.4.6 lands the actual content.
 
-- [ ] **F1.** `pr-body.md.hbs` — Per §11.4 step 6 template
+- [x] **F1.** `pr-body.md.hbs` — Per §11.4 step 6 template
   shape. Renders feature title, piece title, piece spec,
   acceptance criteria, and the audit summary. Variables
   available: feature manifest entry, piece spec body, prior
   pieces merged so far.
-- [ ] **F2.** `decomposition.md.hbs` — Already touched by
+  **As landed:** Task 1.4.1's `pr-body.md.hbs` already met the
+  F1 content bar — feature/piece title, `{{piece.spec}}` (the
+  acceptance criteria live in the piece spec body; the
+  manifest `Piece` carries only an `acceptanceHash`, no
+  separate criteria field), the `{{#if mergedPieces.length}}`
+  merged-pieces section, and the audit summary. F1 is
+  therefore verification-only; the golden (F4) pins its exact
+  output.
+- [x] **F2.** `decomposition.md.hbs` — Already touched by
   Task 1.4.4's renderer. Task 1.4.6 ships the actual v1 template content
   (status badges, piece headers, editable-region HTML
   comments per **M2** / §5.3). **Gap from Task 1.4.4:** the
@@ -605,16 +613,50 @@ the orchestrator depends on. Task 1.4.1 landed the in-tree
   `DocSyncSuite` (which today only checks comment-marker
   passthrough, with a scope note) to assert the §5.3 region
   shape `forge reconcile` (Task 1.4.15) parses.
-- [ ] **F3.** Per-phase answer templates:
+  **As landed:** the placeholder markers are replaced with the
+  full §5.3 set — `forge:order-start`/`-end` wrapping a
+  numbered piece list, and per-piece `forge:piece <pid>`,
+  `forge:editable-summary <pid>`, `forge:status <pid>`. Each
+  piece renders `N. <!-- forge:piece pid -->**pid: title**…`
+  with the summary inside the editable-summary region and the
+  `statusBadge` inside the status region; the merged-piece
+  PR / merge-commit lines render as non-editable extras inside
+  the order region. `DocSyncSuite` gained a §5.3 region-shape
+  test (order region appears once, wraps every `forge:piece`
+  marker in manifest order, editable-summary carries the
+  summary text) and the stale placeholder-marker scope note is
+  removed; the byte-identical re-render test already proves the
+  idempotence `forge reconcile` depends on.
+- [x] **F3.** Per-phase answer templates:
   - `spec-answers.md.hbs` — for §11.1 step 5.
   - `design-review-r<n>-answers.md.hbs` — for §11.2.
   - `design-pr-feedback-r<n>-answers.md.hbs` — for §11.3 step 2.
   - `impl-answers.md.hbs` — for §11.4 step 4.
   - `fixup-r<attempt>-answers.md.hbs` — for §11.6.
-- [ ] **F4.** Unit suite — `TemplateRenderSuite` in `forge-specs`
+  **As landed:** Task 1.4.1 shipped four of the five answer
+  templates; `design-review-r1-answers.md.hbs` (§7.7 /
+  §11.2 — the pre-PR cross-model review loop, distinct from
+  the post-PR `design-pr-feedback` loop) was missing from
+  both `assets/templates/` and `AssetInstaller.TemplateLeaves`.
+  F3 adds it (round-1 instance; orchestrator parameterises
+  `round`) and registers it in `AssetInstaller.TemplateLeaves`,
+  `AssetInstallerSuite.allExpectedDestinations`,
+  `ShippedTemplateRenderSuite`, and the F4 suite. The other
+  four already met the bar.
+- [x] **F4.** Unit suite — `TemplateRenderSuite` in `forge-specs`
   test scope, rendering each template against a fixture
   context and asserting key fields appear. Lightweight golden
   files (one rendered fixture per template).
+  **As landed:** `TemplateRenderSuite` renders all seven
+  shipped templates against one fixed fixture context and
+  compares byte-for-byte to a checked-in golden under
+  `src/test/resources/golden/<template>.golden`. Regeneration
+  is `FORGE_UPDATE_GOLDEN=1` (a missing golden is written
+  rather than asserted, so first-run authoring is ergonomic;
+  CI checks out the committed goldens). This complements
+  `ShippedTemplateRenderSuite` (which proves the renderer
+  *can* handle every construct) by pinning the exact rendered
+  *output* — most importantly the §5.3 marker shape.
 
 ### Task 1.4.7 — Reviewer regression suite (closes C15)
 
@@ -2004,6 +2046,48 @@ ticks off only after Task 1.4.17 lands.
   `forge-specs` 123 (count unchanged); all baselines preserved;
   `sbt clean compile test`, `sbt scalafmtCheckAll`, `forge-it`
   compile all clean.
+- 2026-05-28 — Task 1.4.6 landed. Shipped the v1 content for the
+  PR-body / decomposition / answer templates the orchestrator
+  (Task 1.4.10) renders. **F2 (decomposition §5.3 markers):**
+  replaced Task 1.4.1's coarse `forge:decomposition:begin/end`
+  placeholder with the §5.3 reconcile marker set —
+  `forge:order-start`/`-end` wrapping a numbered piece list,
+  and per-piece `forge:piece <pid>`, `forge:editable-summary
+  <pid>`, `forge:status <pid>`. `DocSyncSuite`'s stale
+  placeholder-marker scope note is removed and a §5.3
+  region-shape test added (order region appears exactly once
+  and wraps every `forge:piece` marker in manifest order;
+  editable-summary carries the summary text between its
+  markers; the old placeholder markers are asserted gone). The
+  existing byte-identical re-render test already proves the
+  idempotence `forge reconcile` (Task 1.4.15) depends on.
+  **F3 (answer templates):** Task 1.4.1 shipped four of the five
+  §7.7 answer templates; the missing
+  `design-review-r1-answers.md.hbs` (§11.2 pre-PR review loop,
+  distinct from the post-PR `design-pr-feedback` loop) was
+  added and registered in `AssetInstaller.TemplateLeaves`,
+  `AssetInstallerSuite.allExpectedDestinations` (now 16
+  destinations), `ShippedTemplateRenderSuite`, and the new F4
+  suite. **F1 (pr-body):** verification-only — Task 1.4.1's
+  template already rendered feature/piece title, `{{piece.spec}}`
+  (acceptance criteria live in the spec body — the manifest
+  `Piece` has only `acceptanceHash`, no separate field), the
+  merged-pieces section, and the audit summary. **F4
+  (golden suite):** new `TemplateRenderSuite` renders all
+  seven templates against one fixed context and compares
+  byte-for-byte to checked-in goldens under
+  `src/test/resources/golden/`; `FORGE_UPDATE_GOLDEN=1`
+  regenerates (missing golden is written, not asserted — CI
+  uses committed goldens). Complements
+  `ShippedTemplateRenderSuite` (renderer can-handle guard) by
+  pinning exact output, most importantly the §5.3 marker shape.
+  `forge-specs` test count 123 → 132 (+7 golden, +1 DocSync
+  region-shape, +1 ShippedTemplateRenderSuite row); `forge-app`
+  unchanged at 94 (same test methods, AssetInstaller now
+  installs 16 assets). Baselines preserved (`forge-core` 358,
+  `forge-agents` 181, `forge-git` 168). `sbt clean compile
+  test` and `sbt scalafmtCheckAll` clean under
+  `-Xfatal-warnings`; `forge-it` compiles.
 
 ## 4. Carry-forward (inherited + new)
 

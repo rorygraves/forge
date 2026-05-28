@@ -1,0 +1,29 @@
+# Persist webhook events
+
+> Piece **p2** of feature [Add Stripe webhook receiver](../specs/stripe-webhook/design.md).
+> Design PR: #7
+
+## Summary
+
+Store verified events idempotently.
+
+## Spec
+
+### Acceptance
+
+- Verified events are persisted exactly once.
+- Replays are no-ops.
+
+
+## Pieces already merged
+
+- `p1` — Add webhook route and signature verification
+
+## Audit
+
+- opened PR #43
+- design reviewed: approve
+
+---
+
+*Opened by [Forge](https://github.com/anthropics/forge). Reviewed by the cross-model reviewer; merged by a human after CI passes.*

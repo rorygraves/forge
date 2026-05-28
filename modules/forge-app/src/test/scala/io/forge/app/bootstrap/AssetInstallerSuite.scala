@@ -32,6 +32,7 @@ class AssetInstallerSuite extends munit.FunSuite:
       paths.userTemplatesDir / "pr-body.md.hbs",
       paths.userTemplatesDir / "decomposition.md.hbs",
       paths.userTemplatesDir / "spec-answers.md.hbs",
+      paths.userTemplatesDir / "design-review-r1-answers.md.hbs",
       paths.userTemplatesDir / "design-pr-feedback-r1-answers.md.hbs",
       paths.userTemplatesDir / "impl-answers.md.hbs",
       paths.userTemplatesDir / "fixup-r1-answers.md.hbs"

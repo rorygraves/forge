@@ -7,9 +7,15 @@
     feature.designPr  (optional)
     pieces            — vector of {id, order, title, summary, status, prNumber?, mergeCommit?}
 
-  M2: the "Pieces" section between the BEGIN/END markers below is the
-  editable region `forge reconcile` reads back. Edits outside that
-  region are refused.
+  §5.3 editable regions — what `forge reconcile` (Task 1.4.15) reads back:
+    forge:order-start / forge:order-end — the ordered piece list. Reordering
+      the list items maps to ReorderPieces(newOrder).
+    forge:editable-summary <pid>        — free-text piece summary. An edit here
+      maps to EditPiece(summary = Some(newText)).
+  Not editable (reconcile refuses edits in these):
+    forge:piece <pid>  — piece id + title.
+    forge:status <pid> — status badge.
+  Anything outside the order region is also non-reconcilable.
 --}}
 # {{feature.title}}
 
@@ -19,26 +25,28 @@
 > Design PR: #{{feature.designPr}}
 {{/if}}
 
-<!-- forge:decomposition:begin -->
 ## Pieces
 
+<!-- forge:order-start -->
 {{#each pieces}}
-### {{this.order}}. `{{this.id}}` — {{this.title}} {{statusBadge this.status}}
-
-{{this.summary}}
-
+{{this.order}}. <!-- forge:piece {{this.id}} -->**{{this.id}}: {{this.title}}**<!-- /forge:piece -->
+   <!-- forge:editable-summary {{this.id}} -->
+   {{this.summary}}
+   <!-- /forge:editable-summary -->
+   <!-- forge:status {{this.id}} -->{{statusBadge this.status}}<!-- /forge:status -->
 {{#if this.prNumber}}
-- PR: #{{this.prNumber}}
+   - PR: #{{this.prNumber}}
 {{/if}}
 {{#if this.mergeCommit}}
-- Merge commit: `{{this.mergeCommit}}`
+   - Merge commit: `{{this.mergeCommit}}`
 {{/if}}
 
 {{/each}}
-<!-- forge:decomposition:end -->
+<!-- forge:order-end -->
 
 ---
 
 *Rendered by [Forge](https://github.com/anthropics/forge) from
-`manifest.json`. Edit the pieces section between the markers above and
-run `forge reconcile {{feature.id}}` to apply.*
+`manifest.json`. Edit a piece summary or reorder the list between the
+`forge:order-start` / `forge:order-end` markers above, then run
+`forge reconcile {{feature.id}}` to import the change.*

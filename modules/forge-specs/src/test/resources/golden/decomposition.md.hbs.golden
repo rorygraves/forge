@@ -1,0 +1,37 @@
+# Add Stripe webhook receiver
+
+> Feature **stripe-webhook** — base branch `main`,
+> branch prefix `forge`.
+> Design PR: #7
+
+## Pieces
+
+<!-- forge:order-start -->
+1. <!-- forge:piece p1 -->**p1: Add webhook route and signature verification**<!-- /forge:piece -->
+   <!-- forge:editable-summary p1 -->
+   Add `POST /stripe/webhook`. Verify against `STRIPE_WEBHOOK_SECRET`.
+   <!-- /forge:editable-summary -->
+   <!-- forge:status p1 -->`merged`<!-- /forge:status -->
+   - PR: #42
+   - Merge commit: `abc1234`
+
+2. <!-- forge:piece p2 -->**p2: Persist webhook events**<!-- /forge:piece -->
+   <!-- forge:editable-summary p2 -->
+   Store verified events idempotently.
+   <!-- /forge:editable-summary -->
+   <!-- forge:status p2 -->`in progress`<!-- /forge:status -->
+
+3. <!-- forge:piece p3 -->**p3: Expose admin replay**<!-- /forge:piece -->
+   <!-- forge:editable-summary p3 -->
+   Replay endpoint for ops.
+   <!-- /forge:editable-summary -->
+   <!-- forge:status p3 -->`pending`<!-- /forge:status -->
+
+<!-- forge:order-end -->
+
+---
+
+*Rendered by [Forge](https://github.com/anthropics/forge) from
+`manifest.json`. Edit a piece summary or reorder the list between the
+`forge:order-start` / `forge:order-end` markers above, then run
+`forge reconcile stripe-webhook` to import the change.*

@@ -1,0 +1,26 @@
+{{!--
+  design-review-r<n>-answers.md.hbs — §7.7 / §11.2 audit of human answers
+  given during a cross-model design-review revision round (the reviewer
+  asked questions; the human answered before the design was revised). This
+  is the pre-PR review loop (§11.2); the post-PR feedback loop has its own
+  design-pr-feedback-r<n>-answers.md.hbs. PR-A ships the round-1 instance;
+  the orchestrator parameterises the filename by `round` at render time.
+
+  Variables:
+    feature.id
+    round             — 1-indexed review round
+    capturedAt
+    qa                — vector of { question, answer, severity }
+--}}
+# Design review (round {{round}}) — {{feature.id}}
+
+*Captured {{capturedAt}}.*
+
+{{#each qa}}
+## Q{{questionNumber @index}}. {{this.question}}
+
+> Severity: {{this.severity}}
+
+{{this.answer}}
+
+{{/each}}

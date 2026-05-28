@@ -1,0 +1,16 @@
+# Design PR feedback (round 1) — stripe-webhook
+
+*Captured 2026-05-28T00:00:00Z, against design PR #43.*
+
+## Q1. Why verify the signature?
+
+> Severity: blocker
+
+To reject spoofed webhook deliveries.
+
+## Q2. Which secret holds the signing key?
+
+> Severity: nit
+
+`STRIPE_WEBHOOK_SECRET`.
+

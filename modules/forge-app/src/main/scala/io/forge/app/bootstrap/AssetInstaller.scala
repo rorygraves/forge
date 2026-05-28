@@ -141,6 +141,7 @@ object AssetInstaller:
       "pr-body.md.hbs",
       "decomposition.md.hbs",
       "spec-answers.md.hbs",
+      "design-review-r1-answers.md.hbs",
       "design-pr-feedback-r1-answers.md.hbs",
       "impl-answers.md.hbs",
       "fixup-r1-answers.md.hbs"

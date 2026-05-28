@@ -1,0 +1,16 @@
+# Fix-up Q&A (attempt 1) — stripe-webhook / p2
+
+*Captured 2026-05-28T00:00:00Z, against PR #43.*
+
+## Q1. Why verify the signature?
+
+> Severity: blocker
+
+To reject spoofed webhook deliveries.
+
+## Q2. Which secret holds the signing key?
+
+> Severity: nit
+
+`STRIPE_WEBHOOK_SECRET`.
+
