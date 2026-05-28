@@ -661,7 +661,7 @@ the orchestrator depends on. Task 1.4.1 landed the in-tree
   *can* handle every construct) by pinning the exact rendered
   *output* — most importantly the §5.3 marker shape.
 
-### Task 1.4.7 — Reviewer regression suite (closes C15)
+### Task 1.4.7 — Reviewer regression suite (hosts the C15 gate; closes C15 once the bar is met)
 
 The ≥19/20 native-schema regression suite Slice 1.1 deferred per
 **C15**. Now that reviewer assets exist (Task 1.4.1) and reviewer
@@ -712,8 +712,11 @@ shipped schemas and prompts.
   `structured_output` into the `result` string —
   `ClaudeConnector.extractStructuredOutput` failed 100% (now fixed,
   back-compat, design-rationale **C16**). The full live ≥19/20
-  measurement across all 6 pairs (~30–90 min, real CLI spend) is
-  an opt-in run not yet executed; **G4 / G5 stay open until it is.**
+  measurement across all 6 pairs (real CLI spend) is an opt-in run
+  not yet executed; **G4 / G5 stay open until it is.** The per-call
+  wall-clock cap is proven to bound real wall-time by
+  `ReviewerCallSubprocessTimeoutSuite` (review round 1 / Finding 1),
+  so the batch is time-bounded per call.
 - [ ] **G4.** Failure mode: if a method × connector pair
   fails the bar in Task 1.4.7, schema/prompt tightening happens
   inside 1.4a (not deferred further). The Task 1.4.7 commit lists
@@ -2172,6 +2175,27 @@ ticks off only after Task 1.4.17 lands.
   `forge-app` 94, `forge-specs` 132). `sbt test` green;
   `sbt scalafmtCheckAll` clean under `-Xfatal-warnings`; `forge-it`
   compiles.
+- 2026-05-28 — Task 1.4.7 review round 1 (3 findings). **Finding 1
+  (High — cap safety):** the ~90-min live-smoke duration was flagged
+  as a possible wall-clock-cap defect that would make the full batch
+  unsafe. Wrote the requested subprocess-backed test —
+  `ReviewerCallSubprocessTimeoutSuite` (forge-app) drives
+  `RealReviewerCall` against a real fake-CLI subprocess (silent-hang
+  *and* chatty-hang variants) with a 2-s cap; both return `Timeout`
+  in ~2 s real wall-clock. So the cap **does** bound real time
+  (unlike the existing `IO.never`/`TestControl` test, which can't
+  prove that); the 90-min figure is a measurement artifact (OS sleep
+  during the long run). S4-3 watch-item updated from "verify before
+  batch" to "verified bounded". **Finding 2 (Medium — wording):**
+  "closes C15" overclaimed while G3/G4/G5 are open; reworded the
+  suite docstring and the Task 1.4.7 header to "hosts the C15 gate;
+  closes once the bar is met". **Finding 3 (Low — Codex smoke):**
+  the cheap `FORGE_IT_RUN_REGRESSION_SMOKE=1` wiring smoke covered
+  only Claude; added a symmetric Codex single-call smoke (shared
+  `assertWiresEndToEnd` helper). `forge-app` test count 94 → 96 (+2
+  subprocess-timeout cases); other baselines preserved. `sbt test`
+  green; `sbt scalafmtCheckAll` clean; `forge-it` compiles. C15
+  remains open (full live bar run still pending).
 
 ## 4. Carry-forward (inherited + new)
 
@@ -2312,16 +2336,25 @@ expected-vs-actual.
   item into Slice 1.4b; Task 1.4.17 evaluates whether MVP-run cost
   data warrants closure inside Phase 1 or whether it rolls
   into v1.3.
-  **Task 1.4.7 latency observation (2026-05-28):** the single live
-  reviewer wiring smoke returned `Settled` but took ~90 min
-  wall-clock despite a 3-min per-call `ReviewerLimits` cap —
-  consistent with either Claude rate-limiting/backoff on the day
-  or the cap's fiber-cancellation not actually terminating a
-  CLI subprocess stuck in internal retry (the exact
-  no-observable-kill gap above). Verify the per-call wall-clock
-  cap bounds real wall-time before kicking off the full Task 1.4.7
-  6×20 batch; if it doesn't, S4-3's connector-boundary widening
-  (observable kill) is the closure path.
+  **Task 1.4.7 latency observation + resolution (2026-05-28, review
+  round 1):** the single live reviewer wiring smoke returned
+  `Settled` but reported ~90 min wall-clock despite a 3-min
+  per-call `ReviewerLimits` cap. Review round 1 (Finding 1) flagged
+  this as a potential cap defect that would make the full batch
+  unsafe. **Empirically refuted:** `ReviewerCallSubprocessTimeoutSuite`
+  (forge-app) drives `RealReviewerCall` against a **real** fake-CLI
+  subprocess — both a silent-hang (`sleep 30`, no output) and a
+  chatty-hang (streams output forever) — with a 2-s cap, and both
+  return `ReviewerOutcome.Timeout` in ~2 s of real wall-clock (the
+  subprocess is killed; not just an `IO.never` under `TestControl`).
+  So the cap **does** bound real wall-time; the ~90-min figure is a
+  measurement artifact (most likely OS/laptop sleep during the long
+  opt-in run — cats-effect's monotonic `IO.sleep` and the subprocess
+  both pause on suspend, while munit's wall-clock keeps counting).
+  The full 6×20 batch is therefore time-bounded per call (still
+  expensive in aggregate, but not unbounded). S4-3's observable-kill
+  widening remains a *diagnostics* nice-to-have, not a correctness
+  blocker for Task 1.4.7.
 - **S4-4 — `RebuildState.run` widened to return
   `RebuildResult(feature, inFlightSessions)` for restart
   recovery.** Surfaced at plan-review pre-Task 1.4.10. The

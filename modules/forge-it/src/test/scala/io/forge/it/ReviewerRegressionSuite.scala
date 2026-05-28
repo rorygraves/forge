@@ -12,7 +12,9 @@ import io.forge.core.paths.ForgePaths
 import java.time.Instant
 import scala.concurrent.duration.*
 
-/** Slice 1.4a Task 1.4.7 (closes carry-forward **C15**) — the ≥19/20 native-schema regression gate Slice 1.1 deferred.
+/** Slice 1.4a Task 1.4.7 — **hosts** the ≥19/20 native-schema regression gate (carry-forward **C15**) Slice 1.1
+  * deferred. C15 only **closes** once all six method × connector pairs meet the bar in a live `FORGE_IT_RUN_REGRESSION=1`
+  * run and `design-rationale.md` is updated — landing this suite does not by itself close it.
   *
   * Slice 1.1 wired `ReviewerAssets(PerMethod(schema, systemPrompt))` through both connectors and the `Reviews.scala`
   * ADT but shipped no actual schema/prompt files, so the §16 "the structured-output contract holds ≥19/20 times" bar
@@ -66,6 +68,7 @@ class ReviewerRegressionSuite extends munit.FunSuite:
     */
   private val smokeOptIn: Boolean = sys.env.get("FORGE_IT_RUN_REGRESSION_SMOKE").contains("1")
   private val claudeSmokeCanRun: Boolean = smokeOptIn && claudeOnPath.isDefined && !skipClaude
+  private val codexSmokeCanRun: Boolean = smokeOptIn && codexOnPath.isDefined && !skipCodex
 
   private val codexModel: String = sys.env.getOrElse("FORGE_IT_CODEX_MODEL", "gpt-5.3-codex")
 
@@ -261,7 +264,16 @@ class ReviewerRegressionSuite extends munit.FunSuite:
       claudeSmokeCanRun,
       "skipped — set FORGE_IT_RUN_REGRESSION_SMOKE=1 with claude on PATH (cheap single-call wiring check)"
     )
-    val rc = RealReviewerCall(claudeConnector)
+    assertWiresEndToEnd(RealReviewerCall(claudeConnector))
+
+  test("smoke: one design-review call wires install→bind→decode end-to-end (codex)"):
+    assume(
+      codexSmokeCanRun,
+      "skipped — set FORGE_IT_RUN_REGRESSION_SMOKE=1 with codex on PATH (cheap single-call wiring check)"
+    )
+    assertWiresEndToEnd(RealReviewerCall(codexConnector))
+
+  private def assertWiresEndToEnd(rc: RealReviewerCall): Unit =
     val outcome = withRetry(rc.designReview(designFixtures.head, limits), ProcessRetries).unsafeRunSync()
     outcome match
       case ReviewerOutcome.Settled(_) => () // clean schema decode — the wiring proof
