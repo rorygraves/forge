@@ -2313,6 +2313,26 @@ ticks off only after Task 1.4.17 lands.
   **(model, wall-clock cap)** pair — haiku@3min cleared all six;
   sonnet needs a >3min cap on large PRs. C15 stays open pending that
   decision + a clean full batch under it.
+- 2026-05-29 — Task 1.4.7: sonnet pr-review/claude re-run at **5-min
+  cap → still 16/20** (3 Timeout + 1 SchemaFail). Two clean findings,
+  both from the now-complete diagnostics: (1) the **first
+  fully-diagnosed schema fail** is the documented-**unrepairable**
+  case — `braces=balanced rawControlChars=0 underlying: "expected , or
+  } got w"` = an **unescaped `"`** inside the summary (`Some("Deny")`);
+  1/20 is within the bar's tolerance, so this is not the blocker. (2)
+  The blocker is **latency**: completed pr-review calls run p50 114s /
+  p90 218s / max 257s, with ~15% (3/20) exceeding even 300s — a smooth
+  heavy tail (genuine slowness on large diffs, not rate-limit spikes).
+  **Sonnet is latency-prohibitive for pr-review under any reasonable
+  wall-clock cap** (would need ~7-8 min). **haiku@3min remains the
+  only clean full-batch config (6/6).** Recommendation pending
+  maintainer: adopt **haiku@3min** as the v1 reviewer default and
+  close C15 against it; sonnet's latency tail + residual
+  unescaped-quote schema tail are recorded as the rationale and feed
+  the production (model, cap, timeout-retry) config decision (Task
+  1.4.9 / S4-3). The unescaped-quote mode is a known residual the
+  normaliser deliberately can't repair (ambiguous); within 1/20
+  tolerance, possible future hardening.
 
 ## 4. Carry-forward (inherited + new)
 
