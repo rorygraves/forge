@@ -64,6 +64,9 @@ final class Orchestrator(
     */
   private val reviewerWallClock: FiniteDuration = 3.minutes
 
+  /** S4-1 — cross-restart persistence of the PRWatcher poll cursor (built from `paths`, no constructor change). */
+  private val baselineStore = new PollBaselineStore(paths)
+
   /** Drive `featureId` from its persisted state to a loop-terminal state (`NeedsHumanIntervention` / `FeatureDone` /
     * `Abandoned`), returning the terminal `Feature`.
     */
@@ -251,17 +254,24 @@ final class Orchestrator(
       case EventSource.UserQa => userInput.map(RaceResult.FromUser.apply)
 
   private def watcherIO(feature: Feature, pr: PrNumber): IO[RaceResult] =
-    // -d1 keeps the poll baseline in-memory per race; -d2 persists it to `ForgePaths.pollBaselineFile` for
-    // cross-restart cursor continuity (the accessor already exists, S4-1).
-    Ref.of[IO, PollBaseline](PollBaseline.empty).flatMap { baselineRef =>
-      watcher
-        .watch(pr, baselineRef)
-        .evalMap(pollResultToEvent(feature, _))
-        .unNone
-        .head
-        .compile
-        .lastOrError
-        .map(RaceResult.FromWatcher.apply)
+    // S4-1: seed the cursor from the persisted baseline file so a restart mid-gate resumes where the last poll left
+    // off, and persist `decoded.nextBaseline` after each Snapshot poll (the watcher's `stepOnce` sets the ref before
+    // emitting, so `baselineRef.get` here reflects the just-decoded cursor).
+    baselineStore.load(feature.id, pr).flatMap { seed =>
+      Ref.of[IO, PollBaseline](seed).flatMap { baselineRef =>
+        watcher
+          .watch(pr, baselineRef)
+          .evalTap {
+            case _: PollResult.Snapshot => baselineRef.get.flatMap(baselineStore.save(feature.id, pr, _))
+            case _ => IO.unit
+          }
+          .evalMap(pollResultToEvent(feature, _))
+          .unNone
+          .head
+          .compile
+          .lastOrError
+          .map(RaceResult.FromWatcher.apply)
+      }
     }
 
   private def pollResultToEvent(feature: Feature, result: PollResult): IO[Option[FsmEvent]] =
