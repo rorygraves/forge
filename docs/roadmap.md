@@ -296,9 +296,10 @@ Slice 5.**
   re-issues Codex role framing in the resume message, or v1.3
   widens the trait to carry `systemPromptPath`. Coupled with the
   v1.3 spec decision; either way the orchestrator has to handle it.
-- **S2-5 writer-side atomic-merge test** — assert the orchestrator
-  atomically persists `manifest.json` before the FSM transition
-  action and the state-cache write (§11.5 step 1 writer side).
+- **S2-5 writer-side atomic-merge test** — ✅ closed in Task 1.4.11
+  (`OrchestratorAtomicMergeSuite`): asserts the orchestrator persists
+  `manifest.json` before the FSM transition action and the state-cache
+  write (§11.5 step 1 writer side); cache lags at the pre-transition state.
 - **S2-8 settle-timeout coverage decision** — either explicit
   reviewer/refine handlers in `Fsm.transition` (with
   `ResumeHintCoverageSuite` rows) or documented orchestrator-side
@@ -687,10 +688,13 @@ deliverable on the relevant sub-PR (Slice 1.4a or Slice 1.4b per §2.4).
   found and fixed inside 1.4a (C16 envelope, C17 Codex strict schema,
   C18 Claude 2.1.156 tolerant parse). Production reviewer (model, cap,
   timeout-retry) tuning deferred to Task 1.4.9 / S4-3.
-- **S2-5 — Writer-side atomic-merge ordering test.** Asserted
-  against the orchestrator-loop sub-PR in Slice 1.4b: orchestrator
-  atomically persists `manifest.json` before the FSM transition
-  action and the state-cache write (§11.5 step 1 writer side).
+- **S2-5 — Writer-side atomic-merge ordering test (landed in Task 1.4.11).
+  ✅ CLOSED 2026-05-29.** `OrchestratorAtomicMergeSuite` drives the real
+  orchestrator loop to `PieceAwaitingMerge`, crashes on the merge-audit
+  append, and pins the §11.5-step-1 writer order: manifest persisted
+  `merged` first, the action-log batch absent, and the state cache lagging
+  at the pre-transition state. A direct `RebuildState.run` restart recovers
+  to `Refining` via reconcile case (c).
 - **S2-8 — `SettleTimeout` reviewer/refine coverage decision.**
   Slice 1.4 picks: explicit `Fsm.transition` handlers for
   `SessionPhase.{DesignReview, CodeReview, Refine}` (with

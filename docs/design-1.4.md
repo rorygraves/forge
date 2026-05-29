@@ -1601,13 +1601,13 @@ across d2a–d2c.
     append; restart reads manifest, reconcile synthesises
     the missing action, FSM advances normally.
 
-### Task 1.4.11 — **S2-5** writer-side atomic-merge test
+### Task 1.4.11 — **S2-5** writer-side atomic-merge test  ✅ landed 2026-05-29
 
 A focused PR that pins the writer-side invariant Slice 1.2 Task 1.2.6
 deferred. Task exists as its own anchor so a future reviewer
 walking carry-forwards can find the test directly.
 
-- [ ] **K1.** `OrchestratorAtomicMergeSuite` in `forge-app`
+- [x] **K1.** `OrchestratorAtomicMergeSuite` in `forge-app`
   test scope. Uses a fault-injection `SpecStore` /
   `FileActionLog` / `FileStateCache` triple:
   - Inject crash between manifest write and action-log
@@ -1618,10 +1618,34 @@ walking carry-forwards can find the test directly.
   - Restart via `RebuildState.run`. Assert reconciliation
     synthesises the missing `audit.piece_merged` and FSM
     advances to `Refining` correctly.
-- [ ] **K2.** Close **S2-5** in `design-rationale.md` —
+  **As landed:** the suite reuses the J5 `OrchestratorTestKit`
+  fakes (`FaultOnMergeAuditLog` injects the crash on the
+  `audit.piece_merged` append; the real `File*` triad backs a temp
+  tree) and drives the **real** `Orchestrator` loop from `Drafting`
+  to `PieceAwaitingMerge`, where the watcher offers the merged
+  snapshot. The crashed transition pins all three writer steps in
+  order: (1) the manifest is already persisted `merged`
+  (`SpecStore.saveManifest` ran first); (2) the action-log batch —
+  `fsm.transition` + `audit.piece_merged`, written all-or-nothing by
+  `appendAll` — never landed; (3) **the new assertion the e2e
+  crash-recovery suite did not make** — the state cache *lags behind*
+  the manifest, still holding the pre-transition
+  `PieceAwaitingMerge(p1, pr)` state, because `cache.save` is the
+  third write and the crash fired on the second. Pass 2 then calls
+  `RebuildState.run` *directly* (not the full loop): the log folds to
+  `PieceAwaitingMerge`, so reconcile takes the three-draft case (c)
+  — `fsm.transition` + `audit.piece_merged` + `harness.crash_recovered`
+  — and the FSM advances to `Refining`. (Distinct from
+  `OrchestratorE2ECrashRecoverySuite`, which drives the whole loop on
+  to `FeatureDone`; this suite is the focused writer-order anchor.)
+- [x] **K2.** Close **S2-5** in `design-rationale.md` —
   "Action required" flips from "deferred to Slice 1.4" to
   "closed in Slice 1.4b Task 1.4.11". Roadmap §7.2.2 entry
   updated.
+  **Done** — S2-5 "Action required" flipped to "CLOSED in Slice 1.4b
+  Task 1.4.11 (2026-05-29)" with the writer-side test path recorded;
+  roadmap §7.2.2 gate entry marked "✅ CLOSED 2026-05-29" and the §2.4
+  carry-forward bullet updated.
 
 ### Task 1.4.12 — **S2-8** / **S3-5** reviewer/refine SettleTimeout closure
 
@@ -2655,6 +2679,21 @@ ticks off only after Task 1.4.17 lands.
   368, `forge-agents` 196, `forge-git` 188, `forge-specs` 132,
   `forge-app` 230; `sbt test` + `sbt scalafmtCheckAll` clean; `forge-it`
   compiles.
+- 2026-05-29 — **Task 1.4.11 landed — S2-5 writer-side atomic-merge
+  test closed.** `OrchestratorAtomicMergeSuite` (`forge-app` test
+  scope) drives the real `Orchestrator` loop to `PieceAwaitingMerge`,
+  injects a crash on the `audit.piece_merged` action-log append, and
+  pins the §11.5-step-1 writer order directly: (1) the manifest is
+  already persisted `merged`, (2) the `fsm.transition` + audit batch
+  never landed (`appendAll` is all-or-nothing), and (3) — the
+  assertion the existing e2e crash-recovery suite did **not** make —
+  the state cache *lags behind* the manifest, still holding the
+  pre-transition `PieceAwaitingMerge` state (since `cache.save` is the
+  third write). A direct `RebuildState.run` restart recovers via
+  reconcile case (c) to `Refining`. **S2-5** flipped to CLOSED in
+  `design-rationale.md`; roadmap §7.2.2 + §2.4 entries updated. Build
+  green: `forge-app` 231 (+1), other module counts unchanged;
+  `sbt scalafmtCheckAll` clean.
 
 ## 4. Carry-forward (inherited + new)
 
@@ -2675,9 +2714,12 @@ explicitly to v1.3 / Phase 2 with a durable home in
   Resolves once all 6 method × connector pairs meet the
   ≥19/20 bar.
 - **S2-5** — Writer-side atomic-merge ordering test.
-  **Resolves in Task 1.4.11** with a focused fault-injection
-  test against the orchestrator's manifest-write
-  ordering.
+  **✅ Closed in Task 1.4.11 (2026-05-29)** — `OrchestratorAtomicMergeSuite`
+  is the focused fault-injection test against the orchestrator's
+  manifest-write ordering (manifest first, then the action-log
+  batch, then the state cache; the cache lags at the pre-transition
+  state on a merge-window crash, and `RebuildState.run` recovers to
+  `Refining`).
 - **S2-8** — `Fsm.transition` doesn't handle
   `SettleTimeout` for reviewer/refine phases. **Resolves
   in Task 1.4.12** via whichever path Task 1.4.2's B3 chose
