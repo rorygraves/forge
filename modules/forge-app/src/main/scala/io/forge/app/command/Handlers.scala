@@ -156,19 +156,19 @@ object abandon:
   def run(ctx: StateChangingContext, command: ForgeCommand.Abandon): IO[ExitCode] =
     Handlers.notImplemented(s"forge abandon ${command.feature.value}", "Task 1.4.10")
 
-// --- read-only (Task 1.4.10 / Task 1.4.13) ----------------------------------------
+// --- read-only (Task 1.4.13) ------------------------------------------------------
 
 object status:
   def run(ctx: ReadOnlyContext): IO[ExitCode] =
-    Handlers.notImplemented("forge status", "Task 1.4.13")
+    StatusReport.run(ctx.paths, ctx.config, ctx.args)
 
 object tail:
   def run(ctx: ReadOnlyContext): IO[ExitCode] =
-    Handlers.notImplemented("forge tail", "Task 1.4.13")
+    TailCommand.run(ctx.paths, ctx.args)
 
 object rebuildState:
   def run(ctx: ReadOnlyContext): IO[ExitCode] =
-    Handlers.notImplemented("forge rebuild-state", "Task 1.4.13")
+    RebuildStateCommand.run(ctx.paths, ctx.args)
 
 // --- unlock --force (§13 — fully implemented) -------------------------------------
 

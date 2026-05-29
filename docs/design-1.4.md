@@ -1647,7 +1647,7 @@ walking carry-forwards can find the test directly.
   roadmap §7.2.2 gate entry marked "✅ CLOSED 2026-05-29" and the §2.4
   carry-forward bullet updated.
 
-### Task 1.4.12 — **S2-8** / **S3-5** reviewer/refine SettleTimeout closure
+### Task 1.4.12 — **S2-8** / **S3-5** reviewer/refine SettleTimeout closure  ✅ landed 2026-05-29
 
 Whichever option B3 (in Task 1.4.2) chose — explicit FSM handlers
 (a) or documented orchestrator-side conversion (b).
@@ -1680,11 +1680,16 @@ Whichever option B3 (in Task 1.4.2) chose — explicit FSM handlers
 The user-facing surface. Per-command handlers wire into the
 orchestrator (Task 1.4.10) or are read-only / preflight-only.
 
-- [ ] **M1.** `forge new "<title>" [--mode <mode>] [--id <slug>]`
+- [x] **M1.** `forge new "<title>" [--mode <mode>] [--id <slug>]`
   — slugs per §5.2; creates `<branchPrefix>/<feature>/design`;
   initializes manifest with empty pieces; emits
   `UserCommandReceived(UserCommand.New)`; loops in
   Orchestrator until `InteractiveSpec`.
+  **Landed Task 1.4.10-d2c** (`NewFeature.scaffold`): preflight →
+  `syncBase` → `createDesignBranch` → seed a `Drafting` manifest.
+  Does not spawn the spec driver (that is `forge spec`, M2). v1
+  takes the title from the feature id; `--mode` / `--id` flag
+  parsing folds into the M2/M5 CLI-parser pass.
 - [ ] **M2.** `forge spec <feature>` — **line-mode REPL.** The
   one stateful interactive command. Wires
   `runStreamingSpec(specifyPrompt, firstMessage)` directly to
@@ -1692,13 +1697,27 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
   `AskUserQuestion` events prompt the human; answers route via
   `session.answerQuestion(toolUseId, answer)`. `/done`
   triggers `UserCommandReceived(UserCommand.Done)`.
-- [ ] **M3.** `forge run <feature>` — fully headless. Loops
+- [x] **M3.** `forge run <feature>` — fully headless. Loops
   Orchestrator from current state through to `FeatureDone` or
   `NeedsHumanIntervention`. Prints state transitions to
   stdout; full detail in `.forge/log/<feature>.jsonl`.
-- [ ] **M4.** `forge status [<feature>]` — Per §2.5 polish:
+  **Landed Task 1.4.10-d2c** (`RunFeature.execute`): loads the
+  manifest for `mode`, builds the real `Orchestrator` via
+  `OrchestratorBuilder`, drives to a loop-terminal state, and
+  renders it via `TerminalReport`.
+- [x] **M4.** `forge status [<feature>]` — Per §2.5 polish:
   current state, current piece, last action, budget remaining.
   Read-only; doesn't acquire the lock (per §15: read-only).
+  **As landed (Task 1.4.13 incr 1):** `StatusReport` reads the
+  rebuildable `FileStateCache` directly (not `RebuildState.run` —
+  status must not write while a `forge run` may be mid-flight) +
+  the manifest (authoritative title/mode/pieces) + the last NDJSON
+  log line (decoded in place, not via `replay`, whose repair-on-read
+  could write). With no feature arg it prints a one-line-per-feature
+  overview across `.forge/specs/`. When no cache exists yet it
+  renders from the manifest and points at `forge run` /
+  `rebuild-state`. The §2.5 golden-file formatting polish is
+  Task 1.4.15 O2; this is the v1 rendering.
 - [ ] **M5.** `forge resume <feature> --<hint>` — variants
   per §15 / §6 `ResumeHint`:
   - `--after-human-push` → `ResumeAfterHumanPush(p, prNumber)`.
@@ -1720,22 +1739,46 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
 - [ ] **M8.** `forge abandon <feature>` — emits
   `UserCommandReceived(UserCommand.Abandon(reason))`;
   Orchestrator transitions to `Abandoned(reason)`.
-- [ ] **M9.** `forge rebuild-state <feature>` — calls
+- [x] **M9.** `forge rebuild-state <feature>` — calls
   `RebuildState.run` directly; reports any
   `RebuildError`. Per §2.5 polish, prove this on a
   deliberately corrupted cache fixture (one test that
   hand-mutates `.forge/state/<feature>.json`).
-- [ ] **M10.** `forge unlock --force` — calls
+  **As landed (Task 1.4.13 incr 1):** `RebuildStateCommand` runs the
+  `RebuildState.run` pipeline (manifest seed → `foldEvents` →
+  `reconcile` → atomic `cache.save`), reports the recovered state
+  and any interrupted in-flight driver sessions, and maps each
+  `RebuildError` variant to an operator message. Classified §15
+  read-only (no lock) even though it writes the cache — recovery
+  must work while a stuck `forge run` holds nothing useful. **The
+  deliberately-corrupted-cache proof is Task 1.4.15 O4** (and depends
+  on a `RebuildError.CacheCorrupt` variant that does not exist yet —
+  `StateCache.load` currently maps an unreadable cache to `None`, so
+  the proof lands with O4, not here).
+- [x] **M10.** `forge unlock --force` — calls
   `ProcessLock.forceRelease` (Slice 1.3). Refuses with
   exit 2 on `LiveHolderRefused`.
-- [ ] **M11.** `forge tail <feature>` — §2.5 polish; tails
+  **Landed Task 1.4.9** (`unlock` handler + `Main` step-3
+  short-circuit): `Released` / `NoLockPresent` → exit 0;
+  `LiveHolderRefused(meta)` → exit 2 with holder info.
+- [x] **M11.** `forge tail <feature>` — §2.5 polish; tails
   `.forge/log/<feature>.jsonl`. Read-only; doesn't acquire
   the lock. Routes through Task 1.4.9's
   `ForgeCommand.ReadOnly(ReadOnlyKind.Tail)`.
+  **As landed (Task 1.4.13 incr 1):** `TailCommand` dumps the current
+  log then follows appends (1s poll) until cancelled; a missing log
+  exits 0 with a note. The unit-testable seam is `existing(path)`;
+  the O3 first-line-read smoke test is Task 1.4.15.
 - [ ] **M12.** Unit + IT coverage — per-command handler
   unit tests in `modules/forge-app/src/test/`; the
   MVP-gate end-to-end run (Task 1.4.16) exercises the integration
   surface.
+  **Partial (Task 1.4.13 incr 1):** `ReadOnlyHandlerSuite` (15 cases)
+  covers the read-only trio (`status` / `tail` / `rebuild-state`)
+  plus `MainSuite`'s read-only routing row updated to assert exit 0
+  (was the not-implemented `70` shell). Remaining handler unit tests
+  (`spec` / `resume` / `reconcile` / `refresh-cache` / `abandon`) +
+  the IT surface land with their increments / Task 1.4.16.
 
 ### Task 1.4.14 — **C14** Codex resume role-framing closure
 
@@ -2715,6 +2758,29 @@ ticks off only after Task 1.4.17 lands.
   CLOSED in `design-rationale.md`; roadmap §7.2.2 + §7.2.4 entries
   updated. Build green: `forge-core` 371 (+3), other module counts
   unchanged; `sbt scalafmtCheckAll` clean.
+- 2026-05-29 — **Task 1.4.13 increment 1 — the read-only trio
+  (`status` M4 / `rebuild-state` M9 / `tail` M11).** Wired the three
+  §15 read-only handlers, which need no orchestrator / connector /
+  lock: `StatusReport` (cache + manifest + last-log-line render, plus
+  a no-feature overview across `.forge/specs/`), `RebuildStateCommand`
+  (the `RebuildState.run` pipeline with in-flight-session reporting and
+  per-`RebuildError` messages), and `TailCommand` (dump-then-follow the
+  feature log at a 1s poll). Added `CliParser.requireFeature` /
+  `optionalFeature` public helpers — phase 2 collapses every read-only
+  command to `ForgeCommand.ReadOnly(kind)` (the feature is not in the
+  `forge-git` ADT), so the handlers parse their own feature from the
+  `rest` tokens on `ReadOnlyContext`; a missing/invalid feature surfaces
+  as exit 64. `MainSuite`'s read-only routing row flipped from the
+  `70` not-implemented shell to exit 0. New `ReadOnlyHandlerSuite` (15
+  cases). Ticked M1/M3 (landed Task 1.4.10-d2c) and M10 (landed
+  Task 1.4.9) as already-shipped. **Still open in Task 1.4.13:** M2
+  (`spec` REPL), M5 (`resume`), M6 (`reconcile` — note the M6-vs-§5.4
+  reconcile-direction scope to settle against Task 1.4.15), M7
+  (`refresh-cache`), M8 (`abandon`), and M12's remaining handler/IT
+  coverage. Build green: `forge-app` 246 (+15), other module counts
+  unchanged (`forge-core` 371, `forge-git` 188, `forge-agents` 196,
+  `forge-specs` 132); `sbt clean compile test` + `sbt scalafmtCheckAll`
+  clean.
 
 ## 4. Carry-forward (inherited + new)
 

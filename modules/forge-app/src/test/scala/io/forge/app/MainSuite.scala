@@ -32,8 +32,10 @@ class MainSuite extends munit.FunSuite:
     assertEquals(run(repo, "unlock"), ExitCode(64))
   }
 
-  tempFixture.test("a read-only shell routes and exits 70 (not implemented)") { repo =>
-    assertEquals(run(repo, "status"), ExitCode(70))
+  tempFixture.test("a read-only command routes without locking and exits 0 (status overview)") { repo =>
+    // `forge status` with no feature prints the (empty) overview; the point is that the read-only class routes to the
+    // wired handler (Task 1.4.13) without acquiring the lock.
+    assertEquals(run(repo, "status"), ExitCode.Success)
   }
 
   tempFixture.test("a state-changing command acquires then releases the lock around its handler") { repo =>
