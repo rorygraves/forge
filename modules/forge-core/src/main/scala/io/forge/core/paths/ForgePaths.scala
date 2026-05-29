@@ -47,6 +47,17 @@ final class ForgePaths(val repoRoot: os.Path, val home: os.Path = os.home):
   /** `.forge/specs/<feature>/audit/<name>` — leaf name supplied by the caller (e.g. `spec-answers.md`). */
   def audit(id: FeatureId, name: String): os.Path = auditDir(id) / name
 
+  // --- per-repo configuration (§18) ---
+
+  /** `.forge/config.json` — per-repo configuration (§18). Missing file ⇒ §18 defaults apply. */
+  val configFile: os.Path = repoForgeDir / "config.json"
+
+  /** `.forge/overrides/` — per-key config override directory (§18 "per-repo overrides under `.forge/overrides/`"). */
+  val overridesDir: os.Path = repoForgeDir / "overrides"
+
+  /** `.forge/overrides/<key>.json` — per-key override of a top-level `config.json` key (e.g. `claude`, `staging`). */
+  def overrideFile(key: String): os.Path = overridesDir / s"$key.json"
+
   // --- per-feature runtime state (gitignored) ---
 
   /** `.forge/log/<feature>.jsonl` — local canonical runtime log (§4 invariant). */

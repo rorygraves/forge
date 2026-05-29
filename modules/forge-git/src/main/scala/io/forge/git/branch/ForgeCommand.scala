@@ -38,8 +38,8 @@ object ForgeCommand:
   final case class RefreshCache(feature: FeatureId) extends ForgeCommand:
     val name = "refresh-cache"
 
-  /** `forge status` / `replay` / `rebuild-state` — all read-only, no branch-state requirements. The `kind` exists so
-    * the Slice-4 audit log can distinguish callers without expanding the BranchManager surface.
+  /** `forge status` / `tail` / `rebuild-state` — all read-only, no branch-state requirements. The `kind` exists so the
+    * Slice-4 audit log can distinguish callers without expanding the BranchManager surface.
     */
   final case class ReadOnly(kind: ReadOnlyKind) extends ForgeCommand:
     def name: String = s"read-only:${kind.tag}"
@@ -50,7 +50,12 @@ object ForgeCommand:
   final case class Abandon(feature: FeatureId) extends ForgeCommand:
     val name = "abandon"
 
+  /** Slice 1.4 Task 1.4.9 I3: `Replay` (batch render-from-log) is cut in favour of `Tail` (live `.jsonl` tail), which
+    * is what the §2.5 polish list / §15 command surface actually name. The old `Replay` placeholder had no §17 / §15
+    * anchor. Filed as carry-forward **S4-2** in `design-rationale.md` (no v1.3 spec edit — §15 mentions "`replay`" only
+    * in a `ForgeCommand` table comment, never on the command line).
+    */
   enum ReadOnlyKind(val tag: String):
     case Status extends ReadOnlyKind("status")
-    case Replay extends ReadOnlyKind("replay")
+    case Tail extends ReadOnlyKind("tail")
     case RebuildState extends ReadOnlyKind("rebuild-state")

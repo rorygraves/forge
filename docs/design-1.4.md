@@ -869,19 +869,29 @@ half.
 
 ### Slice 1.4b — Orchestrator loop, CLI, self-hosting gate
 
-### Task 1.4.9 — `forge-app` entry skeleton + config loader
+### Task 1.4.9 — `forge-app` entry skeleton + config loader  ✅ landed 2026-05-29
 
 `forge-app` so far has `lock/`, `monitor/`, `bootstrap/` (1.4a
 Task 1.4.1), `reviewer/` (1.4a Task 1.4.2). Task 1.4.9 lands the `main` entry
 point and the configuration loader that every command depends
 on.
 
-- [ ] **I1.** `io.forge.app.config.ForgeConfig` — case class
+- [x] **I1.** `io.forge.app.config.ForgeConfig` — case class
   mirroring v1.2 §18 `.forge/config.json` shape. Loaded by
   `ForgeConfigLoader.load(paths: ForgePaths): IO[Either[ConfigError,
   ForgeConfig]]`. Defaults from §18; per-key override from
   `.forge/overrides/<key>.json` if present.
-- [ ] **I2.** `io.forge.app.Main extends IOApp.Simple` — entry
+  **As landed:** nested §18 blocks (`Ci`/`Claude`/`Codex`/`Settle`/
+  `Github`/`BaseFreshness`) each with default args; `staging` reuses
+  `forge-specs` `StagingConfig`. Loader merges defaults →
+  `config.json` → per-key overrides at the `ujson` layer (override
+  *replaces* the named top-level key; partial nested objects still
+  default their own sub-keys), decodes once. A missing `config.json`
+  is `ForgeConfig.Default`, not a `ConfigError`. New `ForgePaths`
+  accessors `configFile` / `overridesDir` / `overrideFile(key)`.
+  Reviewer-tuning knobs (S4-5) deliberately **not** added — a §18
+  extension belongs in `forge-design-1.3.md`.
+- [x] **I2.** `io.forge.app.Main extends IOApp.Simple` — entry
   point. **Two-phase boot:** parse the command class up front
   so each subsequent resource (config, reviewer assets,
   connector, process lock) is acquired only by commands that
@@ -968,7 +978,27 @@ on.
   `StateChangingContext`, `UnlockForceContext` — so a
   read-only handler can't accidentally call into a
   connector that wasn't constructed).
-- [ ] **I3.** `CommandRouter` — thin dispatch table from
+  **As landed:** `Main extends IOApp` (not `IOApp.Simple` — the boot
+  needs the argv list *and* a non-zero `ExitCode`, neither of which
+  `Simple` exposes; framework-mechanics correction, no spec
+  implication). Boot steps 1–4, 7–10 (lock half) are wired: phase-1
+  parse → repoRoot resolve → `unlock --force` short-circuit (real
+  `FileProcessLock.forceRelease`) → config load → **phase-2 parse run
+  before lock acquire** (so a usage error never grabs the lock and the
+  parsed feature id populates the lock metadata — a benign reorder of
+  steps 7/8) → lock acquire for state-changing → dispatch. **Steps 5–6
+  (reviewer-asset install + connector construction) and the action-log
+  half of step 10 are deferred to Task 1.4.10** (I5 — see below): the
+  shell handlers don't touch a connector yet, and the connector +
+  log join the lock's single `Resource` bracket when the orchestrator
+  handlers need them. `Invocation.needsConnector` (phase 1) already
+  classifies the step-5/6 set. Exit codes: `0` ok / `2` lock held or
+  stale / `64` usage / `66` bad `--repo-root` / `70` not-implemented
+  shell / `78` config error. Per-class contexts are independent case
+  classes (`ReadOnlyContext` / `StateChangingContext` /
+  `UnlockForceContext`); `HandlerArgs` is the phase-1 `rest` carried on
+  each context for the handler's own phase-2 feature parse.
+- [x] **I3.** `CommandRouter` — thin dispatch table from
   `ForgeCommand` variant to `command.Handler.run(ctx,
   command): IO[ExitCode]`. Handlers in
   `io.forge.app.command.{new_, spec, run, status, resume,
@@ -991,15 +1021,39 @@ on.
     v1.3 spec edit — §15 names "`replay`" only in the
     `ForgeCommand` table comment, not in the command-line
     surface).
-- [ ] **I4.** Unit suite — `ForgeConfigLoaderSuite` covers
+  **As landed:** `ReadOnlyKind` is now `Status | Tail | RebuildState`;
+  S4-2 filed. `RealBranchManager.preflight` matches `ReadOnly(_)`
+  (kind-agnostic) so the preflight contract is unchanged and
+  `BranchManagerPreflightSuite`'s read-only row (`ReadOnlyKind.Status`)
+  still compiles untouched. `CommandRouter` has two class-keyed entry
+  points (`stateChanging` / `readOnly`); the three `resume` variants
+  share the `resume` handler; `unlock --force` dispatches from `Main`.
+  Handler objects exist for all eleven commands (`unlock` fully wired,
+  the other ten are `70`-exiting shells for Task 1.4.10 / Task 1.4.13).
+- [x] **I4.** Unit suite — `ForgeConfigLoaderSuite` covers
   defaults, partial config (missing keys default in),
   malformed JSON surfaces typed error, per-key override
   resolution.
-- [ ] **I5.** **AGENTS.md "ask before scope-expanding" anchor**
+  **As landed:** `ForgeConfigLoaderSuite` (11 cases incl. non-object
+  root, bad-enum, scalar override, override-without-base, malformed
+  override) plus `CliParserSuite` (phase-1 class/`--repo-root`/unknown
+  + phase-2 feature/resume/unlock construction) and `MainSuite`
+  (boot wiring end-to-end: exit codes, lock acquire→release around a
+  state-changing shell, config-skip on `unlock --force`).
+- [x] **I5.** **AGENTS.md "ask before scope-expanding" anchor**
   — if Task 1.4.9 needs new `forge-core` / `forge-git` /
   `forge-agents` surface (likely: connector construction
   factory, since `Main` constructs the connector once per
   run), file an `AskUserQuestion` before silently expanding.
+  **As resolved:** the connector-construction factory (the flagged
+  expansion) was **not** built — connector construction is deferred to
+  Task 1.4.10 where the orchestrator handlers actually need it, so no
+  new `forge-agents` surface was added and no ask was required. The
+  only cross-module additions are routine path-seam accessors on
+  `ForgePaths` (`configFile` / `overridesDir` / `overrideFile`, same
+  shape as the `pollBaselineFile` accessor Task 1.4.10 itself plans)
+  and the I3-mandated `ForgeCommand.ReadOnlyKind` change — neither a
+  behavioural surface expansion.
 
 ### Task 1.4.10 — `Orchestrator` loop (the headless feature engine)
 
@@ -2449,6 +2503,46 @@ ticks off only after Task 1.4.17 lands.
   at H5" note removed). The §2.4 roadmap `[~]` bullets stay `[~]`
   until Task 1.4.17. **Slice 1.4b opens at Task 1.4.9** (`forge-app`
   entry skeleton + config loader).
+- 2026-05-29 — **Task 1.4.9 landed — `forge-app` entry skeleton +
+  config loader.** I1: `io.forge.app.config.ForgeConfig` mirrors §18
+  field-for-field (nested `Ci`/`Claude`/`Codex`/`Settle`/`Github`/
+  `BaseFreshness` blocks; `staging` reuses `forge-specs`
+  `StagingConfig` so the deny list can't drift); `ForgeConfigLoader`
+  merges §18 defaults → `.forge/config.json` → per-key
+  `.forge/overrides/<key>.json` at the `ujson` layer and decodes once
+  (lenient default-arg merge), with `ConfigError.{Malformed,IoFailure}`
+  and a *missing* config treated as `ForgeConfig.Default` (not an
+  error). New `ForgePaths` accessors `configFile` / `overridesDir` /
+  `overrideFile(key)` keep the `.forge` seam intact. I3:
+  `ForgeCommand.ReadOnlyKind` cuts `Replay` for `Tail`
+  (`Status | Tail | RebuildState`); filed as **S4-2** in
+  `design-rationale.md` (`RealBranchManager` matches `ReadOnly(_)`, so
+  preflight is unchanged). I2: `io.forge.app.Main extends IOApp` (not
+  `IOApp.Simple` — the boot needs argv + a non-zero `ExitCode`, which
+  `Simple` exposes neither of; minor design-sketch correction, no spec
+  implication) with the two-phase boot — phase-1 class parse → repoRoot
+  resolve → `unlock --force` short-circuit (fully wired via
+  `FileProcessLock.forceRelease`, loads no config) → config load →
+  phase-2 parse → lock acquire for state-changing commands → dispatch.
+  `io.forge.app.cli` (phase-1/2 parser, `CommandClass`, `CliError`),
+  `io.forge.app.command` (`CommandRouter`, per-class `*Context` types,
+  eleven handler shells exiting `70` = not-implemented; `unlock` is
+  real). **Deferred to Task 1.4.10 (I5 — no scope expansion):** reviewer-
+  asset install + connector construction (boot steps 5–6) + the action
+  log join the lock's `Resource` bracket when the orchestrator handlers
+  need them; `Invocation.needsConnector` already classifies the set.
+  I4: `ForgeConfigLoaderSuite` (defaults / partial / malformed /
+  non-object root / bad enum / per-key + scalar override / override
+  without base / malformed override) + `CliParserSuite` +
+  `MainSuite` (boot wiring, exit codes, lock acquire/release,
+  config-skip on `unlock --force`). Build green — `forge-app` **130**
+  (was 96), all other modules unchanged (`forge-core` 358,
+  `forge-agents` 196, `forge-git` 168, `forge-specs` 132);
+  `sbt clean compile test` + `sbt scalafmtCheckAll` clean; `forge-it`
+  compiles. S4-5 (reviewer model/cap/retry tuning) deliberately **not**
+  added as config keys — that's a §18 extension for `forge-design-1.3.md`,
+  not a silent field; reviewer model/cap stay at the Task 1.4.7 v1
+  values in the reviewer-call wiring until then.
 
 ## 4. Carry-forward (inherited + new)
 
@@ -2560,8 +2654,10 @@ expected-vs-actual.
   `.forge/log/<feature>.jsonl`, the §2.5 polish item
   the roadmap actually names) and drops `Replay`. v1.3
   impact: none (§15 references "replay" only in the
-  table; not in the command surface). Filed at Task 1.4.9
-  close in `design-rationale.md`.
+  table; not in the command surface). **Filed in
+  `design-rationale.md` (S4-2) at Task 1.4.9 close
+  2026-05-29; `ReadOnlyKind` is now
+  `Status | Tail | RebuildState`.**
 - **S4-3 — Reviewer call cost + observable kill diagnostics
   are out of scope in 1.4a.** Surfaced at plan-review pre-Task 1.4.2.
   `Connector.reviewDesign / reviewPr / refine` return
