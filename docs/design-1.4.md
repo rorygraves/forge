@@ -2279,6 +2279,23 @@ ticks off only after Task 1.4.17 lands.
   `ClaudeConnectorSuite` 31 → 36. Remaining: re-measure
   pr-review/claude at N=20 under the fix; **C15 stays open until all
   six pairs clear ≥19/20.**
+- 2026-05-29 — Task 1.4.7: pinned the Claude reviewer model + first
+  **full 6×20 batch (Claude on haiku, Codex on gpt-5.3-codex) — all
+  six pairs ≥19/20** (64 min, 120 calls). Found the reviewer was
+  silently inheriting the CLI default model (Opus 4.8, ~$0.40/call);
+  added `reviewerModel` to `ClaudeConnector` + `FORGE_IT_CLAUDE_MODEL`
+  to the suite (default = inherit) so batch cost/bar are reproducible.
+  Offline analysis of the 60 dumped Claude envelopes: **haiku wraps
+  every response in a ```json fence + pretty-prints it** — so the C18
+  **salvage** path carried 60/60; haiku's newlines are structural
+  (handled once the fence is stripped), so it did **not** exercise the
+  **normalize** (in-string control char) path that fixed the Opus
+  18/20 case — that remains unit-proven, not yet live-proven. Per the
+  staged plan a **sonnet** full batch follows (production-realistic
+  reviewer); an Opus live re-run is deprioritised on cost (the unit
+  test pins the exact Opus failure shape). C15 stays open pending the
+  production-model bar decision; mechanics validated on the messiest
+  model.
 
 ## 4. Carry-forward (inherited + new)
 
