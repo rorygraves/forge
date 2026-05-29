@@ -121,9 +121,11 @@ object AssetInstaller:
       "refine.json"
     )
 
-    /** System-prompt files — six entries, one per reviewer-method × per-CLI. The driver-side prompts
-      * (`specify.<cli>.md`, `implement.<cli>.md`, `fixup.<cli>.md`) land in a later sub-PR; A1 ships only the reviewer
-      * prompts.
+    /** System-prompt files — twelve entries: six reviewer-method × per-CLI (A1) plus the six driver-side prompts
+      * (`specify.<cli>.md`, `implement.<cli>.md`, `fixup.<cli>.md`) the orchestrator binds via
+      * `Connector.runStreamingSpec` / `runHeadlessImplementation` / `runFixup` (Task 1.4.10-d2b). The design-revision
+      * phase resumes the spec session (no separate prompt at resume), so `specify.<cli>.md` covers both spec and design
+      * revision.
       */
     val PromptLeaves: Vector[String] = Vector(
       "design-review.claude.md",
@@ -131,7 +133,13 @@ object AssetInstaller:
       "code-review.claude.md",
       "code-review.codex.md",
       "refine.claude.md",
-      "refine.codex.md"
+      "refine.codex.md",
+      "specify.claude.md",
+      "specify.codex.md",
+      "implement.claude.md",
+      "implement.codex.md",
+      "fixup.claude.md",
+      "fixup.codex.md"
     )
 
     /** Templates per §11.4 / §7.7 / §14.3. The round-1 / attempt-1 instances stand in for the round-N / attempt-N

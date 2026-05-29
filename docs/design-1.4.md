@@ -1080,14 +1080,14 @@ so a half-built engine never reads as "J-item done".
   the J4 atomic-persist order, and the scripted-fake e2e suites (J5).
   Every git/gh/`Connector`/prompt interaction stays behind the
   `SideEffects` seam (no real impl yet). (commit `96ba820`, 2026-05-29)
-- [ ] **1.4.10-d2a** — `forge-git` commit/status seam. Adds
+- [x] **1.4.10-d2a** — `forge-git` commit/status seam. Adds
   `GitClient.stage` / `commit` / structured `status` (+ `StatusEntry`
   / `CommitResult`), the `RealGitClient` impl, the `FakeGitClient`
   stubs, pure parser/classifier units, and a real-`git`
   integration suite. Pure git-domain (forge-git depends only on
   forge-core); no forge-app changes. Unblocks the `ChangeCollector`
   + §11.4/§11.6 commit→push wiring in d2b.
-- [ ] **1.4.10-d2b** — real `SideEffects` impl + J3 connector factory
+- [x] **1.4.10-d2b** — real `SideEffects` impl + J3 connector factory
   + minimal v1 driver system prompts. `RealSideEffects` wiring the
   `Connector` (J3 — constructed once per `Mode`, shared across
   `runStreamingSpec`/`runHeadlessImplementation`/`runFixup`/
@@ -1096,6 +1096,19 @@ so a half-built engine never reads as "J-item done".
   `SpecStore`/`DocSync`, and template-rendered prompt/PR-body/audit
   assembly; six driver system prompts (spec/implement/fixup ×
   claude/codex) added to `assets/` + `AssetInstaller`. **Completes J3.**
+  **As landed:** `ConnectorFactory.build(mode, paths, config)` (J3 —
+  one `Connector` per `Mode`, reviewer assets from `~/.forge/`, v1
+  models hard-wired pending **S4-5**); `RealSideEffects` implementing
+  all 17 `SideEffects` methods (manifest mutations stay with the FSM —
+  side effects only return events; `Deny`/`Ask` → `Left` for the
+  loop's NHI routing); pure `RealSideEffects.statusToFileChanges`
+  (`StatusEntry → FileChange`, carrying `gitIgnored` + rename source);
+  `pr-body.md.hbs` rendered via `HandlebarsLite` with a plain-body
+  fallback. Six driver prompts shipped + registered in
+  `AssetInstaller.PromptLeaves`. Tests: `RealSideEffectsSuite` (8) +
+  `ConnectorFactorySuite` (2) + the `AssetInstallerSuite` extension;
+  forge-app 203, all unit modules green; `scalafmtCheckAll` clean.
+  J1–J5 / §3 status-log / roadmap fold stay unticked pending d2c.
 - [ ] **1.4.10-d2c** — `Main` wiring + cross-restart durability +
   real-CLI integration. `forge run` / `spec` / `new` handlers
   instantiate the `Orchestrator` inside the lock `Resource`; **S4-1**
