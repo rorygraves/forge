@@ -19,6 +19,30 @@ object FastForwardResult:
   final case class AlreadyUpToDate(sha: Sha) extends FastForwardResult
   final case class LocallyDiverged(local: Sha, remote: Sha) extends FastForwardResult
 
+/** One `git status --porcelain -z` entry (Task 1.4.10-d2a). The two-character XY status is split into [[index]]
+  * (staged) and [[worktree]] (unstaged); [[origPath]] carries the rename/copy source (the new path lives in [[path]]);
+  * [[ignored]] is the `!!` case.
+  *
+  * The orchestrator's `StatusEntry → FileChange` map (Task 1.4.10-d2b, in forge-app) populates `FileChange.gitIgnored`
+  * from [[ignored]] — the §10.1 rule-4 bit `ChangeCollector` cannot compute itself. forge-git stays git-domain: it does
+  * not depend on forge-specs, so the mapping lives in the consumer.
+  */
+final case class StatusEntry(
+    index: Char,
+    worktree: Char,
+    path: String,
+    origPath: Option[String],
+    ignored: Boolean
+)
+
+/** Outcome of [[GitClient.commit]] (Task 1.4.10-d2a). A clean tree is **not** an error — it is a normal post-settle
+  * case (a driver session that produced no working-tree change) the orchestrator must distinguish from a real commit,
+  * so it is modelled as a result variant rather than a [[GitError]].
+  */
+enum CommitResult:
+  case Committed
+  case NothingToCommit
+
 /** §9 / §11.3 step 5 / §11.4 step 1 `git` surface. One-shot subprocess invocations classified through [[GitError]]; no
   * streaming. `RealGitClient` shells out via `os.proc.call`; `FakeGitClient` (PR-A A4) is keyed by argv shape so suites
   * can stub deterministically.
@@ -86,6 +110,24 @@ trait GitClient:
 
   /** `git status --porcelain` empty (clean) vs non-empty (dirty). */
   def isWorktreeClean: IO[Either[GitError, Boolean]]
+
+  /** `git add -A -- <paths>` (Task 1.4.10-d2a) — stage adds / modifications / deletions for the given repo-relative
+    * paths (the §11.4 step 6 / §11.6 commit-then-push flow stages exactly the `ChangeCollector` `Allow` set). Empty
+    * `paths` is a no-op `Right(())`: the seam never stages the whole tree implicitly.
+    */
+  def stage(paths: Vector[String]): IO[Either[GitError, Unit]]
+
+  /** `git status --porcelain -z [--ignored]` parsed into [[StatusEntry]] rows (Task 1.4.10-d2a). NUL framing (`-z`)
+    * sidesteps the `core.quotePath` quoting trap. `includeIgnored = true` adds the `!!` rows the orchestrator needs to
+    * set `FileChange.gitIgnored`.
+    */
+  def status(includeIgnored: Boolean = false): IO[Either[GitError, Vector[StatusEntry]]]
+
+  /** `git commit -m <message>` (Task 1.4.10-d2a). A clean tree maps to [[CommitResult.NothingToCommit]] (not an error);
+    * a real commit maps to [[CommitResult.Committed]] — read the new SHA via [[currentSha]]. Identity is ambient (the
+    * repo / global `user.name` / `user.email`); committer-as-bot policy is an orchestrator concern, not the seam's.
+    */
+  def commit(message: String): IO[Either[GitError, CommitResult]]
 
   /** `git show-ref --verify refs/heads/<name>` — exit 0 ⇒ exists. */
   def branchExistsLocal(name: BranchName): IO[Either[GitError, Boolean]]

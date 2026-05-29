@@ -2,7 +2,7 @@ package io.forge.git.cli.fake
 
 import cats.effect.IO
 import io.forge.core.{BranchName, Sha}
-import io.forge.git.cli.{FastForwardResult, GitError}
+import io.forge.git.cli.{CommitResult, FastForwardResult, GitError, StatusEntry}
 import munit.CatsEffectSuite
 
 /** PR-A A4 — smoke for `FakeGitClient.builder`. Mirrors the [[FakeGhClientSuite]] shape. */
@@ -62,3 +62,32 @@ class FakeGitClientSuite extends CatsEffectSuite:
         assertEquals(r, Right(()))
         assertEquals(seen.toList, List((BranchName("forge/feat/p1"), Some("abc1234"))))
       }
+
+  // --- Task 1.4.10-d2a: commit/status seam stubs ---
+
+  test("unconfigured commit → Transient error naming the method"):
+    val git = FakeGitClient.builder.build
+    git.commit("msg").map {
+      case Left(GitError.Transient(_, msg)) => assert(msg.contains("commit"))
+      case other => fail(s"expected unconfigured error, got $other")
+    }
+
+  test("stage — captures the staged paths via the function variant"):
+    val seen = scala.collection.mutable.ArrayBuffer.empty[Vector[String]]
+    val git = FakeGitClient.builder.stage { paths =>
+      seen += paths
+      IO.pure(Right(()))
+    }.build
+    git.stage(Vector("a.txt", "b.txt")).map { r =>
+      assertEquals(r, Right(()))
+      assertEquals(seen.toList, List(Vector("a.txt", "b.txt")))
+    }
+
+  test("status — canned entries echoed back"):
+    val entries = Vector(StatusEntry(' ', 'M', "keep.txt", None, ignored = false))
+    val git = FakeGitClient.builder.status(entries).build
+    git.status().map(r => assertEquals(r, Right(entries)))
+
+  test("commit — canned NothingToCommit"):
+    val git = FakeGitClient.builder.commit(CommitResult.NothingToCommit).build
+    git.commit("noop").map(r => assertEquals(r, Right(CommitResult.NothingToCommit)))

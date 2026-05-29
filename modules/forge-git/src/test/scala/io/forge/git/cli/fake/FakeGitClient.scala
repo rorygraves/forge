@@ -2,7 +2,7 @@ package io.forge.git.cli.fake
 
 import cats.effect.IO
 import io.forge.core.{BranchName, Sha}
-import io.forge.git.cli.{FastForwardResult, GitClient, GitError}
+import io.forge.git.cli.{CommitResult, FastForwardResult, GitClient, GitError, StatusEntry}
 
 /** Test-only [[GitClient]] stub. Same shape as [[FakeGhClient]] — builder DSL, "unconfigured" default for every method.
   * Keeps `BranchManager` / `PRWatcher` suites independent of a real git binary; live `git` semantics are exercised in
@@ -22,7 +22,10 @@ final class FakeGitClient private (
     listTagsFn: Option[String] => IO[Either[GitError, Vector[String]]],
     isWorktreeCleanFn: IO[Either[GitError, Boolean]],
     branchExistsLocalFn: BranchName => IO[Either[GitError, Boolean]],
-    branchExistsRemoteFn: BranchName => IO[Either[GitError, Boolean]]
+    branchExistsRemoteFn: BranchName => IO[Either[GitError, Boolean]],
+    stageFn: Vector[String] => IO[Either[GitError, Unit]],
+    statusFn: Boolean => IO[Either[GitError, Vector[StatusEntry]]],
+    commitFn: String => IO[Either[GitError, CommitResult]]
 ) extends GitClient:
 
   override def currentBranch: IO[Either[GitError, BranchName]] = currentBranchFn
@@ -42,6 +45,9 @@ final class FakeGitClient private (
   override def isWorktreeClean: IO[Either[GitError, Boolean]] = isWorktreeCleanFn
   override def branchExistsLocal(name: BranchName): IO[Either[GitError, Boolean]] = branchExistsLocalFn(name)
   override def branchExistsRemote(name: BranchName): IO[Either[GitError, Boolean]] = branchExistsRemoteFn(name)
+  override def stage(paths: Vector[String]): IO[Either[GitError, Unit]] = stageFn(paths)
+  override def status(includeIgnored: Boolean): IO[Either[GitError, Vector[StatusEntry]]] = statusFn(includeIgnored)
+  override def commit(message: String): IO[Either[GitError, CommitResult]] = commitFn(message)
 
 object FakeGitClient:
 
@@ -70,7 +76,11 @@ object FakeGitClient:
       private val branchExistsLocalFn: BranchName => IO[Either[GitError, Boolean]] = (_: BranchName) =>
         notConfigured("branchExistsLocal"),
       private val branchExistsRemoteFn: BranchName => IO[Either[GitError, Boolean]] = (_: BranchName) =>
-        notConfigured("branchExistsRemote")
+        notConfigured("branchExistsRemote"),
+      private val stageFn: Vector[String] => IO[Either[GitError, Unit]] = (_: Vector[String]) => notConfigured("stage"),
+      private val statusFn: Boolean => IO[Either[GitError, Vector[StatusEntry]]] = (_: Boolean) =>
+        notConfigured("status"),
+      private val commitFn: String => IO[Either[GitError, CommitResult]] = (_: String) => notConfigured("commit")
   ):
     def currentBranch(response: Either[GitError, BranchName]): Builder = copy(currentBranchFn = IO.pure(response))
     def currentBranch(name: BranchName): Builder = currentBranch(Right(name))
@@ -130,6 +140,18 @@ object FakeGitClient:
     def branchExistsRemote(response: Either[GitError, Boolean]): Builder =
       branchExistsRemote(_ => IO.pure(response))
 
+    def stage(fn: Vector[String] => IO[Either[GitError, Unit]]): Builder = copy(stageFn = fn)
+    def stage(response: Either[GitError, Unit]): Builder = stage(_ => IO.pure(response))
+    def stageOk: Builder = stage(Right(()))
+
+    def status(fn: Boolean => IO[Either[GitError, Vector[StatusEntry]]]): Builder = copy(statusFn = fn)
+    def status(response: Either[GitError, Vector[StatusEntry]]): Builder = status(_ => IO.pure(response))
+    def status(entries: Vector[StatusEntry]): Builder = status(Right(entries))
+
+    def commit(fn: String => IO[Either[GitError, CommitResult]]): Builder = copy(commitFn = fn)
+    def commit(response: Either[GitError, CommitResult]): Builder = commit(_ => IO.pure(response))
+    def commit(result: CommitResult): Builder = commit(Right(result))
+
     def build: FakeGitClient = new FakeGitClient(
       currentBranchFn,
       currentShaFn,
@@ -144,7 +166,10 @@ object FakeGitClient:
       listTagsFn,
       isWorktreeCleanFn,
       branchExistsLocalFn,
-      branchExistsRemoteFn
+      branchExistsRemoteFn,
+      stageFn,
+      statusFn,
+      commitFn
     )
 
   def builder: Builder = Builder()

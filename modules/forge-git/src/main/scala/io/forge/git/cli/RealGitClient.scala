@@ -131,6 +131,22 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
   override def isWorktreeClean: IO[Either[GitError, Boolean]] =
     run(Vector("git", "status", "--porcelain")).map(_.map(_.isEmpty))
 
+  override def stage(paths: Vector[String]): IO[Either[GitError, Unit]] =
+    if paths.isEmpty then IO.pure(Right(()))
+    else run(Vector("git", "add", "-A", "--") ++ paths).map(_.map(_ => ()))
+
+  override def status(includeIgnored: Boolean): IO[Either[GitError, Vector[StatusEntry]]] =
+    val argv =
+      Vector("git", "status", "--porcelain", "-z") ++ (if includeIgnored then Vector("--ignored") else Vector.empty)
+    run(argv).map(_.map(RealGitClient.parseStatusZ))
+
+  override def commit(message: String): IO[Either[GitError, CommitResult]] =
+    // Deliberately no `-q`: git prints "nothing to commit" to stdout, which the classifier keys off.
+    IO.blocking {
+      val res = os.proc("git", "commit", "-m", message).call(cwd = repoRoot, check = false, stderr = os.Pipe)
+      RealGitClient.classifyCommit(res.exitCode, res.out.text(), res.err.text())
+    }
+
   override def branchExistsLocal(name: BranchName): IO[Either[GitError, Boolean]] =
     refExists(s"refs/heads/${name.value}")
 
@@ -175,3 +191,41 @@ object RealGitClient:
     else if NoUpstreamPattern.findFirstIn(stderr).isDefined then Left(GitError.NoUpstream(branch))
     else if ForceLeasePattern.findFirstIn(stderr).isDefined then Left(GitError.ForceLeaseRejected(branch, stderr))
     else Left(GitError.Transient(exitCode, stderr))
+
+  private val NothingToCommitPattern: Regex =
+    """(?i)(nothing to commit|no changes added to commit|nothing added to commit)""".r
+
+  /** `git commit` classifier (Task 1.4.10-d2a): exit 0 ⇒ [[CommitResult.Committed]]; a clean-tree refusal (git prints
+    * "nothing to commit" to stdout and exits non-zero) ⇒ [[CommitResult.NothingToCommit]]; anything else ⇒
+    * [[GitError.Transient]]. Visible for testing.
+    */
+  def classifyCommit(exitCode: Int, stdout: String, stderr: String): Either[GitError, CommitResult] =
+    if exitCode == 0 then Right(CommitResult.Committed)
+    else if NothingToCommitPattern.findFirstIn(stdout + "\n" + stderr).isDefined then
+      Right(CommitResult.NothingToCommit)
+    else Left(GitError.Transient(exitCode, stderr))
+
+  /** Parse `git status --porcelain -z` (Task 1.4.10-d2a). Each record is a NUL-terminated token `XY<space><path>`;
+    * rename/copy records (X ∈ {R, C}) are followed by a second NUL token carrying the source path. NUL framing means
+    * paths are never quoted, so no unescaping is needed. Visible for testing.
+    */
+  def parseStatusZ(raw: String): Vector[StatusEntry] =
+    // Trailing NUL produces an empty final segment; drop empties.
+    val tokens = raw.split('\u0000').iterator.filter(_.nonEmpty).toVector
+    val out = Vector.newBuilder[StatusEntry]
+    var i = 0
+    while i < tokens.length do
+      val tok = tokens(i)
+      // A well-formed token is at least "XY p" — two status chars, a separator, then the path.
+      if tok.length < 4 then i += 1
+      else
+        val index = tok.charAt(0)
+        val worktree = tok.charAt(1)
+        val path = tok.substring(3)
+        val isRenameOrCopy = index == 'R' || index == 'C' || worktree == 'R' || worktree == 'C'
+        val (origPath, next) =
+          if isRenameOrCopy && i + 1 < tokens.length then (Some(tokens(i + 1)), i + 2)
+          else (None, i + 1)
+        out += StatusEntry(index, worktree, path, origPath, ignored = index == '!' && worktree == '!')
+        i = next
+    out.result()

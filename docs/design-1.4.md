@@ -1060,6 +1060,54 @@ on.
 The heart of Slice 1.4b. Wires Slices 1–3 together through
 `Fsm.transition`.
 
+**Increment breakdown (delivery sub-PRs).** J1–J5 below are the
+*contract*; the engine ships as a sequence of sub-increments so each
+lands reviewably. Tick a sub-increment's box as it lands. The J1–J5
+boxes, the §3 status-log entry, and the roadmap fold all flip only
+when the final increment (**d2c**) lands and closes the whole Task —
+so a half-built engine never reads as "J-item done".
+
+- [x] **1.4.10-a/b** — orchestrator foundations + source-selection
+  (`EventSources`, `ActiveSession`, the `SideEffects` trait,
+  `OrchestratorSourceSelectionSuite`); establishes J2's
+  source-selection table. (commit `f2b744e`, 2026-05-29)
+- [x] **1.4.10-c** — pure post-settle synthesis + restart recovery
+  (`PostSettleSynthesis`, `RestartRecovery`, the `RebuildState`
+  in-flight widening **S4-4**, and the two pinning suites); J2's
+  synthesis + restart half. (commit `c00c21e`, 2026-05-29)
+- [x] **1.4.10-d1** — effectful loop engine + J5 e2e: the
+  `Orchestrator` `IO` loop (J1), the source→`FsmEvent` conversion,
+  the J4 atomic-persist order, and the scripted-fake e2e suites (J5).
+  Every git/gh/`Connector`/prompt interaction stays behind the
+  `SideEffects` seam (no real impl yet). (commit `96ba820`, 2026-05-29)
+- [ ] **1.4.10-d2a** — `forge-git` commit/status seam. Adds
+  `GitClient.stage` / `commit` / structured `status` (+ `StatusEntry`
+  / `CommitResult`), the `RealGitClient` impl, the `FakeGitClient`
+  stubs, pure parser/classifier units, and a real-`git`
+  integration suite. Pure git-domain (forge-git depends only on
+  forge-core); no forge-app changes. Unblocks the `ChangeCollector`
+  + §11.4/§11.6 commit→push wiring in d2b.
+- [ ] **1.4.10-d2b** — real `SideEffects` impl + J3 connector factory
+  + minimal v1 driver system prompts. `RealSideEffects` wiring the
+  `Connector` (J3 — constructed once per `Mode`, shared across
+  `runStreamingSpec`/`runHeadlessImplementation`/`runFixup`/
+  `resumeStreamingSpec`), `ChangeCollector` (the `StatusEntry →
+  FileChange` map that sets `gitIgnored`), `BranchManager`,
+  `SpecStore`/`DocSync`, and template-rendered prompt/PR-body/audit
+  assembly; six driver system prompts (spec/implement/fixup ×
+  claude/codex) added to `assets/` + `AssetInstaller`. **Completes J3.**
+- [ ] **1.4.10-d2c** — `Main` wiring + cross-restart durability +
+  real-CLI integration. `forge run` / `spec` / `new` handlers
+  instantiate the `Orchestrator` inside the lock `Resource`; **S4-1**
+  poll-baseline file persistence; **S4-5** reviewer process-failure
+  retry; a `forge-it` end-to-end driving real `claude`/`codex` +
+  git/gh. **Closes Task 1.4.10**: flips J1–J5, adds the §3
+  status-log entry.
+
+J-item mapping: **J2** ← a/b + c; **J1 + J4 + J5** ← d1; **J3** ←
+d2b; the real git/gh/`Connector` behaviour behind J1/J4 is realized
+across d2a–d2c.
+
 - [ ] **J1.** `io.forge.app.orchestrator.Orchestrator` —
   the headless feature loop. Pseudocode (the three
   sub-phases from J2 are explicit; `currentDriverSession`
