@@ -9,15 +9,16 @@ that first; everything below is Claude-Code-specific.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
 - **Active implementation plan:**
   [`docs/design-1.4.md`](docs/design-1.4.md) — Slice 1.4 (Phase-1 MVP
-  gate). Opened 2026-05-27. Task 1.4.1 (reviewer schemas + system prompts
-  under `~/.forge/`) is landing now. The most recent closed audit
+  gate). Opened 2026-05-27. **Slice 1.4a (Task 1.4.1 → Task 1.4.8) closed
+  2026-05-29; Slice 1.4b open** — Task 1.4.9 (`forge-app` entry skeleton +
+  config loader) is the entry point. The most recent closed audit
   trails are [`docs/design-2.3.md`](docs/design-2.3.md) (Slice 1.3,
   closed 2026-05-27), [`docs/design-2.2.md`](docs/design-2.2.md)
   (Slice 1.2), and [`docs/design-2.1.md`](docs/design-2.1.md) (Slice
   1.1). See `AGENTS.md` §"Per-section implementation plans" for the
   pattern (Task breakdown with checkbox items).
-- **Current state:** Slices 1.1, 1.2, and 1.3 ✅ closed 2026-05-27.
-  Slice 1.4 🟢 open 2026-05-27.
+- **Current state:** Slices 1.1, 1.2, 1.3 ✅ closed 2026-05-27;
+  **Slice 1.4a ✅ closed 2026-05-29; Slice 1.4b 🟢 open.**
   Slice 1.1 shipped both connectors against v1.2 §7.1 with real-CLI
   integration coverage in `forge-it`. Slice 1.2 shipped `forge-core` —
   `ForgePaths`, relocated manifest data types,
@@ -28,20 +29,29 @@ that first; everything below is Claude-Code-specific.
   `forge-git` (`GhClient` / `GitClient` one-shot CLI seams,
   `PrSnapshotDecoder` + `BaselineCursor(at, seenIds)`,
   `BranchManager` + `BranchProtectionCache`, `PRWatcher`) and
-  `forge-app` (`ProcessLock`, `SessionMonitor`) — every component
-  the Slice 1.4 orchestrator needs to produce `FsmEvent`s from the
-  outside world. Test scope: `forge-core` 358, `forge-agents` 181,
-  `forge-git` 163, `forge-app` 46, `forge-it` 10 default-on + 5
-  opt-in. **Carry-forward** to v1.3 / Slice 1.4 (see
-  [`docs/design-rationale.md`](docs/design-rationale.md) and
-  [`docs/roadmap.md`](docs/roadmap.md) §7.2): **C14** (Codex
-  `resumeStreamingSpec` system-prompt prepending), ~~**C15**~~
-  (≥19/20 native schema regression suite — **✅ closed in Task 1.4.7**,
-  2026-05-29: bar met for all six method × connector pairs with the v1
-  reviewer config claude=`haiku` / codex=`gpt-5.3-codex` at a 3-min
-  cap; see design-rationale C15/C16/C17/C18 and carry-forward S4-5),
-  **S2-1** through **S2-10**, and **S3-1** through **S3-8**.
-  (Full TL;DR "Current state" refresh lands at Task 1.4.8 H5.)
+  `forge-app` (`ProcessLock`, `SessionMonitor`). **Slice 1.4a** shipped
+  the orchestrator's writable foundation: in-tree reviewer assets +
+  `AssetInstaller` (first-run install into `~/.forge/`), the
+  `io.forge.app.reviewer` wall-clock boundary (`ReviewerCall` /
+  `ReviewerOutcome` / `RealReviewerCall`), the repopulated `forge-specs`
+  (`SpecStore` / `FileSpecStore`, `DocSync` + `HandlebarsLite`,
+  `ChangeCollector` + `StagingConfig`), the v1 templates, and the
+  Task 1.4.7 `ReviewerRegressionSuite` that **closed C15** (≥19/20 for all
+  six method × connector pairs; v1 config claude=`haiku` /
+  codex=`gpt-5.3-codex`, 3-min cap). Test scope: `forge-core` 358,
+  `forge-agents` 196, `forge-git` 168, `forge-specs` 132 (new),
+  `forge-app` 96, plus `forge-it` opt-in regression/smoke suites.
+  **Carry-forward into Slice 1.4b** (see
+  [`docs/design-1.4.md`](docs/design-1.4.md) §4,
+  [`docs/design-rationale.md`](docs/design-rationale.md), and
+  [`docs/roadmap.md`](docs/roadmap.md) §7.2): **C14** (Codex resume
+  role-framing — Task 1.4.14), **S2-5** (writer-side atomic-merge test —
+  Task 1.4.11), **S2-8** / **S3-5** (reviewer/refine `SettleTimeout`
+  mapping, B3 chose option (a) — Task 1.4.12), **S4-3** (reviewer cost /
+  kill diagnostics — watch item), **S4-5** (production reviewer
+  model/cap/retry tuning — Task 1.4.9 `ForgeConfig`); the long-standing
+  **S2-1**–**S2-10** / **S3-1**–**S3-8** spec-text items reconcile at
+  Task 1.4.17.
 - **Two architectural seams to preserve in v1 work:**
   - `ForgePaths` helper — no `.forge/...` literals outside it. Enforced
     by `ForgePathsSuite`'s `os.walk` sweep over

@@ -129,7 +129,54 @@ fix this file.
   [`docs/roadmap.md`](docs/roadmap.md) §7.2): **S3-1** through
   **S3-8**, plus the Slice-1/2 carry-forwards **C14**, **C15**,
   and **S2-1** through **S2-10**.
-- Slices 1.4 and 2.1 (TUI) scoped in design §17.
+- **Slice 1.4a (reviewer assets + `forge-specs` repopulation +
+  regression gate) — ✅ complete 2026-05-29; Slice 1.4b open.**
+  Reviewer assets ship in-tree under `assets/reviewer/{schemas,prompts}/`
+  (3 JSON Schemas + 6 per-method × per-CLI system prompts) and
+  `assets/templates/` (7 templates per §11.4 / §7.7 / §14.3), with
+  `io.forge.app.bootstrap.AssetInstaller.installIfMissing(paths)`
+  copying each into `~/.forge/{schemas,prompts,templates}/` on first
+  run (existing files preserved; typed `WriteFailed` /
+  `InvalidExistingDestination` on failure). `ForgePaths` grew
+  `userSchemasDir` / `userPromptsDir` / `userTemplatesDir` so the
+  install destinations keep the `.forge` seam intact. The
+  `io.forge.app.reviewer` boundary (`ReviewerCall` +
+  `ReviewerLimits(wallClockTimeout)` +
+  `ReviewerOutcome[+A] = Settled | Timeout | AdapterFailure`,
+  `RealReviewerCall` racing each one-shot `connector.review*` against
+  `IO.sleep(cap)`) colocates the §7.9 wall-clock cap with the reviewer
+  call — fiber-cancellation only, subprocess cleanup left to the
+  connector `Resource` finalizer (no observable kill channel:
+  carry-forward **S4-3**). `forge-specs` is re-populated (it lost its
+  sources in Slice 1.2 per **S2-1**): `SpecStore` /
+  `FileSpecStore` (atomic temp+`ATOMIC_MOVE`+fsync persistence of
+  `manifest.json` / `design.md` / `decomposition.md` / `pieces/<p>.md`
+  with `Manifest.validate` on load), `DocSync` (renders
+  `decomposition.md` from the manifest via a hand-rolled
+  `HandlebarsLite`, idempotent byte-identical re-render, §5.3 reconcile
+  markers), and `ChangeCollector` (Allow/Deny/Ask per §10.1, all 16
+  §18 default deny patterns enforced via `StagingConfig.DefaultDenyPatterns`,
+  `**/`-prefix glob workaround per **CC4**). **Task 1.4.7 closed C15**:
+  `ReviewerRegressionSuite` (`forge-it`, opt-in
+  `FORGE_IT_RUN_REGRESSION=1`) met the ≥19/20 native-schema bar for all
+  six method × connector pairs with the v1 reviewer config
+  (claude=`haiku` / codex=`gpt-5.3-codex`, 3-min cap); three real-CLI
+  drifts (**C16** Claude 2.1.153 `result`-string payload, **C17** Codex
+  `--output-schema` strict subset, **C18** Claude 2.1.156 tolerant
+  parse) were found and fixed inside 1.4a. Test scope grew: `forge-app`
+  46 → 96, new `forge-specs` 132; `forge-agents` 181 → 196 (C16/C17/C18
+  decode tests); `forge-core` 358 / `forge-git` 168 preserved.
+  **Carry-forward into Slice 1.4b** (see
+  [`docs/design-1.4.md`](docs/design-1.4.md) §4 and
+  [`docs/design-rationale.md`](docs/design-rationale.md)): **C14**
+  (Codex resume role-framing — Task 1.4.14), **S2-5** (writer-side
+  atomic-merge test — Task 1.4.11), **S2-8** / **S3-5** (reviewer/refine
+  `SettleTimeout` mapping, B3 chose option (a) — Task 1.4.12), **S4-3**
+  (reviewer cost / kill diagnostics — watch item), **S4-5** (production
+  reviewer model/cap/retry tuning — Task 1.4.9 `ForgeConfig`). Slice 1.4b
+  (Task 1.4.9 → Task 1.4.17) builds the headless orchestrator, the §17
+  CLI, and the MVP self-hosting gate on top.
+- Slices 1.4b and 2.1 (TUI) scoped in design §17.
 - Phase 4 (Forge-instance pivot: multi-repo, daemon, parallel,
   containerised) is post-v1 and needs its own design doc before any
   code lands. See [`docs/roadmap.md`](docs/roadmap.md).
@@ -349,9 +396,9 @@ implications of round 1's signature change; `design-1.4.md`
 
 - [`docs/design-1.4.md`](docs/design-1.4.md) — Slice 1.4 (Phase-1 MVP
   gate; reviewer assets + `forge-specs` (Slice 1.4a) → headless
-  orchestrator + REPL (Slice 1.4b)). Opened 2026-05-27. Task 1.4.1
-  (reviewer schemas + system prompts under `~/.forge/`) is the entry
-  point.
+  orchestrator + REPL (Slice 1.4b)). Opened 2026-05-27. **Slice 1.4a
+  (Task 1.4.1 → Task 1.4.8) closed 2026-05-29; Slice 1.4b open** — Task 1.4.9
+  (`forge-app` entry skeleton + config loader) is the entry point.
 
 Recently-closed audit trails: [`docs/design-2.1.md`](docs/design-2.1.md)
 (Slice 1.1, closed 2026-05-26), [`docs/design-2.2.md`](docs/design-2.2.md)

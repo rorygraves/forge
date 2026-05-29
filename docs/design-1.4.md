@@ -744,13 +744,13 @@ shipped schemas and prompts.
   all six pairs with the haiku/codex v1 config) and the roadmap §7.2
   C15 bullet updated.
 
-### Task 1.4.8 — 1.4a close-out + handoff to 1.4b
+### Task 1.4.8 — 1.4a close-out + handoff to 1.4b  ✅ landed 2026-05-29
 
 Mirror of Slice 1.3 Task 1.3.8 structure: section-level coherence
 review, roadmap status update, carry-forward walk for 1.4a's
 half.
 
-- [ ] **H1.** Code review on Task 1.4.1 through Task 1.4.7 as a section.
+- [x] **H1.** Code review on Task 1.4.1 through Task 1.4.7 as a section.
   Checklist:
   - Does every §7.1 reviewer-method × per-CLI pair have a
     shipped schema + prompt under Task 1.4.1?
@@ -770,7 +770,41 @@ half.
     "Testing & review discipline" rule "Review comments on
     design docs are signals, not the patch list": re-walk the
     contract end-to-end, not just patch named findings.
-- [ ] **H2.** §4 carry-forward walked for 1.4a items:
+  **As reviewed (2026-05-29):** all six checklist items confirmed
+  green. (i) Three schemas (`design-review`/`code-review`/`refine`)
+  + six prompts (× `claude`/`codex`) ship under `assets/reviewer/`,
+  installed into `~/.forge/` by `AssetInstaller`; the three
+  schema-shape suites (`DesignReviewSchemaShapeSuite` /
+  `PrReviewSchemaShapeSuite` / `RefineSchemaShapeSuite`) + the
+  networknt-backed `RefineSchemaValidationSuite` assert ADT↔schema
+  field correspondence so drift fails the build. (ii)
+  `ReviewerRegressionSuite` has six bar tests — `{design-review,
+  pr-review, refine}` × `{claude, codex}` — plus two wiring-smoke
+  tests. (iii) `ReviewerOutcome.Timeout` + `RealReviewerCall`
+  docstrings document the fiber-cancellation-only contract (no
+  `killError`, no `cost`), pointing at the connector `Resource`
+  finalizer and **S4-3**. (iv) `DocSyncSuite`'s "render → write →
+  re-read → re-render is byte-identical" test pins the idempotence
+  `forge reconcile` (Task 1.4.15) depends on. (v)
+  `ChangeCollectorDenySuite` parametrically exercises all 16
+  `StagingConfig.DefaultDenyPatterns` entries (root + nested path
+  each) plus rules 2–4, and `StagingConfig.DefaultDenyPatterns` is
+  the single source of truth shared with the orchestrator's config
+  defaulting. (vi) Coherence pass: the `ReviewerCall` →
+  `ReviewerOutcome` → orchestrator-mapping contract is internally
+  consistent across the docstrings, design-rationale B3/S2-8/S3-5,
+  and §4. Build green at close: `forge-core` 358, `forge-agents`
+  196, `forge-git` 168, `forge-specs` 132, `forge-app` 96;
+  `sbt scalafmtCheckAll` + `sbt clean compile test` clean; `forge-it`
+  compiles. **One watch item (non-blocking):**
+  `ChangeCollectorDenySuite.denyCases` is a hand-maintained mirror
+  of `DefaultDenyPatterns` with no drift-guard assertion — all 16
+  patterns are currently covered, but a future addition to
+  `DefaultDenyPatterns` would not be auto-tested. Cheap hardening
+  (assert `denyCases.map(_._1).toSet == DefaultDenyPatterns.toSet`)
+  is left to whoever next touches the deny list rather than
+  scope-expanding this close-out.
+- [x] **H2.** §4 carry-forward walked for 1.4a items:
   - **C15** — closed in Task 1.4.7 (assuming bar met for all 6
     pairs).
   - **S2-8 / S3-5** — Task 1.4.2's reviewer wrappers ship the
@@ -788,15 +822,48 @@ half.
     deferred (new at Task 1.4.2; see §4). Stays open into 1.4b as
     a watch item only; budgets remain driver-session-only
     for v1.
-- [ ] **H3.** `roadmap.md` §2.4 status block updated —
+  **As walked (2026-05-29):** every 1.4a carry-forward has a
+  durable home. **C15** is marked CLOSED in `design-rationale.md`
+  (bar met for all six pairs with the v1 `haiku`/`gpt-5.3-codex`
+  config) and the roadmap §7.2 bullet is updated. **C16**, **C17**,
+  **C18** — the three real-CLI drifts found en route — each have a
+  full `design-rationale.md` entry. **S2-8** / **S3-5** carry into
+  1.4b Task 1.4.12; Task 1.4.2's B3 decision (orchestrator maps
+  `Timeout` → `FsmEvent.SettleTimeout(...)`, option (a)) is filed
+  against **S2-8** in `design-rationale.md`. **C14** carries into
+  1.4b Task 1.4.14. **S4-3** stays open as a 1.4b watch item (filed
+  at Task 1.4.2 close; budgets remain driver-session-only for v1).
+  **S4-5** (production reviewer model/cap/retry — surfaced by the
+  now-landed Task 1.4.7) is recorded in §4 + folded into the C15
+  residual note; it anchors to Task 1.4.9 `ForgeConfig`. The
+  1.4b-anchored new items **S4-1** (poll-baseline file), **S4-2**
+  (`forge replay` cut), **S4-4** (`RebuildState.run` widening) file
+  to `design-rationale.md` at their landing Tasks (1.4.9 / 1.4.10),
+  per §4 — none is buried.
+- [x] **H3.** `roadmap.md` §2.4 status block updated —
   "🟢 Slice 1.4a complete, 1.4b open — Task 1.4.9 is the entry
   point". Don't flip the §2.4 bullet from `[~]` to
   `[x]` yet; that's Task 1.4.17 after 1.4b closes.
-- [ ] **H4.** `AGENTS.md` "Current state" gets a Slice 1.4a
+  **Done** — §2.4 status block now reads "Slice 1.4a complete,
+  1.4b open — 2026-05-29" with Task 1.4.9 named as the 1.4b entry
+  point and a one-line 1.4a recap; the `[~]` bullets stay `[~]`.
+- [x] **H4.** `AGENTS.md` "Current state" gets a Slice 1.4a
   paragraph (mirror Slice 1.3's structure / length). Active
   design-`<section>`.md list keeps `design-1.4.md` pointer.
-- [ ] **H5.** `CLAUDE.md` TL;DR mirrors §3 / §4
+  **Done** — added a Slice 1.4a "✅ complete 2026-05-29" bullet
+  mirroring Slice 1.3's length (assets + `AssetInstaller`,
+  `io.forge.app.reviewer` boundary, repopulated `forge-specs`,
+  C15-closing Task 1.4.7, grown test counts, 1.4b carry-forward); the
+  "Active design-`<slice-id>`.md files" pointer now names Task 1.4.9
+  as the 1.4b entry point.
+- [x] **H5.** `CLAUDE.md` TL;DR mirrors §3 / §4
   carry-forward changes.
+  **Done** — "Active implementation plan" + "Current state" bullets
+  refreshed: Slice 1.4a closed / 1.4b open with Task 1.4.9 entry,
+  updated test scope (`forge-specs` 132 new, `forge-app` 96,
+  `forge-agents` 196), and the 1.4b carry-forward list
+  (C14/S2-5/S2-8/S3-5/S4-3/S4-5). The stale "refresh lands at
+  Task 1.4.8 H5" placeholder note is removed.
 
 ---
 
@@ -2360,6 +2427,28 @@ ticks off only after Task 1.4.17 lands.
   latency tail + the residual unescaped-quote schema mode are the
   recorded inputs to that decision). Remaining 1.4a work is Task 1.4.8
   (1.4a close-out).
+- 2026-05-29 — **Task 1.4.8 landed — Slice 1.4a closed, handed off to
+  1.4b.** H1 section review on Task 1.4.1–1.4.7: all six checklist
+  items confirmed green (reviewer schema/prompt pairs + shape suites;
+  six-pair regression coverage; `ReviewerOutcome.Timeout`
+  fiber-cancellation-only docstring + S4-3; `DocSync` byte-identical
+  re-render; all 16 §18 deny patterns enforced via
+  `StagingConfig.DefaultDenyPatterns`; end-to-end `ReviewerCall` →
+  `ReviewerOutcome` → orchestrator-mapping coherence). Build green at
+  close — `forge-core` 358, `forge-agents` 196, `forge-git` 168,
+  `forge-specs` 132, `forge-app` 96; `sbt scalafmtCheckAll` +
+  `sbt clean compile test` clean; `forge-it` compiles. One
+  non-blocking watch item logged under H1 (the
+  `ChangeCollectorDenySuite.denyCases` mirror of `DefaultDenyPatterns`
+  has no drift-guard assertion — all 16 currently covered). H2
+  carry-forward walk: C15 closed; C16/C17/C18 filed; S2-8/S3-5 (B3
+  option a) → Task 1.4.12; C14 → Task 1.4.14; S4-3 watch item; S4-5 →
+  Task 1.4.9; S4-1/S4-2/S4-4 file at their 1.4b landing Tasks. H3/H4/H5
+  doc updates landed in `roadmap.md` §2.4, `AGENTS.md` "Current state"
+  + active-design pointer, and `CLAUDE.md` TL;DR (stale "refresh lands
+  at H5" note removed). The §2.4 roadmap `[~]` bullets stay `[~]`
+  until Task 1.4.17. **Slice 1.4b opens at Task 1.4.9** (`forge-app`
+  entry skeleton + config loader).
 
 ## 4. Carry-forward (inherited + new)
 

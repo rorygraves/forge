@@ -245,10 +245,16 @@ there (Task 1.3.1 through Task 1.3.8) lives in
 
 ### 2.4 Slice 1.4 — Reviewer assets + `forge-specs` (Slice 1.4a) → headless orchestrator + REPL (Slice 1.4b)
 
-🟢 **Slice 1.4 open — 2026-05-27.** Implementation plan lives in
-[`design-1.4.md`](design-1.4.md) (Task 1.4.1 through Task 1.4.17 across Slice 1.4a + Slice 1.4b).
-Task 1.4.1 (reviewer schemas + system prompts under `~/.forge/`) is the
-entry point. The §2.4 bullets below stay `[~]` until Task 1.4.17 lands; the
+🟢 **Slice 1.4a complete, 1.4b open — 2026-05-29.** Implementation plan
+lives in [`design-1.4.md`](design-1.4.md) (Task 1.4.1 through Task 1.4.17
+across Slice 1.4a + Slice 1.4b). Slice 1.4a (Task 1.4.1 → Task 1.4.8) shipped
+the writable foundation: reviewer assets under `~/.forge/`, the
+`ReviewerCall` wall-clock wrappers, the repopulated `forge-specs`
+(`SpecStore` / `DocSync` / `ChangeCollector`), the v1 templates, and
+the Task 1.4.7 regression gate (C15 closed — ≥19/20 for all six method ×
+connector pairs with the v1 `haiku` / `gpt-5.3-codex` reviewer config).
+**Task 1.4.9 (`forge-app` entry skeleton + config loader) is the 1.4b entry
+point.** The §2.4 bullets below stay `[~]` until Task 1.4.17 lands; the
 audit trail in `design-1.4.md` ticks per-sub-PR checklists as items
 land.
 
