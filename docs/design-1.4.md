@@ -1055,7 +1055,7 @@ on.
   and the I3-mandated `ForgeCommand.ReadOnlyKind` change — neither a
   behavioural surface expansion.
 
-### Task 1.4.10 — `Orchestrator` loop (the headless feature engine)
+### Task 1.4.10 — `Orchestrator` loop (the headless feature engine)  ✅ landed 2026-05-29
 
 The heart of Slice 1.4b. Wires Slices 1–3 together through
 `Fsm.transition`.
@@ -1109,19 +1109,25 @@ so a half-built engine never reads as "J-item done".
   `ConnectorFactorySuite` (2) + the `AssetInstallerSuite` extension;
   forge-app 203, all unit modules green; `scalafmtCheckAll` clean.
   J1–J5 / §3 status-log / roadmap fold stay unticked pending d2c.
-- [ ] **1.4.10-d2c** — `Main` wiring + cross-restart durability +
-  real-CLI integration. `forge run` / `spec` / `new` handlers
-  instantiate the `Orchestrator` inside the lock `Resource`; **S4-1**
-  poll-baseline file persistence; **S4-5** reviewer process-failure
-  retry; a `forge-it` end-to-end driving real `claude`/`codex` +
-  git/gh. **Closes Task 1.4.10**: flips J1–J5, adds the §3
-  status-log entry.
+- [x] **1.4.10-d2c** — `Main` wiring + cross-restart durability +
+  wiring smoke. `forge run` / `forge new` handlers instantiate the
+  `Orchestrator` (via `OrchestratorBuilder`) inside the lock
+  `Resource`; **S4-1** poll-baseline file persistence
+  (`PollBaselineStore`); **S4-5** reviewer process-failure retry
+  (`RetryingReviewerCall`); terminal-state rendering (`TerminalReport`).
+  **Scope confirmed with the maintainer:** `forge spec` REPL +
+  `status`/`tail`/`reconcile` stay Task 1.4.13; the full real-CLI
+  feature drive is the Task 1.4.16 MVP gate, so d2c closes with an
+  opt-in `forge-it` construction smoke
+  (`OrchestratorWiringSmokeSuite`, `FORGE_IT_RUN_WIRING_SMOKE=1`)
+  rather than a real `claude`/`codex`/gh end-to-end. **Closes
+  Task 1.4.10**: flips J1–J5, adds the §3 status-log entry.
 
 J-item mapping: **J2** ← a/b + c; **J1 + J4 + J5** ← d1; **J3** ←
 d2b; the real git/gh/`Connector` behaviour behind J1/J4 is realized
 across d2a–d2c.
 
-- [ ] **J1.** `io.forge.app.orchestrator.Orchestrator` —
+- [x] **J1.** `io.forge.app.orchestrator.Orchestrator` —
   the headless feature loop. Pseudocode (the three
   sub-phases from J2 are explicit; `currentDriverSession`
   is the `Ref[IO, Option[ActiveSession]]` defined in J2):
@@ -1183,7 +1189,7 @@ across d2a–d2c.
   of `RebuildState.run`'s return shape (carry-forward
   **S4-4**); see J2 for the per-phase × FSM-state
   synthetic-`HarnessError` mapping.
-- [ ] **J2.** Event sources, session lifecycle, post-settle
+- [x] **J2.** Event sources, session lifecycle, post-settle
   synthesis, and restart recovery. `Orchestrator`'s loop has
   **three internal sub-phases** that interleave the pure
   `Fsm.transition` reactive core with the §11 side-effect
@@ -1565,14 +1571,14 @@ across d2a–d2c.
   `observedTransitions` and `observedPieceMerges` but no
   in-flight bookkeeping). Filed as new carry-forward
   **S4-4** in §4.
-- [ ] **J3.** Connector lifetime — `Connector` is
+- [x] **J3.** Connector lifetime — `Connector` is
   constructed once at orchestrator start per `Mode`
   (Claude or Codex). `runStreamingSpec /
   runHeadlessImplementation / runFixup /
   resumeStreamingSpec` calls share the connector
   resource. **C14 watch:** the Codex resume call needs
   to handle role framing per Task 1.4.14's resolution.
-- [ ] **J4.** Atomic manifest persistence — `SpecStore.saveManifest`
+- [x] **J4.** Atomic manifest persistence — `SpecStore.saveManifest`
   (1.4a Task 1.4.3) is called **before** the action log append +
   state cache write. Per §11.5 step 1, if the orchestrator
   crashes between manifest write and FSM transition action,
@@ -1580,7 +1586,7 @@ across d2a–d2c.
   manifest and `RebuildState.reconcile` synthesises the
   missing `audit.piece_merged` action. This is the writer
   side of the invariant that **S2-5** flagged.
-- [ ] **J5.** Unit suite — orchestrator loop happy paths via
+- [x] **J5.** Unit suite — orchestrator loop happy paths via
   fake event sources (fake `SessionMonitor`, fake
   `PRWatcher`, fake `ReviewerCall`). Cover at minimum:
   - Spec phase end-to-end (`Drafting → InteractiveSpec →
@@ -2604,6 +2610,51 @@ ticks off only after Task 1.4.17 lands.
   added as config keys — that's a §18 extension for `forge-design-1.3.md`,
   not a silent field; reviewer model/cap stay at the Task 1.4.7 v1
   values in the reviewer-call wiring until then.
+- 2026-05-29 — **Task 1.4.10 landed — the `Orchestrator` loop +
+  `Main` wiring (J1–J5 closed).** Shipped across five sub-increments
+  (a/b → c → d1 → d2a → d2b → d2c) so each landed reviewably; the
+  J-boxes flip now that the closing increment (**d2c**) is in.
+  **J1/J2** (loop engine): the effectful `Orchestrator` interleaves
+  the pure `Fsm.transition` core with three sub-phases — state-entry
+  hooks, the `EventSources.select` source race, and post-settle
+  synthesis (`PostSettleSynthesis`) — behind the `SideEffects` seam,
+  with the source-driven `currentDriverSession` lifecycle and
+  `RestartRecovery` routing in-flight sessions to NHI on restart.
+  **J3** (`ConnectorFactory` + `OrchestratorBuilder`): one `Connector`
+  per `Mode`, shared across every driver call + reviewer one-shot;
+  the builder assembles the real git/gh/branch-manager, `RealPRWatcher`,
+  `RetryingReviewerCall(RealReviewerCall)`, the `File*` triad,
+  `FileDocSync`, `DefaultChangeCollector`. **J4**: the atomic-persist
+  order (`saveManifest` → action-log append → state-cache save) is the
+  **S2-5** writer invariant. **J5**: the scripted-fake e2e suites
+  (`OrchestratorE2EHappyPathSuite` / `…CrashRecoverySuite` /
+  `…SourceSelectionSuite` / `…PostSettleSynthesisSuite` /
+  `…RestartSuite`). **d2c specifically:** (i) `RetryingReviewerCall`
+  — §7.6 / §11.2-step-9 process-failure retry decorator (**S4-5**
+  mechanism; model/cap §18 tuning stays deferred to a v1.3 revision);
+  (ii) `PollBaselineStore` + `Orchestrator.watcherIO` persistence of
+  the PRWatcher cursor to `ForgePaths.pollBaselineFile` (**S4-1**
+  closed); (iii) `Main` wiring — `forge run <feature>` builds the
+  real orchestrator inside the lock `Resource`, drives to a terminal
+  state, and renders it via `TerminalReport` (FeatureDone/Abandoned/
+  NHI + the `forge resume`/`spec`/`abandon` recovery line per
+  `ResumeHint`; the §2.5 six-path polish stays Task 1.4.15);
+  `forge new <feature>` preflights, cuts the design branch, and seeds
+  a `Drafting` manifest. `forge spec` REPL + `status`/`tail`/
+  `reconcile` stay Task 1.4.13 shells (scope confirmed with the
+  maintainer). The full real-CLI feature drive is deferred to the
+  Task 1.4.16 MVP gate; d2c closes with an opt-in `forge-it`
+  `OrchestratorWiringSmokeSuite` (`FORGE_IT_RUN_WIRING_SMOKE=1`) that
+  exercises the real `AssetInstaller` → `ConnectorFactory` →
+  `OrchestratorBuilder` path in a throwaway `~/.forge` (no GitHub /
+  CLI needed). Carry-forward updated: **S4-1** closed; **S4-5**
+  mechanism-half closed (tuning deferred); **C14** (Codex resume
+  role-framing) still open → Task 1.4.14; **S2-8** / **S3-5** reviewer
+  SettleTimeout mapping wired orchestrator-side (option a) → verified
+  at Task 1.4.12; **S4-3** stays a watch item. Build green: `forge-core`
+  368, `forge-agents` 196, `forge-git` 188, `forge-specs` 132,
+  `forge-app` 230; `sbt test` + `sbt scalafmtCheckAll` clean; `forge-it`
+  compiles.
 
 ## 4. Carry-forward (inherited + new)
 
@@ -2705,8 +2756,12 @@ expected-vs-actual.
   accessor. v1.3 impact: §6 `Feature` may want a typed
   projection `pollBaselines: Map[PrNumber, PollBaseline]`
   (rebuilt from the file via `RebuildState.run`); §11.0
-  precondition list grows by one file. Filed at Task 1.4.10
-  close in `design-rationale.md`.
+  precondition list grows by one file. **Implemented +
+  closed at Task 1.4.10-d2c** (`io.forge.app.orchestrator.PollBaselineStore`
+  + `Orchestrator.watcherIO`; `PollBaselineStoreSuite` +
+  `OrchestratorPollBaselinePersistenceSuite`); the
+  `design-rationale.md` S4-1 entry carries the
+  implementation note.
 - **S4-2 — `forge replay` cut in favour of `forge tail`.**
   Surfaced at plan-review pre-Task 1.4.1. Slice 1.3 Task 1.3.3's
   `ForgeCommand.ReadOnlyKind` carried `Replay` as a
@@ -2812,7 +2867,15 @@ expected-vs-actual.
   unescaped-`"`-in-summary schema mode (rare, normaliser cannot
   repair, within 1/20 tolerance — possible future hardening).
   Watch item through 1.4b; no v1.2 spec edit beyond §18 reviewer
-  keys.
+  keys. **Update (Task 1.4.10-d2c):** the *retry-mechanism* half is
+  now implemented — `RetryingReviewerCall` re-issues on
+  `ReviewerProcessFailure` up to `config.<cli>.reviewProcessRetries`
+  / `refineProcessRetries` (the counts already exist on
+  `ClaudeConfig` / `CodexConfig`), wired by `OrchestratorBuilder`.
+  The *model + wall-clock cap* knobs remain deferred (a §18
+  extension for `forge-design-1.3.md`); see the `design-rationale.md`
+  S4-5 entry. Final disposition at Task 1.4.17 / gated on Task 1.4.16
+  MVP-run data.
 
 ## 5. Cross-references
 
