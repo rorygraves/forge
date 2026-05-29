@@ -66,6 +66,14 @@ final class ForgePaths(val repoRoot: os.Path, val home: os.Path = os.home):
   /** `.forge/state/<feature>.json` — local rebuildable state cache. */
   def stateFile(id: FeatureId): os.Path = repoForgeDir / "state" / s"${id.value}.json"
 
+  /** `.forge/state/<feature>.poll-baselines.json` — sibling state file holding the per-PR `PollBaseline`s the
+    * orchestrator's `PRWatcher` poll loop carries (§S3-7 round-2 / carry-forward S4-1). `Manifest` / `Piece` carry no
+    * baseline fields (the manifest is the §4 committed source of truth; the poll baseline is local-only state that
+    * mutates on every gh round-trip), so the baseline map lives here keyed across the design PR + every piece PR. Same
+    * gitignored `.forge/state/` family as `stateFile`.
+    */
+  def pollBaselineFile(id: FeatureId): os.Path = repoForgeDir / "state" / s"${id.value}.poll-baselines.json"
+
   /** `.forge/state/.lock` — OS-level lock file (§13). */
   val lockFile: os.Path = repoForgeDir / "state" / ".lock"
 

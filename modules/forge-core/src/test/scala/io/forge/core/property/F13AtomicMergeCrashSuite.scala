@@ -45,7 +45,7 @@ class F13AtomicMergeCrashSuite extends munit.FunSuite:
 
     val result = RebuildState.run(FeatureA, paths, manifestStore, log, cache).unsafeRunSync()
     result match
-      case Right(f) =>
+      case Right(RebuildState.RebuildResult(f, _)) =>
         f.state match
           case FsmState.Refining(p, pr, startedAt) =>
             assertEquals(p, P1)
@@ -77,7 +77,7 @@ class F13AtomicMergeCrashSuite extends munit.FunSuite:
 
       val result = RebuildState.run(FeatureA, paths, manifestStore, log, cache).unsafeRunSync()
       result match
-        case Right(f) =>
+        case Right(RebuildState.RebuildResult(f, _)) =>
           f.state match
             case FsmState.Refining(p, pr, _) =>
               assertEquals(p, P1)
@@ -108,7 +108,7 @@ class F13AtomicMergeCrashSuite extends munit.FunSuite:
 
       val result = RebuildState.run(FeatureA, paths, manifestStore, log, cache).unsafeRunSync()
       result match
-        case Right(f) =>
+        case Right(RebuildState.RebuildResult(f, _)) =>
           // Case (b) does not synthesise FSM transitions — feature state is whatever the fold reached.
           assertEquals(f.state, FsmState.PieceImplementing(P2): FsmState)
         case Left(err) => fail(s"expected Right, got Left($err)")

@@ -89,7 +89,8 @@ final class FileStateCache(paths: ForgePaths) extends StateCache:
     loadOrUnreadable(featureId).flatMap { loaded =>
       RebuildState.run(featureId, paths, manifestStore, log, this).flatMap {
         case Left(err) => IO.pure(Left(err))
-        case Right(rebuilt) =>
+        case Right(rebuildResult) =>
+          val rebuilt = rebuildResult.feature
           loaded match
             case Right(Some(cached)) if cached == rebuilt =>
               // Cache matched the rebuild — the `RebuildState.run` re-save was a no-op overwrite. Don't append a

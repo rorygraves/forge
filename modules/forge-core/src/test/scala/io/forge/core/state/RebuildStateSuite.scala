@@ -231,7 +231,9 @@ class RebuildStateSuite extends munit.FunSuite:
 
     val result = RebuildState.run(FeatureA, paths, manifestStore, log, cache).unsafeRunSync()
     result match
-      case Right(f) => assertEquals(f, Feature.initial(FeatureA, manifest))
+      case Right(RebuildState.RebuildResult(f, inFlight)) =>
+        assertEquals(f, Feature.initial(FeatureA, manifest))
+        assertEquals(inFlight, Vector.empty) // Drafting carries no driver session
       case Left(err) => fail(s"expected Right, got Left($err)")
     val cached = cache.load(FeatureA).unsafeRunSync()
     assertEquals(cached.map(_.state), Some(FsmState.Drafting: FsmState))
@@ -263,12 +265,13 @@ class RebuildStateSuite extends munit.FunSuite:
 
     val result = RebuildState.run(FeatureA, paths, manifestStore, log, cache).unsafeRunSync()
     result match
-      case Right(f) =>
+      case Right(RebuildState.RebuildResult(f, inFlight)) =>
         f.state match
           case FsmState.Refining(p, pr, _) =>
             assertEquals(p, P1)
             assertEquals(pr, P1Pr)
           case other => fail(s"expected Refining, got $other")
+        assertEquals(inFlight, Vector.empty) // recovered to Refining — no live driver
       case Left(err) => fail(s"expected Right, got Left($err)")
     // The log should have gained the fsm.transition + audit.piece_merged + harness.crash_recovered repair entries.
     val replayed = log.replay(FeatureA).unsafeRunSync()

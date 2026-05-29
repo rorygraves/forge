@@ -2,8 +2,8 @@ package io.forge.core.state
 
 import cats.effect.IO
 import io.forge.core.*
-import io.forge.core.fsm.{Feature, Fsm, FsmEvent, FsmState}
-import io.forge.core.log.{ActionDraft, ActionLog, FoldResult, ObservedTransition, Replay}
+import io.forge.core.fsm.{Feature, Fsm, FsmEvent, FsmState, SessionPhase}
+import io.forge.core.log.{Action, ActionDraft, ActionLog, FoldResult, ObservedTransition, Replay}
 import io.forge.core.manifest.{Manifest, ManifestStore, Piece, PieceStatus}
 import io.forge.core.paths.ForgePaths
 
@@ -40,7 +40,7 @@ object RebuildState:
       manifestStore: ManifestStore,
       log: ActionLog,
       cache: StateCache
-  ): IO[Either[RebuildError, Feature]] =
+  ): IO[Either[RebuildError, RebuildResult]] =
     val _ = paths // currently unused; kept on the signature so Slice-4 wiring + future per-feature lock helpers don't
     // have to thread paths through twice.
     manifestStore.load(featureId).flatMap {
@@ -59,9 +59,98 @@ object RebuildState:
                     val appendIfNeeded =
                       if reconciled.draftsToAppend.isEmpty then IO.unit
                       else log.appendAll(featureId, reconciled.draftsToAppend).void
-                    appendIfNeeded *> cache.save(featureId, reconciled.feature).as(Right(reconciled.feature))
+                    // The in-flight projection is computed from the replayed log against the *post-reconcile* feature
+                    // state (reconcile may have advanced PieceAwaitingMerge → Refining, which is not a driver-session
+                    // state and so carries no in-flight session). The recovery drafts appended above are audit/merge
+                    // markers, never spawn/settle, so they never affect this projection.
+                    val inFlight = inFlightSessions(actions, reconciled.feature)
+                    appendIfNeeded *>
+                      cache.save(featureId, reconciled.feature).as(Right(RebuildResult(reconciled.feature, inFlight)))
           }
     }
+
+  /** A driver session the action log shows as still in flight at the tail — a `<actor>.spawn` / `<actor>.resume` for
+    * the current state's driver phase with no subsequent settle marker (`monitor.outcome`, see [[inFlightSessions]]).
+    *
+    * Slice 1.4b Task 1.4.10 carry-forward **S4-4**: a prior orchestrator subprocess does not survive Forge process
+    * death (regardless of whether Claude / Codex preserve the session id under `--resume`), so the orchestrator turns
+    * each `InFlightSession` into a synthetic `FsmEvent.HarnessError` before racing any sources, landing the FSM in
+    * `NeedsHumanIntervention` with a phase-appropriate hint rather than attempting a transparent resume.
+    */
+  final case class InFlightSession(
+      phase: SessionPhase, // Spec | DesignRevision | Implement | Fixup
+      sessionId: String, //   the spawn/resume id from the log tail
+      piece: Option[PieceId] // None for design phases; Some(p) for implement / fix-up
+  )
+
+  /** Widened result of [[run]] (Slice 1.2 returned only `Feature`; Slice 1.4b Task 1.4.10 / carry-forward **S4-4** adds
+    * the in-flight projection the orchestrator needs for restart recovery). The canonical `Feature` shape is unchanged
+    * — `inFlightSessions` is a log-tail bookkeeping projection, not a `Feature` field.
+    */
+  final case class RebuildResult(feature: Feature, inFlightSessions: Vector[InFlightSession])
+
+  /** Log kind the orchestrator (Task 1.4.10) appends for every `SessionMonitor` `MonitorOutcome` (settled / settle
+    * timeout / turn-budget / budget breach), tagged with the same `piece` as the spawn it closes. It is a no-op
+    * projection at the [[Replay]] layer (an unknown kind), and exists purely so [[inFlightSessions]] can distinguish
+    * "driver still running" (spawn with no following marker → in-flight) from "driver settled, crashed in the
+    * post-settle window" (spawn + marker, FSM state unchanged because e.g. `Settled(Implement, Clean)` is an FSM no-op
+    * until `PrOpened`) — the latter is replayed by the orchestrator's post-settle synthesis, not surfaced as an
+    * interrupted session.
+    */
+  val MonitorOutcomeKind: String = "monitor.outcome"
+
+  /** Pure projection of the driver session (if any) the log shows still in flight at its tail, given the post-reconcile
+    * `feature`. Returns at most one element: the orchestrator runs a single driver at a time (`currentDriverSession:
+    * Option[ActiveSession]`), so the log tail holds at most one unmatched spawn. The `Vector` shape matches the
+    * [[RebuildResult]] field and leaves room for a future multi-session model without a signature change.
+    *
+    * The current state's driver phase + piece key is derived from `feature.state` (each driver-bearing state maps to
+    * exactly one `SessionPhase`):
+    *
+    *   - `InteractiveSpec` → `(Spec, None)`
+    *   - `DesignReviewing(_)` / `DesignPrFeedback(_, _)` → `(DesignRevision, None)`
+    *   - `PieceImplementing(p)` → `(Implement, Some(p))`
+    *   - `PieceFixingUp(p, _, _)` → `(Fixup, Some(p))`
+    *   - any other state → no driver session is live, so the result is empty.
+    *
+    * Among the spawn/resume actions matching that piece key, the last one is in flight iff no [[MonitorOutcomeKind]]
+    * action with the same piece key follows it (by `seq`).
+    */
+  def inFlightSessions(actions: Vector[Action], feature: Feature): Vector[InFlightSession] =
+    driverKeyFor(feature.state) match
+      case None => Vector.empty
+      case Some((phase, pieceKey)) =>
+        val spawns = actions.filter(a => isSpawnOrResumeKind(a.kind) && a.piece == pieceKey)
+        spawns.lastOption match
+          case None => Vector.empty
+          case Some(spawn) =>
+            val settledAfter = actions.exists { a =>
+              a.seq > spawn.seq && a.kind == MonitorOutcomeKind && a.piece == pieceKey
+            }
+            if settledAfter then Vector.empty
+            else
+              sessionIdOf(spawn) match
+                case None => Vector.empty
+                case Some(sid) => Vector(InFlightSession(phase, sid, pieceKey))
+
+  /** The `(SessionPhase, piece)` driver key for a state, or `None` if the state has no live driver session. */
+  private def driverKeyFor(state: FsmState): Option[(SessionPhase, Option[PieceId])] =
+    state match
+      case FsmState.InteractiveSpec => Some((SessionPhase.Spec, None))
+      case _: FsmState.DesignReviewing => Some((SessionPhase.DesignRevision, None))
+      case _: FsmState.DesignPrFeedback => Some((SessionPhase.DesignRevision, None))
+      case s: FsmState.PieceImplementing => Some((SessionPhase.Implement, Some(s.p)))
+      case s: FsmState.PieceFixingUp => Some((SessionPhase.Fixup, Some(s.p)))
+      case _ => None
+
+  private def isSpawnOrResumeKind(kind: String): Boolean =
+    kind.endsWith(".spawn") || kind.endsWith(".resume")
+
+  /** Session id from a spawn (`sessionId`) or resume (`newSessionId`) payload. */
+  private def sessionIdOf(action: Action): Option[String] =
+    val obj = action.payload.objOpt
+    if action.kind.endsWith(".resume") then obj.flatMap(_.get("newSessionId")).flatMap(_.strOpt)
+    else obj.flatMap(_.get("sessionId")).flatMap(_.strOpt)
 
   /** Pure reconciliation rule. Inputs: the log-fold projection + the seed manifest. Output: the post-recovery `Feature`
     * and the repair drafts that need to be appended to make the on-disk log self-consistent.
