@@ -1652,23 +1652,28 @@ walking carry-forwards can find the test directly.
 Whichever option B3 (in Task 1.4.2) chose — explicit FSM handlers
 (a) or documented orchestrator-side conversion (b).
 
-- [ ] **L1.** **If (a):** Add `Fsm.transition` handlers for
+- [x] **L1.** **If (a):** Add `Fsm.transition` handlers for
   `SettleTimeout(SessionPhase.DesignReview, _)` from
   `DesignReviewing(round)`, `SettleTimeout(CodeReview, _)`
   from `PieceAwaitingReview`, `SettleTimeout(Refine, _)`
   from `Refining`. Each routes to `NeedsHumanIntervention`
   with a phase-appropriate `ResumeHint`. Add
-  `ResumeHintCoverageSuite` rows.
-- [ ] **L2.** **If (b):** `Orchestrator.handleReviewerOutcome`
+  `ResumeHintCoverageSuite` rows. **DONE 2026-05-29:** option (a)
+  per B3. Three handlers added (`DesignReview`→`ReopenDesign`,
+  `CodeReview`/`Refine`→`RunAnotherFixup`); three new
+  `ResumeHintCoverageSuite` rows; `forge-core` green (371).
+- [x] **L2.** **If (b):** ~~`Orchestrator.handleReviewerOutcome`
   converts `Timeout(_)` to
-  `FsmEvent.HarnessError("<phase> settle timeout")`.
-  Document the conversion in `Fsm.scala`'s scaladoc and in
-  `Orchestrator.handleReviewerOutcome`'s scaladoc; the FSM
-  doesn't gain new handlers. Add an
-  `OrchestratorReviewerTimeoutSuite` row pinning the
-  conversion.
-- [ ] **L3.** Close **S2-8** and **S3-5** in
-  `design-rationale.md`. Roadmap §7.2.2 entry updated.
+  `FsmEvent.HarnessError("<phase> settle timeout")`.~~ **N/A —
+  B3 chose option (a); L1 is the live path.** (The orchestrator
+  *does* map `ReviewerOutcome.Timeout` → `FsmEvent.SettleTimeout`
+  in `designReviewEvent`/`prReviewEvent`/`refineEvent`, landed at
+  Task 1.4.10 — but to `SettleTimeout`, not `HarnessError`.)
+- [x] **L3.** Close **S2-8** and **S3-5** in
+  `design-rationale.md`. Roadmap §7.2.2 entry updated. **DONE
+  2026-05-29:** both CLOSED notes added in `design-rationale.md`;
+  roadmap §7.2.2 S2-8/S3-5 entry + §7.2.4 S3-5 entry flipped to
+  ✅ CLOSED.
 
 ### Task 1.4.13 — CLI surface (every §17 / §15 command)
 
@@ -2694,6 +2699,22 @@ ticks off only after Task 1.4.17 lands.
   `design-rationale.md`; roadmap §7.2.2 + §2.4 entries updated. Build
   green: `forge-app` 231 (+1), other module counts unchanged;
   `sbt scalafmtCheckAll` clean.
+- 2026-05-29 — **Task 1.4.12 landed — S2-8 / S3-5 reviewer/refine
+  `SettleTimeout` closure.** Per B3's option (a), `Fsm.transition`
+  now handles all 7 `SessionPhase` variants: the three reviewer/refine
+  timeouts route from `DesignReviewing` → `NHI(ReopenDesign(currentDesignPr))`,
+  `PieceAwaitingReview` → `NHI(RunAnotherFixup(p, pr))`, and `Refining`
+  → `NHI(RunAnotherFixup(p, pr))` (the last clears the stale
+  `currentPieceSessionId` per §6.1). Each hint mirrors its phase's
+  existing recovery rule, so no new `ResumeHint` variant was introduced.
+  The orchestrator-side `ReviewerOutcome.Timeout` → `FsmEvent.SettleTimeout`
+  mapping was already in place from Task 1.4.10
+  (`designReviewEvent`/`prReviewEvent`/`refineEvent`), so L1 was purely
+  the FSM half. Three new `ResumeHintCoverageSuite` rows pin the hints
+  (L2 N/A — option (b) not taken). **S2-8** and **S3-5** flipped to
+  CLOSED in `design-rationale.md`; roadmap §7.2.2 + §7.2.4 entries
+  updated. Build green: `forge-core` 371 (+3), other module counts
+  unchanged; `sbt scalafmtCheckAll` clean.
 
 ## 4. Carry-forward (inherited + new)
 
@@ -2721,14 +2742,15 @@ explicitly to v1.3 / Phase 2 with a durable home in
   state on a merge-window crash, and `RebuildState.run` recovers to
   `Refining`).
 - **S2-8** — `Fsm.transition` doesn't handle
-  `SettleTimeout` for reviewer/refine phases. **Resolves
-  in Task 1.4.12** via whichever path Task 1.4.2's B3 chose
-  (explicit FSM handlers vs orchestrator-side
-  conversion).
+  `SettleTimeout` for reviewer/refine phases. **✅ Closed in
+  Task 1.4.12 (2026-05-29)** via B3's option (a): explicit
+  `Fsm.transition` handlers for the three reviewer/refine phases,
+  each routing to a phase-appropriate `NHI` hint, with matching
+  `ResumeHintCoverageSuite` rows.
 - **S3-5** — `SessionMonitor` carve-out matches **S2-8**
-  on the SessionMonitor side. Closes alongside
-  **S2-8** in Task 1.4.12 (1.4a Task 1.4.2's reviewer wrappers ship
-  the wall-clock emission path).
+  on the SessionMonitor side. **✅ Closed alongside **S2-8** in
+  Task 1.4.12 (2026-05-29)** — the `SessionMonitor` driver-phase
+  carve-out stands; the FSM-side gap it mirrored is closed.
 
 ### Inherited from Slices 1–3, conditional / watch items
 

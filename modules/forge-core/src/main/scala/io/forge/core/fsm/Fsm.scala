@@ -255,6 +255,16 @@ object Fsm:
           ResumeHint.ReopenDesign(currentDesignPr(feature))
         )
 
+      // §B3 option (a) / S2-8: reviewer-side wall-clock cap. The orchestrator's `designReviewEvent` maps
+      // `ReviewerOutcome.Timeout` → `SettleTimeout(SessionPhase.DesignReview, _)` (distinct from the driver-side
+      // DesignRevision phase above). Route to NHI with the same design-phase hint as the revision/converge paths.
+      case FsmEvent.SettleTimeout(SessionPhase.DesignReview, _) =>
+        toNeedsHumanIntervention(
+          feature,
+          "design review settle timeout",
+          ResumeHint.ReopenDesign(currentDesignPr(feature))
+        )
+
       case _ => noop(feature)
 
   private def designNeedsHumanInputTransitions(
@@ -507,6 +517,16 @@ object Fsm:
           exhaustedHint = ResumeHint.RunAnotherFixup(state.p, state.prNumber)
         )
 
+      // §B3 option (a) / S2-8: reviewer-side wall-clock cap. The orchestrator's `prReviewEvent` maps
+      // `ReviewerOutcome.Timeout` → `SettleTimeout(SessionPhase.CodeReview, _)`. Route to NHI with the same fix-up
+      // hint the review-failed / human-override paths use.
+      case FsmEvent.SettleTimeout(SessionPhase.CodeReview, _) =>
+        toNeedsHumanIntervention(
+          feature,
+          s"code review settle timeout for piece ${state.p.value}",
+          ResumeHint.RunAnotherFixup(state.p, state.prNumber)
+        )
+
       case _ => noop(feature)
 
   private def pieceAwaitingMergeTransitions(
@@ -644,6 +664,18 @@ object Fsm:
         )
         val updated = feature.copy(state = to, currentPieceSessionId = None)
         (updated, Vector(fsmTransitionDraft(feature, state, to, piece = Some(state.p))))
+
+      // §B3 option (a) / S3-5: refinery wall-clock cap. The orchestrator's `refineEvent` maps
+      // `ReviewerOutcome.Timeout` → `SettleTimeout(SessionPhase.Refine, _)`. The piece is already merged at this point,
+      // so the recovery hint is RunAnotherFixup (matching hintFromState for Refining); `toNeedsHumanIntervention`
+      // clears the stale currentPieceSessionId per §6.1.
+      case FsmEvent.SettleTimeout(SessionPhase.Refine, _) =>
+        toNeedsHumanIntervention(
+          feature,
+          s"refine settle timeout for piece ${state.p.value}",
+          ResumeHint.RunAnotherFixup(state.p, state.prNumber)
+        )
+
       case _ => noop(feature)
 
   private def planningUpdateTransitions(

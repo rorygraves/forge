@@ -695,11 +695,16 @@ deliverable on the relevant sub-PR (Slice 1.4a or Slice 1.4b per §2.4).
   `merged` first, the action-log batch absent, and the state cache lagging
   at the pre-transition state. A direct `RebuildState.run` restart recovers
   to `Refining` via reconcile case (c).
-- **S2-8 — `SettleTimeout` reviewer/refine coverage decision.**
-  Slice 1.4 picks: explicit `Fsm.transition` handlers for
-  `SessionPhase.{DesignReview, CodeReview, Refine}` (with
-  `ResumeHintCoverageSuite` rows) **or** documented
-  orchestrator-side conversion of these timeouts to `HarnessError`.
+- **S2-8 / S3-5 — `SettleTimeout` reviewer/refine coverage decision
+  (landed in Task 1.4.12). ✅ CLOSED 2026-05-29.** Option (i) chosen:
+  `Fsm.transition` now handles all 7 `SessionPhase` variants —
+  `SettleTimeout(SessionPhase.{DesignReview, CodeReview, Refine}, _)`
+  route from `DesignReviewing` / `PieceAwaitingReview` / `Refining` to
+  phase-appropriate `NHI` hints (`ReopenDesign` / `RunAnotherFixup` ×2),
+  with three new `ResumeHintCoverageSuite` rows. The orchestrator-side
+  `ReviewerOutcome.Timeout` → `FsmEvent.SettleTimeout` mapping landed at
+  Task 1.4.10. The `SessionMonitor` driver-phase carve-out (S3-5) stands
+  as designed. See design-rationale **S2-8** / **S3-5** CLOSED notes.
 
 #### 7.2.3 Conditional watch items (fix only if Slice 1.4 measures the cost)
 
@@ -753,7 +758,7 @@ defaults, not code changes.
   watch; reviewer/refine are one-shot adapter calls whose
   wall-clock caps live in Slice 1.4a's reviewer-asset wrappers. No
   separate v1.3 spec change — S2-8's resolution covers both
-  sides.
+  sides. ✅ CLOSED 2026-05-29 with **S2-8** at Task 1.4.12 (see §7.2.2).
 
 ---
 
