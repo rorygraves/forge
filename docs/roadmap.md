@@ -673,11 +673,14 @@ deliverable on the relevant sub-PR (Slice 1.4a or Slice 1.4b per §2.4).
   either re-issues Codex role framing in the resume message, or
   (if v1.3 chose to widen the trait) calls the widened signature.
   The two halves of C14 ship coupled.
-- **C15 — Native schema regression suite (lands as Task 1.4.7).** ≥19/20 bar on
-  `reviewDesign` / `reviewPr` / `refine` for each connector, gated
-  on shipped reviewer assets in Slice 1.4a. Path is
-  `~/.forge/schemas/{design-review,code-review,refine}.json`
-  (matches code; design-rationale C15 wording corrected).
+- **C15 — Native schema regression suite (landed in Task 1.4.7). ✅ CLOSED
+  2026-05-29.** ≥19/20 bar on `reviewDesign` / `reviewPr` / `refine`
+  for each connector — **met for all six method × connector pairs** in
+  a full live batch (claude reviewer on `haiku`, codex on
+  `gpt-5.3-codex`, 3-min cap). En route, three real-CLI drifts were
+  found and fixed inside 1.4a (C16 envelope, C17 Codex strict schema,
+  C18 Claude 2.1.156 tolerant parse). Production reviewer (model, cap,
+  timeout-retry) tuning deferred to Task 1.4.9 / S4-3.
 - **S2-5 — Writer-side atomic-merge ordering test.** Asserted
   against the orchestrator-loop sub-PR in Slice 1.4b: orchestrator
   atomically persists `manifest.json` before the FSM transition

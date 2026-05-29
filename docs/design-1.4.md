@@ -661,7 +661,7 @@ the orchestrator depends on. Task 1.4.1 landed the in-tree
   *can* handle every construct) by pinning the exact rendered
   *output* — most importantly the §5.3 marker shape.
 
-### Task 1.4.7 — Reviewer regression suite (hosts the C15 gate; closes C15 once the bar is met)
+### Task 1.4.7 — Reviewer regression suite (hosts the C15 gate; closes C15 once the bar is met)  ✅ landed 2026-05-29
 
 The ≥19/20 native-schema regression suite Slice 1.1 deferred per
 **C15**. Now that reviewer assets exist (Task 1.4.1) and reviewer
@@ -696,38 +696,53 @@ shipped schemas and prompts.
   verbatim from real commits (`adb3791`, `f873169`, `705796f`);
   refine manifests are built inline from a real `Manifest` value
   (type-checked, no fixture drift — same idiom as `DocSyncSuite`).
-- [ ] **G3.** Pass bar: ≥19/20 per method per connector. A
+- [x] **G3.** Pass bar: ≥19/20 per method per connector. A
   schema-validation failure (per the Slice 1.1 `Native` schema
   contract) counts as a fail. Adapter errors that are
   retryable per §7.6 don't count against the bar (retried
   per `reviewProcessRetries`).
-  **As landed (scoring implemented; full bar run pending):** the
-  suite classifies each sample `Settled` = pass,
-  `StructuredOutputMissing/Malformed` = schema-fail (counts
-  against the bar), and retries `ReviewerProcessFailure` / wall-clock
-  `Timeout` before scoring (transient, "don't count" per §7.6),
-  then asserts `passes ≥ 19/20` with a per-sample breakdown clue.
-  **Blocker found + fixed:** the wiring smoke caught that Claude
-  2.1.153 moved the reviewer schema payload out of
-  `structured_output` into the `result` string —
-  `ClaudeConnector.extractStructuredOutput` failed 100% (now fixed,
-  back-compat, design-rationale **C16**). The full live ≥19/20
-  measurement across all 6 pairs (real CLI spend) is an opt-in run
-  not yet executed; **G4 / G5 stay open until it is.** The per-call
-  wall-clock cap is proven to bound real wall-time by
-  `ReviewerCallSubprocessTimeoutSuite` (review round 1 / Finding 1),
-  so the batch is time-bounded per call.
-- [ ] **G4.** Failure mode: if a method × connector pair
+  **Met (2026-05-29).** Full live 6×20 batch with the v1 reviewer
+  config **(claude reviewer on `haiku`, codex on `gpt-5.3-codex`),
+  3-min per-call cap → all six method × connector pairs ≥19/20.**
+  Scoring: `Settled` = pass, `StructuredOutputMissing/Malformed`
+  = schema-fail (counts), `ReviewerProcessFailure` / wall-clock
+  `Timeout` retried once then transient-don't-count per §7.6
+  (the suite still counts a *persistent* timeout — see the model
+  choice below). Three CLI drifts were found and fixed *inside*
+  1.4a along the way (G4): **C16** (Claude 2.1.153 moved the payload
+  from `structured_output` to the `result` string), **C17** (Codex
+  `--output-schema` strict-mode subset), and **C18** (Claude 2.1.156
+  `--json-schema` validates but no longer hard-enforces → tolerant
+  parse: prose/fence salvage + in-string control-char normalisation).
+  Across ~115 real Claude calls under C18 the only residual schema
+  fail is a single unescaped-`"`-in-summary (documented-unrepairable,
+  within the 1/20 tolerance). The per-call wall-clock cap is proven
+  to bound real time by `ReviewerCallSubprocessTimeoutSuite`.
+- [x] **G4.** Failure mode: if a method × connector pair
   fails the bar in Task 1.4.7, schema/prompt tightening happens
-  inside 1.4a (not deferred further). The Task 1.4.7 commit lists
-  the failing pairs; a follow-up commit tightens; Task 1.4.7
-  re-runs until bar met. The "section closes" only when
-  all six pairs pass.
-- [ ] **G5.** File **C15** resolution in
+  inside 1.4a (not deferred further).
+  **Done.** Every failing pair was tightened inside 1.4a rather than
+  deferred: C16/C17 unblocked the connector paths; C18 (tolerant
+  parse + prompt tightening) cleared the Claude prose/control-char
+  failures. **Model/cap finding:** `sonnet` reviews are higher
+  quality but **latency-prohibitive** for pr-review — at both 3-min
+  and 5-min caps it stalled at 16/20 (p50 114s, p90 218s, ~15% of
+  large-diff calls exceed 300s; a smooth heavy tail, not rate-limit
+  spikes), so `sonnet` would need a ~7-8 min cap and still carries
+  the unescaped-quote tail. The v1 reviewer is therefore **haiku at a
+  3-min cap** (fast ~46s/call, cheap, schema-clean 6/6). Production
+  tuning of the reviewer **(model, wall-clock cap, timeout-retry
+  policy)** — including whether a heavier model is worth a much larger
+  cap for review *quality* — is a `ForgeConfig` decision deferred to
+  Task 1.4.9 / **S4-3** (recorded in §4 + `design-rationale.md`).
+- [x] **G5.** File **C15** resolution in
   `design-rationale.md` — the entry's "Action required"
   flips from "defer to reviewer-asset PR" to "closed in
   Slice 1.4a Task 1.4.7; bar met for all 6 method × connector
   pairs". Roadmap §7.2.2 entry updated.
+  **Done** — C15 marked closed in `design-rationale.md` (bar met for
+  all six pairs with the haiku/codex v1 config) and the roadmap §7.2
+  C15 bullet updated.
 
 ### Task 1.4.8 — 1.4a close-out + handoff to 1.4b
 
@@ -2333,6 +2348,18 @@ ticks off only after Task 1.4.17 lands.
   1.4.9 / S4-3). The unescaped-quote mode is a known residual the
   normaliser deliberately can't repair (ambiguous); within 1/20
   tolerance, possible future hardening.
+- 2026-05-29 — **Task 1.4.7 closed; C15 resolved.** Maintainer adopted
+  **haiku @ 3-min cap** as the v1 reviewer config. The C15 ≥19/20 bar
+  is **met for all six method × connector pairs** in the full live
+  batch (claude reviewer on haiku, codex on gpt-5.3-codex). G3/G4/G5
+  ticked; Task 1.4.7 header flipped to ✅. C15 marked closed in
+  `design-rationale.md`; roadmap §7.2 C15 bullet updated. The reviewer
+  **(model, wall-clock cap, timeout-retry)** production tuning — and
+  whether a heavier model (sonnet/opus) is worth a much larger cap for
+  review quality — is deferred to Task 1.4.9 / **S4-3** (sonnet's
+  latency tail + the residual unescaped-quote schema mode are the
+  recorded inputs to that decision). Remaining 1.4a work is Task 1.4.8
+  (1.4a close-out).
 
 ## 4. Carry-forward (inherited + new)
 
@@ -2518,6 +2545,28 @@ expected-vs-actual.
   `forge-app/main` (no Slice 1.2 caller change because
   Slice 1.2 had no orchestrator caller). Stays open through
   Slice 1.4b; closure at Task 1.4.10 landing.
+- **S4-5 — Production reviewer (model, wall-clock cap,
+  timeout-retry) is a `ForgeConfig` decision.** Surfaced by
+  Task 1.4.7's live bar measurement. The §16 schema bar is **met**
+  (C15 closed) with the v1 config **claude reviewer = `haiku`,
+  codex = `gpt-5.3-codex`, 3-min cap**, chosen because haiku is
+  fast (~46s/call) and schema-clean (6/6). The open question is
+  *quality vs cost vs latency*: `sonnet` (and likely `opus`)
+  review better but are **latency-prohibitive** for pr-review on
+  large diffs — `sonnet` stalled at 16/20 at both 3-min and 5-min
+  caps (p50 114s, p90 218s, ~15% > 300s; smooth heavy tail, not
+  rate-limit spikes) and would need a ~7-8 min cap plus a more
+  tolerant timeout-retry policy. Task 1.4.9 (`ForgeConfig`) should
+  expose reviewer `model` + `wallClockCap` + reviewer
+  `timeout-retry count` per §18, and Task 1.4.9/1.4.10 wire the
+  orchestrator to construct the reviewer connector with them
+  (the `ClaudeConnector.reviewerModel` seam + the
+  `FORGE_IT_CLAUDE_MODEL` / `FORGE_IT_REGRESSION_CAP` test knobs
+  landed in Task 1.4.7 are the hooks). Also records the residual
+  unescaped-`"`-in-summary schema mode (rare, normaliser cannot
+  repair, within 1/20 tolerance — possible future hardening).
+  Watch item through 1.4b; no v1.2 spec edit beyond §18 reviewer
+  keys.
 
 ## 5. Cross-references
 
