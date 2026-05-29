@@ -51,8 +51,10 @@ fix this file.
   system-prompt prepending under the shared trait signature
   (orchestrator-side resume code, lands with Slice 2 FSM, must be
   written aware of it); **C15** — PR-D (≥19/20 native schema
-  regression suite) deferred to the reviewer-asset PR in Slice 1.4 (it
-  needs shipped schemas + reviewer system prompts to run). The
+  regression suite) — **✅ closed in Slice 1.4a Task 1.4.7** (2026-05-29):
+  `ReviewerRegressionSuite` met the bar for all six method × connector
+  pairs with the v1 reviewer config (claude=`haiku` / codex=`gpt-5.3-codex`,
+  3-min cap); see design-rationale C15/C16/C17/C18 + carry-forward S4-5. The
   orchestrator-side `HaltWithQuestion` re-spawn loop also lands with
   Slice 2 FSM — that's an orchestrator concern, not a connector one.
 - **Slice 1.2 (`forge-core` — FSM, Feature, ActionLog, StateCache) —

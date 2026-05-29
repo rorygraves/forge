@@ -41,10 +41,33 @@ import scala.concurrent.duration.*
   *
   * **Opt-in by default, very slow.** 6 pairs × 20 samples = 120+ real reviewer calls against full design docs / diffs;
   * a full run is tens of minutes and costs real CLI spend. Even with the binaries on PATH this suite skips unless
-  * `FORGE_IT_RUN_REGRESSION=1` is set, matching the `FORGE_IT_RUN_RELIABILITY` gate. Per-connector escape hatches:
-  * `FORGE_IT_SKIP_CLAUDE=1` / `FORGE_IT_SKIP_CODEX=1`. For an incremental ramp before the full batch, set
-  * `FORGE_IT_REGRESSION_SAMPLES=<n>` (e.g. `=2`) to run a reduced-scale shakedown across all six pairs with a
-  * proportionally-scaled pass bar — only the default `=20` is the C15-closing measurement (G3).
+  * `FORGE_IT_RUN_REGRESSION=1` is set, matching the `FORGE_IT_RUN_RELIABILITY` gate.
+  *
+  * **Environment knobs (full list):**
+  *   - `FORGE_IT_RUN_REGRESSION=1` — opt in to the full 6×20 batch.
+  *   - `FORGE_IT_RUN_REGRESSION_SMOKE=1` — opt in to the cheap single-call wiring smoke instead (one design-review
+  *     call per connector; proves install→bind→decode without the batch). Independent of the batch gate.
+  *   - `FORGE_IT_SKIP_CLAUDE=1` / `FORGE_IT_SKIP_CODEX=1` — per-connector escape hatches (CI/offline, or to run one
+  *     side of the matrix).
+  *   - `FORGE_IT_REGRESSION_SAMPLES=<n>` — samples per pair (default 20). `=2` runs a 6×2 shakedown across all pairs;
+  *     the pass bar scales proportionally, but **only `=20` is the C15-closing measurement** (G3).
+  *   - `FORGE_IT_CLAUDE_MODEL=<alias>` — Claude reviewer model (`haiku` / `sonnet` / `opus` / full id). Unset ⇒ the
+  *     CLI's *default* model, which is volatile (currently Opus 4.8 at ~$0.40/call). **The v1 reviewer config that
+  *     closed C15 is `=haiku` at the default 3-min cap — all six pairs ≥19/20** (design-rationale C15 / carry-forward
+  *     S4-5). `sonnet`/`opus` review better but are latency-prohibitive for pr-review (see `FORGE_IT_REGRESSION_CAP`).
+  *   - `FORGE_IT_CODEX_MODEL=<id>` — Codex reviewer model (default `gpt-5.3-codex`).
+  *   - `FORGE_IT_REGRESSION_CAP=<seconds>` — per-call wall-clock cap (default 180). A *persistent* timeout counts
+  *     against the bar; raise this (e.g. `=300`, matching the connector's own reviewer timeout) when measuring a
+  *     slower model. `sonnet` pr-review needs ~7-8 min and still tails — which is why the v1 reviewer is `haiku`.
+  *   - `FORGE_REVIEWER_RAW_DUMP_DIR=<dir>` — (read by `ClaudeConnector`) dump every Claude reviewer call's full raw
+  *     envelope to `<dir>` for offline analysis (length / `stop_reason` / brace-balance / control-char distribution).
+  *     The first stop when a future CLI drift breaks the bar — it ruled truncation in/out during the C18 investigation.
+  *
+  * **When this bar regresses (it will — the CLIs drift):** a schema-fail's assert clue carries the connector's
+  * `resultDiagnostic` (length / stop_reason / output-tokens / brace-balance / raw-control-chars) plus the underlying
+  * `ujson` reason, so a failure is self-explaining. Truncation, prose-wrapping, and in-string control chars are
+  * already handled by `ClaudeConnector.extractStructuredOutput` (design-rationale C16/C17/C18); a new shape is a new
+  * C-series finding — capture a raw envelope (`FORGE_REVIEWER_RAW_DUMP_DIR`) before changing the decoder.
   */
 class ReviewerRegressionSuite extends munit.FunSuite:
 

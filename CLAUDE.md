@@ -35,10 +35,13 @@ that first; everything below is Claude-Code-specific.
   opt-in. **Carry-forward** to v1.3 / Slice 1.4 (see
   [`docs/design-rationale.md`](docs/design-rationale.md) and
   [`docs/roadmap.md`](docs/roadmap.md) §7.2): **C14** (Codex
-  `resumeStreamingSpec` system-prompt prepending), **C15**
-  (Slice 1.1's PR-D ≥19/20 native schema regression suite deferred
-  to Slice 1.4 — lands as Task 1.4.7), **S2-1** through **S2-10**, and
-  **S3-1** through **S3-8**.
+  `resumeStreamingSpec` system-prompt prepending), ~~**C15**~~
+  (≥19/20 native schema regression suite — **✅ closed in Task 1.4.7**,
+  2026-05-29: bar met for all six method × connector pairs with the v1
+  reviewer config claude=`haiku` / codex=`gpt-5.3-codex` at a 3-min
+  cap; see design-rationale C15/C16/C17/C18 and carry-forward S4-5),
+  **S2-1** through **S2-10**, and **S3-1** through **S3-8**.
+  (Full TL;DR "Current state" refresh lands at Task 1.4.8 H5.)
 - **Two architectural seams to preserve in v1 work:**
   - `ForgePaths` helper — no `.forge/...` literals outside it. Enforced
     by `ForgePathsSuite`'s `os.walk` sweep over
@@ -59,6 +62,11 @@ sbt "project forge-it" test                           # IT (require claude, code
 sbt "testOnly *ClaudeStreamingSpecSuite"              # one unit suite
 sbt "project forge-it" "testOnly *CodexStreaming*"    # one IT suite
 FORGE_IT_RUN_RELIABILITY=1 sbt "project forge-it" test  # opt-in long-running suites
+# Reviewer regression bar (C15). Opt-in; v1 config = claude reviewer on haiku, 3-min cap.
+FORGE_IT_RUN_REGRESSION=1 FORGE_IT_CLAUDE_MODEL=haiku sbt "project forge-it" "testOnly *ReviewerRegressionSuite"
+FORGE_IT_RUN_REGRESSION_SMOKE=1 sbt "project forge-it" "testOnly *ReviewerRegressionSuite"  # cheap wiring smoke
+# More knobs (all documented in ReviewerRegressionSuite's docstring): FORGE_IT_REGRESSION_SAMPLES,
+# FORGE_IT_REGRESSION_CAP, FORGE_IT_SKIP_CLAUDE/CODEX, FORGE_REVIEWER_RAW_DUMP_DIR (raw-envelope capture for drift triage).
 ```
 
 Scala 3.5.2, sbt build. `-Xfatal-warnings`, `-Wunused:imports`, and
@@ -138,8 +146,9 @@ human + agent reviewers.
   reliability checks, regression batches) is opt-in via env var. Forge
   convention is `FORGE_IT_RUN_*`; document the gate in the suite
   docstring's "Opt-in by default" line. See
-  `CodexHaltWithQuestionReliabilitySuite` for the pattern. Applies to
-  Task 1.4.7 (reviewer regression) before it lands.
+  `CodexHaltWithQuestionReliabilitySuite` for the pattern, and
+  `ReviewerRegressionSuite` (Task 1.4.7, landed) whose docstring is the
+  canonical reference for the reviewer-bar env knobs.
 
 - **Consistency sweep before declaring a Task item done.** For each
   new file, diff lifecycle / error handling / invariant checks against
