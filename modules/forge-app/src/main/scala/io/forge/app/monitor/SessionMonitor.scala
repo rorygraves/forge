@@ -2,7 +2,7 @@ package io.forge.app.monitor
 
 import cats.effect.{IO, Ref}
 import fs2.Stream
-import io.forge.agents.{AgentEvent, StreamingSession}
+import io.forge.agents.{AgentEvent, AgentSession}
 import io.forge.core.PieceId
 import io.forge.core.cost.CostTotals
 import io.forge.core.fsm.SessionPhase
@@ -37,7 +37,7 @@ trait SessionMonitor:
   def monitor(
       phase: SessionPhase,
       piece: Option[PieceId],
-      session: StreamingSession,
+      session: AgentSession,
       events: Stream[IO, AgentEvent],
       limits: SessionLimits,
       runningTotals: Ref[IO, CostTotals]

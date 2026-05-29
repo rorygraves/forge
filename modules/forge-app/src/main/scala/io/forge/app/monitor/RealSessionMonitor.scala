@@ -3,7 +3,7 @@ package io.forge.app.monitor
 import cats.effect.{Deferred, IO, Ref}
 import cats.syntax.all.*
 import fs2.Stream
-import io.forge.agents.{AgentEvent, StreamingSession}
+import io.forge.agents.{AgentEvent, AgentSession}
 import io.forge.core.PieceId
 import io.forge.core.cost.CostTotals
 import io.forge.core.fsm.{BudgetScope, SessionPhase, SettleOutcome}
@@ -27,10 +27,10 @@ import io.forge.core.fsm.{BudgetScope, SessionPhase, SettleOutcome}
   * all inside `IO.uncancelable`. The atomic claim (`winnerClaimed.modify(_ => (true, !_))`) ensures exactly one fiber
   * goes through that path — losers find the claim already set and become no-ops.
   *
-  * **Kill-failure resilience (PR-F review round 2 P2).** [[io.forge.agents.StreamingSession.kill]] is not infallible;
-  * the real `StreamingDriver` propagates `Subprocess.kill` failures. If the kill raises, the winner must still publish
-  * the outcome or `result.get` hangs forever (the loser fibers see `winnerClaimed = true` and become no-ops, so no
-  * other path can publish). `finishWithKill` therefore runs the kill under `attempt`, decorates the outcome with the
+  * **Kill-failure resilience (PR-F review round 2 P2).** [[io.forge.agents.AgentSession.kill]] is not infallible; the
+  * real `StreamingDriver` propagates `Subprocess.kill` failures. If the kill raises, the winner must still publish the
+  * outcome or `result.get` hangs forever (the loser fibers see `winnerClaimed = true` and become no-ops, so no other
+  * path can publish). `finishWithKill` therefore runs the kill under `attempt`, decorates the outcome with the
   * `Throwable.getMessage` on failure, and always completes the Deferred. Outcomes that don't perform a side effect
   * route through `finish` (`sideEffect = IO.unit`, never throws, `killError` always `None`).
   *
@@ -43,7 +43,7 @@ final class RealSessionMonitor extends SessionMonitor:
   override def monitor(
       phase: SessionPhase,
       piece: Option[PieceId],
-      session: StreamingSession,
+      session: AgentSession,
       events: Stream[IO, AgentEvent],
       limits: SessionLimits,
       runningTotals: Ref[IO, CostTotals]
@@ -112,7 +112,7 @@ final class RealSessionMonitor extends SessionMonitor:
   private def handleEvent(
       phase: SessionPhase,
       piece: Option[PieceId],
-      session: StreamingSession,
+      session: AgentSession,
       limits: SessionLimits,
       runningTotals: Ref[IO, CostTotals],
       pendingBreach: Ref[IO, Option[MonitorOutcome.BudgetBreached]],
@@ -149,7 +149,7 @@ final class RealSessionMonitor extends SessionMonitor:
   private def applyCaps(
       phase: SessionPhase,
       piece: Option[PieceId],
-      session: StreamingSession,
+      session: AgentSession,
       limits: SessionLimits,
       pendingBreach: Ref[IO, Option[MonitorOutcome.BudgetBreached]],
       finish: MonitorOutcome => IO[Unit],

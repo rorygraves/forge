@@ -116,8 +116,11 @@ object PostSettleSynthesis:
     * `SettleTimeout` map structurally; `TurnBudgetBreached` / `BudgetBreached` flatten their rich cost payload into the
     * FSM-bound `message: String`. A non-`None` `killError` is surfaced into the message so the failed-kill diagnostic
     * isn't lost.
+    *
+    * Public so the orchestrator loop (Task 1.4.10-d) and tests can convert a pass-through outcome directly; the loop's
+    * sub-phase III dispatches on [[plan]] (whose pass-through rows wrap exactly this conversion).
     */
-  private def toFsmEvent(outcome: MonitorOutcome): FsmEvent =
+  def toFsmEvent(outcome: MonitorOutcome): FsmEvent =
     outcome match
       case MonitorOutcome.Settled(phase, settle) =>
         FsmEvent.Settled(phase, settle)
