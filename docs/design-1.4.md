@@ -2296,6 +2296,23 @@ ticks off only after Task 1.4.17 lands.
   test pins the exact Opus failure shape). C15 stays open pending the
   production-model bar decision; mechanics validated on the messiest
   model.
+- 2026-05-29 — Task 1.4.7: full **sonnet** 6×20 batch. **5/6 pairs
+  ≥19/20; pr-review/claude 16/20 — but `schemaFail=0`.** The parse
+  fix is fully validated: sonnet emits **bare** objects (not haiku's
+  fences), 5 of them multi-line, so it **live-exercised the normalize
+  (in-string control char) path** with zero schema failures — the
+  live confirmation the haiku run couldn't give. The 4 misses are all
+  **Timeout**: sonnet pr-review (largest input) runs a median ~77s but
+  tails past the suite's **3-min wall-clock cap** (slowest completed
+  162s; 4 exceeded 180s, even after their one retry). Genuine latency,
+  not a hang or rate-limit (durations spread 3–162s). So the bar miss
+  is a **cap-too-tight-for-sonnet** issue, not correctness. Added
+  `FORGE_IT_REGRESSION_CAP=<seconds>` so the bar can be re-measured
+  under a production-realistic cap (connector default is 5 min). Open
+  decision (ties to S4-3 / Task 1.4.9 config): the production reviewer
+  **(model, wall-clock cap)** pair — haiku@3min cleared all six;
+  sonnet needs a >3min cap on large PRs. C15 stays open pending that
+  decision + a clean full batch under it.
 
 ## 4. Carry-forward (inherited + new)
 

@@ -97,7 +97,14 @@ class ReviewerRegressionSuite extends munit.FunSuite:
     */
   private val PassingThreshold: Int = math.ceil(Samples * 19.0 / 20.0).toInt
   private val ProcessRetries: Int = 1
-  private val SettleCap: FiniteDuration = 3.minutes
+
+  /** Per-call wall-clock cap (the [[ReviewerCall]] settle timeout). Default 3 min. Slower models on the largest input
+    * (sonnet on a full pr-review diff runs a median ~77s but tails past 180s) brush this cap, so a timeout-driven bar
+    * miss is a *latency*, not a schema, problem. Override with `FORGE_IT_REGRESSION_CAP=<seconds>` (e.g. `=300` to
+    * match the connector's own `reviewerTimeout` default) to measure the bar under a production-realistic cap.
+    */
+  private val SettleCap: FiniteDuration =
+    sys.env.get("FORGE_IT_REGRESSION_CAP").flatMap(_.toIntOption).filter(_ > 0).map(_.seconds).getOrElse(3.minutes)
   private val limits: ReviewerLimits = ReviewerLimits(wallClockTimeout = SettleCap)
 
   // --- shipped reviewer assets (installed into a temp ~/.forge via the real AssetInstaller path) ----
