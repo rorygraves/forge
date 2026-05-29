@@ -1,9 +1,17 @@
 package io.forge.app.command
 
-import cats.effect.{ExitCode, IO}
+import cats.effect.{Clock, ExitCode, IO}
 import cats.effect.std.Console
 import io.forge.app.lock.{FileProcessLock, ForceReleaseResult, LockMetadata}
-import io.forge.git.branch.ForgeCommand
+import io.forge.app.orchestrator.OrchestratorBuilder
+import io.forge.core.{BranchName, FeatureId}
+import io.forge.core.manifest.{FileManifestStore, Manifest}
+import io.forge.core.paths.ForgePaths
+import io.forge.core.state.RebuildError
+import io.forge.git.branch.{ForgeCommand, RealBranchManager}
+import io.forge.git.branch.protection.InMemoryBranchProtectionCache
+import io.forge.git.cli.{RealGhClient, RealGitClient}
+import io.forge.specs.FileSpecStore
 
 /** Task 1.4.9 I3 — per-command handlers.
   *
@@ -24,7 +32,7 @@ private[command] object Handlers:
 // Braces (not a significant-indentation `:`) because `new_:` would lex as one operator identifier (`varid '_' op`).
 object new_ {
   def run(ctx: StateChangingContext, command: ForgeCommand.New): IO[ExitCode] =
-    Handlers.notImplemented(s"forge new ${command.feature.value}", "Task 1.4.10")
+    NewFeature.scaffold(ctx.paths, ctx.config, command.feature)
 }
 
 object spec:
@@ -33,11 +41,108 @@ object spec:
 
 object run:
   def run(ctx: StateChangingContext, command: ForgeCommand.Run): IO[ExitCode] =
-    Handlers.notImplemented(s"forge run ${command.feature.value}", "Task 1.4.10")
+    RunFeature.execute(ctx.paths, ctx.config, command.feature)
 
 object resume:
   def run(ctx: StateChangingContext, command: ForgeCommand): IO[ExitCode] =
     Handlers.notImplemented(s"forge ${command.name}", "Task 1.4.10")
+
+/** Task 1.4.10-d2c — `forge new <feature>` (§11.1 step 1): preflight, cut the design branch, seed a `Drafting`
+  * manifest. Does **not** spawn the spec driver — that is the interactive `forge spec` REPL (Task 1.4.13). The body is
+  * an injectable `scaffold(...)` so the duplicate-feature guard and manifest-load paths are unit-testable without git;
+  * the full happy path (real `git`/`gh`) is covered opt-in in `forge-it`.
+  */
+object NewFeature:
+
+  def scaffold(paths: ForgePaths, config: io.forge.app.config.ForgeConfig, featureId: FeatureId): IO[ExitCode] =
+    val specStore = new FileSpecStore(paths)
+    // Guard on the manifest file directly (not `ManifestStore.load`, which collapses "absent" and "malformed" into one
+    // error): an existing feature must not be silently re-scaffolded, and a corrupt manifest must not be overwritten.
+    IO.blocking(os.exists(paths.manifest(featureId))).flatMap {
+      case true =>
+        Console[IO]
+          .errorln(s"forge new ${featureId.value}: feature already exists (manifest present at that path).")
+          .as(ExitCode(1))
+      case false =>
+        buildBranchManager(paths, config).flatMap { bm =>
+          val base = BranchName(config.baseBranch)
+          bm.preflight(ForgeCommand.New(featureId), None).flatMap { report =>
+            if !report.allPassed then Console[IO].errorln(preflightMessage(featureId, report)).as(ExitCode(1))
+            else
+              bm.syncBase(base).flatMap {
+                case Left(err) => fail(featureId, err.message)
+                case Right(snapshot) =>
+                  bm.createDesignBranch(featureId, config.branchPrefix, snapshot).flatMap {
+                    case Left(err) => fail(featureId, err.message)
+                    case Right(branch) =>
+                      specStore.saveManifest(featureId, seedManifest(featureId, config)).flatMap {
+                        case Left(e) => fail(featureId, s"could not write manifest: $e")
+                        case Right(_) =>
+                          Console[IO]
+                            .println(
+                              s"forge new ${featureId.value}: created design branch ${branch.value}. " +
+                                s"Next: forge spec ${featureId.value}"
+                            )
+                            .as(ExitCode.Success)
+                      }
+                  }
+              }
+          }
+        }
+    }
+
+  private def fail(featureId: FeatureId, detail: String): IO[ExitCode] =
+    Console[IO].errorln(s"forge new ${featureId.value}: $detail").as(ExitCode(1))
+
+  private def buildBranchManager(
+      paths: ForgePaths,
+      config: io.forge.app.config.ForgeConfig
+  ): IO[io.forge.git.branch.BranchManager] =
+    import scala.concurrent.duration.*
+    InMemoryBranchProtectionCache(ttl = config.github.branchProtectionTtlSec.seconds).map { cache =>
+      new RealBranchManager(new RealGitClient(paths.repoRoot), new RealGhClient(paths.repoRoot), cache, Clock[IO])
+    }
+
+  private def seedManifest(featureId: FeatureId, config: io.forge.app.config.ForgeConfig): Manifest =
+    Manifest(
+      schemaVersion = Manifest.CurrentSchemaVersion,
+      featureId = featureId,
+      title = featureId.value,
+      baseBranch = BranchName(config.baseBranch),
+      branchPrefix = config.branchPrefix,
+      mode = config.mode,
+      designPr = None,
+      pieces = Vector.empty
+    )
+
+  private def preflightMessage(featureId: FeatureId, report: io.forge.git.branch.PreflightReport): String =
+    val reasons = report.failures.map(f => s"  - ${f.id}: ${f.reason}").mkString("\n")
+    s"forge new ${featureId.value}: preflight failed:\n$reasons"
+
+/** Task 1.4.10-d2c — `forge run <feature>`: load the manifest (for `mode`), build the real [[Orchestrator]], drive it
+  * to a loop-terminal state, and render that state (with the `forge resume` recovery hint on NHI). The headless
+  * complement to the interactive `forge spec`.
+  */
+object RunFeature:
+
+  def execute(paths: ForgePaths, config: io.forge.app.config.ForgeConfig, featureId: FeatureId): IO[ExitCode] =
+    new FileManifestStore(paths).load(featureId).flatMap {
+      case Left(failure) => Console[IO].errorln(manifestLoadMessage(featureId, failure)).as(ExitCode(1))
+      case Right(manifest) =>
+        OrchestratorBuilder.build(manifest.mode, paths, config).flatMap { case (orch, _) =>
+          orch.run(featureId).flatMap { terminal =>
+            val rendered = TerminalReport.render(terminal)
+            val emit =
+              if rendered.exitCode == ExitCode.Success then Console[IO].println(rendered.message)
+              else Console[IO].errorln(rendered.message)
+            emit.as(rendered.exitCode)
+          }
+        }
+    }
+
+  private def manifestLoadMessage(featureId: FeatureId, failure: RebuildError.ManifestLoadFailed): String =
+    s"forge run ${featureId.value}: cannot load manifest — ${failure.cause.getMessage}. " +
+      s"Has the feature been designed yet? Run: forge spec ${featureId.value}"
 
 object reconcile:
   def run(ctx: StateChangingContext, command: ForgeCommand.Reconcile): IO[ExitCode] =

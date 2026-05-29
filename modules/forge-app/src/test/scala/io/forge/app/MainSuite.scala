@@ -36,10 +36,11 @@ class MainSuite extends munit.FunSuite:
     assertEquals(run(repo, "status"), ExitCode(70))
   }
 
-  tempFixture.test("a state-changing command acquires then releases the lock around its shell") { repo =>
-    // shell exits 70; the run must release the lock so a second run can re-acquire it.
-    assertEquals(run(repo, "run", "my-feat"), ExitCode(70))
-    assertEquals(run(repo, "run", "my-feat"), ExitCode(70))
+  tempFixture.test("a state-changing command acquires then releases the lock around its handler") { repo =>
+    // `forge run` on an undesigned feature exits 1 (no manifest yet); the point is the lock bracket — the handler runs
+    // inside the lock Resource and must release it so a second run re-acquires (rather than seeing a held/stale lock).
+    assertEquals(run(repo, "run", "my-feat"), ExitCode(1))
+    assertEquals(run(repo, "run", "my-feat"), ExitCode(1))
   }
 
   tempFixture.test("config is loaded for non-unlock commands; a malformed config exits 78") { repo =>

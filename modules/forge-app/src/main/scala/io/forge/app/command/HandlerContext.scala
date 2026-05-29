@@ -12,9 +12,11 @@ import io.forge.core.paths.ForgePaths
   * `args` carries the phase-1 `rest` tokens so a handler can finish the per-feature parse it owns (I2 step 8 — `forge
   * status [<feature>]`, `forge tail <feature>`). Task 1.4.9 ships shell handlers that don't consume it yet.
   *
-  * **Deferred to Task 1.4.10:** [[StateChangingContext]] gains the constructed driver/reviewer connector and the
-  * append-only action log (I2 steps 6 + 10) when the orchestrator handlers need them; the connector + log then join the
-  * lock inside `Main`'s single `Resource` bracket. Task 1.4.9 holds only the lock so the bracket shape is real.
+  * **Task 1.4.10-d2c:** the orchestrator handlers (`forge run` / `forge new`) build the connector + action log + git/gh
+  * stack on demand from `paths` + `config` via [[io.forge.app.orchestrator.OrchestratorBuilder]] inside `Main`'s lock
+  * bracket, rather than threading them through this context. The connector holds no long-lived resource of its own (its
+  * subprocesses are per-call `Resource`s) and `FileActionLog` is append-on-write, so [[StateChangingContext]] stays at
+  * `(paths, config, args)` — no extra fields are needed.
   */
 final case class ReadOnlyContext(paths: ForgePaths, config: ForgeConfig, args: Vector[String])
 
