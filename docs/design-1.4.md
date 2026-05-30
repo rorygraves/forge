@@ -1690,13 +1690,37 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
   Does not spawn the spec driver (that is `forge spec`, M2). v1
   takes the title from the feature id; `--mode` / `--id` flag
   parsing folds into the M2/M5 CLI-parser pass.
-- [ ] **M2.** `forge spec <feature>` — **line-mode REPL.** The
+- [x] **M2.** `forge spec <feature>` — **line-mode REPL.** The
   one stateful interactive command. Wires
   `runStreamingSpec(specifyPrompt, firstMessage)` directly to
   stdin/stdout: assistant-text events stream to stdout;
   `AskUserQuestion` events prompt the human; answers route via
   `session.answerQuestion(toolUseId, answer)`. `/done`
   triggers `UserCommandReceived(UserCommand.Done)`.
+  **As landed (Task 1.4.13 incr 3):** `SpecRepl` is a **standalone
+  handler** (not the orchestrator loop) — the J2 `InteractiveSpec`
+  "SessionMonitor + REPL race" can't work as drawn (a session's
+  `events` is a single-consumer fs2 `Channel`; the two would steal
+  events from each other), so the REPL is the **sole** consumer of the
+  event stream and the orchestrator's `EventSource.Repl` stays
+  `IO.never` (headless `forge run` never enters the spec phase). The
+  loop reacts at `Result` boundaries: a `Result` after an
+  `AskUserQuestion` prompts for *that* question and routes via
+  `answerQuestion`; a plain `Result` prompts for the next free message
+  (or `/done`) and routes via `send`. **Persist is at `/done` only**
+  (`SessionSpawned` then `UserCommand.Done`, manifest **reloaded** from
+  disk since the driver owns `manifest.json` through decomposition —
+  Forge writes the log + cache but never the manifest, to avoid
+  clobbering the driver's pieces); an interrupted session leaves
+  `Drafting` and a re-run starts fresh. The §11.1 step-7 coherence
+  post-check is skipped on the human-driven `/done` path (operator is
+  the gate). Deviations carried to §4: **S4-6** (standalone REPL /
+  `EventSource.Repl` stays `IO.never`), **S4-7** (no
+  InteractiveSpec-resume — interrupted spec restarts fresh), **S4-8**
+  (step-7 coherence skipped on `/done`). Unit seams:
+  `SpecReplSuite` (13 cases — `runLoop` via scripted session+console,
+  `finalizeDone` against real `File*` stores, the `classifyStart` gate
+  and answer helpers). Real-CLI spec session is Task 1.4.16.
 - [x] **M3.** `forge run <feature>` — fully headless. Loops
   Orchestrator from current state through to `FeatureDone` or
   `NeedsHumanIntervention`. Prints state transitions to
@@ -1796,7 +1820,7 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
   unit tests in `modules/forge-app/src/test/`; the
   MVP-gate end-to-end run (Task 1.4.16) exercises the integration
   surface.
-  **Partial (Task 1.4.13 incr 1 + 2):** `ReadOnlyHandlerSuite` (15
+  **Partial (Task 1.4.13 incr 1 + 2 + 3):** `ReadOnlyHandlerSuite` (15
   cases) covers the read-only trio (`status` / `tail` /
   `rebuild-state`); `MainSuite`'s read-only routing row asserts exit
   0. Incr 2 adds `OrchestratorUserCommandSuite` (4 cases — the
@@ -1804,9 +1828,10 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
   resume + abandon, against real `File*` stores) and
   `UserCommandHandlerSuite` (9 cases — the pure `deriveResume` /
   `deriveAbandon` CLI-flag→`UserCommand` derivation + the git-free
-  manifest-not-found short-circuit). Remaining handler unit tests
-  (`spec` / `reconcile` / `refresh-cache`) + the IT surface land with
-  their increments / Task 1.4.16.
+  manifest-not-found short-circuit). Incr 3 adds `SpecReplSuite` (13
+  cases — the `forge spec` `runLoop` / `finalizeDone` / `classifyStart`
+  seams). Remaining handler unit tests (`reconcile` / `refresh-cache`)
+  + the IT surface land with their increments / Task 1.4.16.
 
 ### Task 1.4.14 — **C14** Codex resume role-framing closure
 
@@ -2835,6 +2860,34 @@ ticks off only after Task 1.4.17 lands.
   other counts unchanged (`forge-core` 371, `forge-git` 188,
   `forge-agents` 196, `forge-specs` 132); `sbt clean compile test` +
   `sbt scalafmtCheckAll` clean; `forge-it` compiles.
+- 2026-05-30 — **Task 1.4.13 increment 3 — the `forge spec` REPL
+  (M2).** Landed `io.forge.app.command.SpecRepl`, the one stateful
+  interactive command, as a **standalone handler** rather than an
+  orchestrator-loop source: a session's `events` is a single-consumer
+  fs2 `Channel`, so the J2 `InteractiveSpec` "SessionMonitor + REPL
+  race" can't work as drawn — the REPL is the sole consumer and the
+  orchestrator's `EventSource.Repl` stays `IO.never` (headless never
+  enters spec). The loop pulls `session.events` one event at a time and
+  reacts at `Result` boundaries: a `Result` after `AskUserQuestion`
+  prompts for that question (→ `answerQuestion`); a plain `Result`
+  prompts for the next message or `/done` (→ `send`). Persist is at
+  `/done` only — `SessionSpawned` then `UserCommand.Done`, with the
+  driver-owned `manifest.json` **reloaded** (Forge writes log + cache,
+  never the manifest, to avoid clobbering the decomposition); an
+  interrupted session leaves `Drafting` and re-runs fresh. The `spec`
+  handler shell is replaced; `Handlers.spec` now calls
+  `SpecRepl.execute`. New deviations filed in §4: **S4-6** (standalone
+  REPL / Repl source deferral), **S4-7** (no InteractiveSpec-resume),
+  **S4-8** (step-7 coherence skipped on `/done`). New `SpecReplSuite`
+  (13 — `runLoop` via a scripted session+console, `finalizeDone`
+  against real `File*` stores proving the reload-not-clobber +
+  `DesignReviewing(1)` landing, the `classifyStart` gate and answer
+  helpers). **Still open in Task 1.4.13:** M6 (`reconcile` — gated on
+  Task 1.4.15 reverse-parse), M7 (`refresh-cache`), and M12's remaining
+  handler/IT coverage. Build green: `forge-app` 272 (+13), other counts
+  unchanged (`forge-core` 188 unit, `forge-git`, `forge-agents` 196,
+  `forge-specs`); `sbt test` + `sbt scalafmtCheckAll` clean; `forge-it`
+  compiles.
 
 ## 4. Carry-forward (inherited + new)
 
@@ -3060,6 +3113,45 @@ expected-vs-actual.
   extension for `forge-design-1.3.md`); see the `design-rationale.md`
   S4-5 entry. Final disposition at Task 1.4.17 / gated on Task 1.4.16
   MVP-run data.
+- **S4-6 — `forge spec` is a standalone REPL; `EventSource.Repl`
+  stays `IO.never` (was D-spec-1).** Surfaced landing Task 1.4.13
+  incr 3. The J2 source table (§Task 1.4.10) draws `InteractiveSpec`
+  as racing `SessionMonitor + REPL`, but a session's `events` is a
+  single-consumer fs2 `Channel` (`StreamingDriver.buildSession`), so
+  the monitor and the REPL would steal events from each other. v1
+  resolves this by making `forge spec` (`io.forge.app.command.SpecRepl`)
+  its own handler that is the **sole** consumer of the event stream;
+  the orchestrator's `EventSource.Repl` source remains `IO.never`,
+  which is sound because headless `forge run` never enters the spec
+  phase (`InteractiveSpec` is reachable only via `forge spec`). v1.3
+  impact: the J2 table's `InteractiveSpec` row should be re-drawn as
+  "REPL-only (handler-owned), not an orchestrator race," and the
+  step-7 coherence post-check relocated accordingly (see **S4-8**).
+  Reconcile at Task 1.4.17.
+- **S4-7 — Interrupted `forge spec` restarts fresh (no
+  InteractiveSpec resume) (was D-spec-2).** Surfaced landing
+  Task 1.4.13 incr 3. v1 `SpecRepl` persists **only at `/done`**, so an
+  interrupted session (Ctrl-D / driver crash) leaves the feature in
+  `Drafting` and a re-run starts a new spec session — there is no
+  persisted `InteractiveSpec` to resume the same CLI conversation.
+  Consequence: the J2 restart-recovery row mapping `InteractiveSpec →
+  NHI(AbortOrAbandon)` is theoretical in v1 (never persisted from this
+  path), and `forge spec`'s `classifyStart` refuses a stray
+  `InteractiveSpec` rather than resuming it. Resuming the conversation
+  across an interruption (persist `SessionSpawned` early +
+  `resumeStreamingSpec`) is a post-v1 refinement. Reconcile at
+  Task 1.4.17.
+- **S4-8 — §11.1 step-7 coherence post-check skipped on the `/done`
+  path (was D-spec-3).** Surfaced landing Task 1.4.13 incr 3. The
+  orchestrator runs the step-7 design/manifest/piece/decomposition
+  coherence post-check on an auto-`Settled(Spec, Clean)`; the
+  human-driven `/done` path emits `UserCommand.Done` and **skips** it
+  (the operator is the coherence gate). The driver-owned `manifest.json`
+  is reloaded at `/done` (not written back) so Forge never clobbers the
+  decomposition. Folding a coherence check (with the "≤2 corrective
+  rounds" the post-settle table envisages) into the interactive `/done`
+  is deferred — likely a §11.1 note in `forge-design-1.3.md`.
+  Reconcile at Task 1.4.17.
 
 ## 5. Cross-references
 

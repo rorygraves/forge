@@ -38,7 +38,7 @@ object new_ {
 
 object spec:
   def run(ctx: StateChangingContext, command: ForgeCommand.Spec): IO[ExitCode] =
-    Handlers.notImplemented(s"forge spec ${command.feature.value}", "Task 1.4.13")
+    SpecRepl.execute(ctx.paths, ctx.config, command.feature)
 
 object run:
   def run(ctx: StateChangingContext, command: ForgeCommand.Run): IO[ExitCode] =
