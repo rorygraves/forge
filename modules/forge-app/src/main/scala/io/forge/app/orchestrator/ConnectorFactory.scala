@@ -44,7 +44,9 @@ object ConnectorFactory:
             cwd = Some(paths.repoRoot),
             reviewerAssets = Some(reviewerAssets(paths, "claude")),
             reviewerModel = Some(ClaudeReviewerModel),
-            reviewerTimeout = ReviewerCap
+            reviewerTimeout = ReviewerCap,
+            driverPermissionMode = config.claude.permissionMode,
+            driverAllowedTools = config.claude.allowedTools
           )
         )
       case Mode.CodexDriver =>

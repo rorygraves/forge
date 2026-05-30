@@ -42,7 +42,9 @@ final class ClaudeConnector(
     initTimeout: FiniteDuration = 30.seconds,
     reviewerAssets: Option[ReviewerAssets] = None,
     reviewerModel: Option[String] = None,
-    reviewerTimeout: FiniteDuration = 5.minutes
+    reviewerTimeout: FiniteDuration = 5.minutes,
+    driverPermissionMode: String = "default",
+    driverAllowedTools: Vector[String] = Vector.empty
 ) extends Connector:
 
   val name: String = "claude"
@@ -59,7 +61,7 @@ final class ClaudeConnector(
     */
   def runStreamingSpec(systemPromptPath: os.Path, initialUserMessage: String): IO[StreamingSession] =
     spawnStreaming(
-      ClaudeConnector.streamingSpecArgv(binary, systemPromptPath),
+      ClaudeConnector.streamingSpecArgv(binary, systemPromptPath, driverPermissionMode, driverAllowedTools),
       initialUserMessage
     ).widen
 
@@ -75,15 +77,31 @@ final class ClaudeConnector(
   def resumeStreamingSpec(sessionId: String, systemPromptPath: os.Path, message: String): IO[StreamingSession] =
     val _ = systemPromptPath
     spawnStreaming(
-      ClaudeConnector.resumeStreamingSpecArgv(binary, sessionId),
+      ClaudeConnector.resumeStreamingSpecArgv(binary, sessionId, driverPermissionMode, driverAllowedTools),
       message
     ).widen
 
   def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] =
-    spawnHeadless(ClaudeConnector.headlessArgv(binary, prompt.systemPromptPath, prompt.body)).widen
+    spawnHeadless(
+      ClaudeConnector.headlessArgv(
+        binary,
+        prompt.systemPromptPath,
+        prompt.body,
+        driverPermissionMode,
+        driverAllowedTools
+      )
+    ).widen
 
   def runFixup(prompt: FixupPrompt): IO[AgentSession] =
-    spawnHeadless(ClaudeConnector.headlessArgv(binary, prompt.systemPromptPath, prompt.body)).widen
+    spawnHeadless(
+      ClaudeConnector.headlessArgv(
+        binary,
+        prompt.systemPromptPath,
+        prompt.body,
+        driverPermissionMode,
+        driverAllowedTools
+      )
+    ).widen
 
   // --- reviewer methods ----
 
@@ -223,22 +241,50 @@ object ClaudeConnector:
     * either ignores or rejects the streaming flags. Verified empirically — the first version of this argv (without
     * `-p`) hit the StreamingDriver init timeout because no events were emitted.
     */
-  def streamingSpecArgv(binary: String, systemPromptPath: os.Path): List[String] =
+  /** §7.1 driver permission flags. The driver sessions (spec / implement / fix-up) must write + edit files and run Bash
+    * without an interactive approver — `-p` streaming mode has no prompt channel, so an unlisted tool that needs
+    * permission is silently denied. `--permission-mode` + `--allowedTools` (from `config.claude`) pre-authorise the
+    * driver's tools. Emits nothing for the `"default"` mode + empty allowlist so the reviewer/legacy argv shape is
+    * unchanged (and existing argv tests stay green). Reviewer one-shots are read-only and never get these flags.
+    */
+  def driverPermissionFlags(permissionMode: String, allowedTools: Vector[String]): List[String] =
+    (if permissionMode.nonEmpty && permissionMode != "default" then List("--permission-mode", permissionMode)
+     else Nil) ++
+      (if allowedTools.nonEmpty then "--allowedTools" :: allowedTools.toList else Nil)
+
+  def streamingSpecArgv(
+      binary: String,
+      systemPromptPath: os.Path,
+      permissionMode: String = "default",
+      allowedTools: Vector[String] = Vector.empty
+  ): List[String] =
     (binary :: "-p" :: IsolationFlags) ++ OutputFlags ++ StreamingInputFlags ++
-      List("--system-prompt-file", systemPromptPath.toString)
+      List("--system-prompt-file", systemPromptPath.toString) ++ driverPermissionFlags(permissionMode, allowedTools)
 
   /** argv for `resumeStreamingSpec`. Resume already encodes the prior system prompt in the session state, so no
     * `--system-prompt-file` is supplied here. `-p` still required for the same reason as `streamingSpecArgv`.
     */
-  def resumeStreamingSpecArgv(binary: String, sessionId: String): List[String] =
-    (binary :: "-p" :: IsolationFlags) ++ OutputFlags ++ StreamingInputFlags ++ List("--resume", sessionId)
+  def resumeStreamingSpecArgv(
+      binary: String,
+      sessionId: String,
+      permissionMode: String = "default",
+      allowedTools: Vector[String] = Vector.empty
+  ): List[String] =
+    (binary :: "-p" :: IsolationFlags) ++ OutputFlags ++ StreamingInputFlags ++ List("--resume", sessionId) ++
+      driverPermissionFlags(permissionMode, allowedTools)
 
   /** argv for headless (`-p <prompt>`) one-shot runs. No `--input-format stream-json` — the prompt is on argv and the
     * CLI should not wait on stdin.
     */
-  def headlessArgv(binary: String, systemPromptPath: os.Path, prompt: String): List[String] =
+  def headlessArgv(
+      binary: String,
+      systemPromptPath: os.Path,
+      prompt: String,
+      permissionMode: String = "default",
+      allowedTools: Vector[String] = Vector.empty
+  ): List[String] =
     (binary :: "-p" :: prompt :: IsolationFlags) ++ OutputFlags ++
-      List("--system-prompt-file", systemPromptPath.toString)
+      List("--system-prompt-file", systemPromptPath.toString) ++ driverPermissionFlags(permissionMode, allowedTools)
 
   /** argv for reviewer one-shots: `claude -p '<prompt>' --output-format json --json-schema '<schema>'
     * --system-prompt-file <path>` plus isolation. Distinct shape from `headlessArgv`: `--output-format json` (not

@@ -48,6 +48,26 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     assert(argv.containsSlice(List("--input-format", "stream-json")), clue = argv)
     assert(argv.containsSlice(List("--output-format", "stream-json")), clue = argv)
 
+  test("driver argv carries --permission-mode + --allowedTools so headless sessions can write/edit/run"):
+    // §7.1: driver sessions (spec/implement/fix-up) run headless with no interactive approver, so their tools must be
+    // pre-authorised or every Write/Edit/Bash is denied. The default (mode "default" + empty allowlist) emits nothing
+    // so the reviewer/legacy argv shape is unchanged.
+    assertEquals(ClaudeConnector.driverPermissionFlags("default", Vector.empty), List.empty[String])
+    val spec = ClaudeConnector.streamingSpecArgv(
+      "claude",
+      os.Path("/tmp/spec.md"),
+      "acceptEdits",
+      Vector("Read", "Write", "Bash")
+    )
+    assert(spec.containsSlice(List("--permission-mode", "acceptEdits")), clue = spec)
+    assert(spec.containsSlice(List("--allowedTools", "Read", "Write", "Bash")), clue = spec)
+    val headless =
+      ClaudeConnector.headlessArgv("claude", os.Path("/tmp/impl.md"), "do it", "acceptEdits", Vector("Edit"))
+    assert(headless.containsSlice(List("--permission-mode", "acceptEdits")), clue = headless)
+    assert(headless.containsSlice(List("--allowedTools", "Edit")), clue = headless)
+    // Default-arg call (used by existing tests) stays flag-free.
+    assert(!ClaudeConnector.streamingSpecArgv("claude", os.Path("/tmp/spec.md")).contains("--permission-mode"))
+
   test("encodeUserMessageJson wraps text in the wire shape `--input-format stream-json` expects"):
     val frame = ClaudeConnector.encodeUserMessageJson("hello")
     val parsed = ujson.read(frame)
