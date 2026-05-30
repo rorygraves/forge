@@ -125,6 +125,27 @@ class RealSideEffectsSuite extends munit.FunSuite:
     assert(!calls.exists(_.startsWith("git.commit")), calls.mkString(" | "))
     assert(!calls.exists(_.startsWith("bm.createPr")), calls.mkString(" | "))
 
+  tempFixture.test("classifyCommitOpenPr: pre-existing ignored cruft is filtered, not denied"): repo =>
+    // `git status --ignored` floods with the repo's pre-existing ignored paths (target/, node_modules/, .env,
+    // .forge/state, …). Those are not the driver's change set — they must be filtered out, NOT denied (one denial
+    // would block the whole stage). Only non-ignored changes + the force-included .forge/specs survive.
+    val calls = ArrayBuffer.empty[String]
+    val status = Vector(
+      StatusEntry('M', ' ', "src/Main.scala", None, ignored = false),
+      StatusEntry('!', '!', "target/", None, ignored = true),
+      StatusEntry('!', '!', "node_modules/", None, ignored = true),
+      StatusEntry('!', '!', ".env", None, ignored = true),
+      StatusEntry('!', '!', ".forge/state/image.json", None, ignored = true),
+      StatusEntry('M', ' ', ".forge/specs/feat/manifest.json", None, ignored = true) // force-included carve-out
+    )
+    val se = sut(repo, calls = calls, status = status, prNumber = PrNumber(7))
+    val ev = se.classifyCommitOpenPr(feature(FsmState.PieceImplementing(p1)), p1).unsafeRunSync()
+    assertEquals(ev, Right(FsmEvent.PrOpened(p1, PrNumber(7))), "cruft must be filtered → Allow, not Deny")
+    val stage = calls.find(_.startsWith("git.stage")).getOrElse("")
+    assert(stage.contains("src/Main.scala") && stage.contains(".forge/specs/feat/manifest.json"), stage)
+    assert(!stage.contains("target") && !stage.contains("node_modules") && !stage.contains(".env"), stage)
+    assert(!stage.contains(".forge/state"), stage)
+
   // --- requiredChecksOverlay (§8 overlay delegation) ------------------------
 
   tempFixture.test("requiredChecksOverlay delegates to BranchManager with feature id / base / epoch"): repo =>

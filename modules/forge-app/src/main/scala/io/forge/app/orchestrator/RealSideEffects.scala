@@ -183,8 +183,15 @@ final class RealSideEffects(
   private def classifyChanges: EitherT[IO, String, Vector[FileChange]] =
     for
       status <- et(git.status(includeIgnored = true))(gitErr)
+      // `--ignored` is needed to surface the force-included `.forge/specs` source of truth (§10.1 rule 4, CC4), but it
+      // also lists EVERY pre-existing ignored path in the repo (`target/`, `node_modules/`, `.env`, `.idea`,
+      // `.forge/{state,log,config.json}`, build/cache dirs, …). Those are not the driver's change set; left in, the
+      // ChangeCollector denies them and a single denial blocks the whole stage. Keep only non-ignored changes plus
+      // ignored paths under `.forge/specs` (the carve-out Forge actually intends to commit).
+      changes = statusToFileChanges(paths.repoRoot, status)
+        .filter(fc => !fc.gitIgnored || fc.path.startsWith(paths.specsRoot))
       cls <- EitherT.liftF[IO, String, Classification](
-        changeCollector.classify(paths.repoRoot, statusToFileChanges(paths.repoRoot, status), config.staging)
+        changeCollector.classify(paths.repoRoot, changes, config.staging)
       )
       included <- EitherT.fromEither[IO](cls match
         case Classification.Allow(inc) => Right(inc)
