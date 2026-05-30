@@ -267,7 +267,7 @@ object RefreshCacheFeature:
 
 object reconcile:
   def run(ctx: StateChangingContext, command: ForgeCommand.Reconcile): IO[ExitCode] =
-    Handlers.notImplemented(s"forge reconcile ${command.feature.value}", "Task 1.4.13")
+    ReconcileCommand.execute(ctx.paths, ctx.config, command.feature)
 
 object refreshCache:
   def run(ctx: StateChangingContext, command: ForgeCommand.RefreshCache): IO[ExitCode] =

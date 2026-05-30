@@ -300,6 +300,8 @@ class RealSideEffectsSuite extends munit.FunSuite:
       IO.pure(Right(()))
 
   private final class FakeDocSync extends DocSync:
+    def renderManifest(manifest: io.forge.core.manifest.Manifest): IO[Either[DocSyncError, String]] =
+      IO.pure(Right("decomp"))
     def renderDecomposition(feature: FeatureId): IO[Either[DocSyncError, String]] = IO.pure(Right("decomp"))
     def writeDecomposition(feature: FeatureId): IO[Either[DocSyncError, Unit]] = IO.pure(Right(()))
 

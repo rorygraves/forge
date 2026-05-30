@@ -1766,11 +1766,31 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
   `forge resume` then **drives the feature forward** to its next
   loop-terminal state (the recovery complement to `forge run`) via
   the shared `Orchestrator.applyUserCommand`.
-- [ ] **M6.** `forge reconcile <feature>` — runs **M2** /
+- [x] **M6.** `forge reconcile <feature>` — runs **M2** /
   §5.4 manifest reconcile against `decomposition.md`'s
   HTML-comment editable regions. Re-renders if no edits
   detected; surfaces `ManifestPatch` if edits valid; refuses
   if edits outside editable regions.
+  **As landed (Task 1.4.13 incr 5):** pure `io.forge.specs.Reconcile`
+  parses the `forge:order-start/-end` region (order + per-piece
+  `forge:editable-summary` text) and `buildPatch`-diffs it against the
+  manifest (`EditPiece(summary)` + `ReorderPieces`); `DocSync` gained
+  `renderManifest(manifest)` so the `ReconcileCommand` handler can
+  render a **candidate** manifest. The handler renders canonical → if
+  it equals on-disk, NoChange; else parse → patch → apply → re-render
+  the candidate and require it to match the on-disk file byte-for-byte
+  (the round-trip proof that every on-disk diff is a reconcilable
+  editable-region edit). Out-of-region edits (piece id/title, status
+  badge, surrounding prose) leave a residual → refuse with line hunks.
+  Confirm is interactive y/N (§5.4) over the shared `ReplConsole`;
+  apply is **direct** `SpecStore.saveManifest`, **no FSM transition**
+  (the FSM `PlanningUpdate` state's advance-to-next-piece is the
+  refinery flow's semantics, wrong for a planning edit) — filed as
+  **S4-9**. Merged-piece edits / §5.5 violations refuse via
+  `ManifestPatch.validate`; a missing `decomposition.md` is
+  (re)rendered. The §5.4 *cross-command* reconcile-preflight gate ("on
+  every command except read-only / reconcile") is **not** wired here —
+  filed as **S4-10**.
 - [x] **M7.** `forge refresh-cache <feature>` — bumps
   `branchProtectionCacheEpoch` only; no state mutation
   beyond that (per §15).
@@ -1858,8 +1878,16 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
   apply→persist case (epoch +1, lifecycle state unchanged, persisted) +
   a terminal-reject case in `OrchestratorUserCommandSuite`, and the
   `RefreshCache` epoch-bump + state-preserved assertion in
-  `FsmReviewFixesSuite`. Remaining handler unit tests (`reconcile`) +
-  the IT surface land with their increments / Task 1.4.16.
+  `FsmReviewFixesSuite`. Incr 5 adds the `reconcile` coverage:
+  `ReconcileSuite` (forge-specs, 9 — the pure parse/buildPatch/hunks +
+  the render round-trip proving parse is the inverse of render) and
+  `ReconcileCommandSuite` (forge-app, 9 — the handler end-to-end over
+  real `File*` stores + the shipped template + a scripted
+  `ReplConsole`: no-change, summary-edit y/N/EOF, reorder,
+  out-of-region refuse, merged-piece refuse, missing markers,
+  missing-file re-render). **All per-command handler unit tests now
+  land; only the IT surface remains** — the MVP-gate end-to-end run
+  (Task 1.4.16) exercises it, so M12 stays open until then.
 
 ### Task 1.4.14 — **C14** Codex resume role-framing closure
 
@@ -2968,6 +2996,44 @@ ticks off only after Task 1.4.17 lands.
   (resume tests modified in place, count unchanged), other counts
   unchanged (`forge-core` 372, `forge-git` 188, `forge-specs` 132);
   `sbt test` + `sbt scalafmtCheckAll` clean; `forge-it` compiles.
+- 2026-05-30 — **Task 1.4.13 increment 5 — `forge reconcile` (M6),
+  the last substantive M-item.** Imports operator edits made in
+  `decomposition.md`'s §5.3 editable regions back into
+  `manifest.json`. New pure `io.forge.specs.Reconcile` parses the
+  `forge:order-start/-end` order region (piece order + per-piece
+  `forge:editable-summary` text, the de-indent being the exact inverse
+  of the template's 3-space summary indent) and diffs it against the
+  manifest into a `ManifestPatch` (`EditPiece(summary)` per changed
+  piece + a `ReorderPieces` when the order changed). `DocSync` gained
+  `renderManifest(manifest)` (promoted from the existing private
+  helper) so the handler can render a *candidate* manifest. The
+  algorithm leans on DocSync's idempotence: render canonical → if it
+  equals the on-disk file there are no edits; otherwise parse, build
+  the patch, apply it, re-render the candidate, and require the
+  candidate to match the on-disk file byte-for-byte — that match is
+  the proof every on-disk diff was a reconcilable editable-region
+  edit. Anything else (a touched piece id/title, status badge, or
+  surrounding prose) leaves a residual and the handler refuses with
+  the offending line hunks (§5.4). `ReconcileCommand` is interactive
+  y/N (§5.4, user decision 2026-05-30) over the shared `ReplConsole`
+  seam; on `y` it applies the validated patch straight through
+  `SpecStore.saveManifest` (atomic) with **no FSM transition** — see
+  **S4-9**. Merged-piece edits and §5.5 merged-prefix violations are
+  caught by `ManifestPatch.validate` and refuse; an add/remove of
+  pieces (non-permutation) refuses with a friendlier targeted message.
+  Tests: `ReconcileSuite` (forge-specs, 9 — parse round-trip is the
+  inverse of render, buildPatch cases, structural refusals, hunks) +
+  `ReconcileCommandSuite` (forge-app, 9 — no-change, summary-edit
+  y/N/EOF, reorder, out-of-region refuse, merged-piece refuse, missing
+  markers, missing-file re-render). Build green: `forge-specs` 141
+  (+9), `forge-app` 288 (+9), other counts unchanged (`forge-core`
+  372, `forge-agents` 196, `forge-git` 188); `sbt test` +
+  `sbt scalafmtCheckAll` clean; `forge-it` compiles. New carry-forward
+  **S4-9** (reconcile is manifest-only, no FSM/log audit action) and
+  **S4-10** (the §5.4 cross-command reconcile-preflight gate is not
+  yet wired) filed in §4. **M6 ticked; M12 reconcile coverage
+  ticked.** Task 1.4.13's remaining work is the section close
+  (Task 1.4.17 / MVP gate).
 
 ## 4. Carry-forward (inherited + new)
 
@@ -3234,6 +3300,47 @@ expected-vs-actual.
   rounds" the post-settle table envisages) into the interactive `/done`
   is deferred — likely a §11.1 note in `forge-design-1.3.md`.
   Reconcile at Task 1.4.17.
+- **S4-9 — `forge reconcile` applies the manifest patch directly, no
+  FSM/log audit action.** Surfaced landing Task 1.4.13 incr 5. §5.4
+  says reconcile applies imported edits "as a `PlanningUpdate` (§14)",
+  but the FSM `PlanningUpdate` state (§14.3) accepts a patch by
+  *advancing to the next piece* — that is the refinery's mid-feature
+  flow, and is wrong for an operator planning-edit that must be
+  orthogonal to the lifecycle state (the feature may be `DesignReady`,
+  mid-implementation, anything). v1 `ReconcileCommand` therefore
+  applies the validated `ManifestPatch` straight through
+  `SpecStore.saveManifest` (atomic, §11.5 step 1) and leaves the FSM
+  state untouched (user decision 2026-05-30, choosing the smaller
+  contract-conformant edit over a new `UserCommand.Reconcile` + FSM
+  handler). `manifest.json` is the committed source of truth (§4) so
+  the state cache rebuilds from the fresh manifest on the next
+  `forge run` / `rebuild-state`, and `forge status` reads the manifest
+  authoritatively for piece data — no cache write needed. Consequence:
+  a reconcile produces **no action-log entry**, so the §19 audit trail
+  doesn't record it (the manifest's own git history is the record).
+  v1.3 impact: §5.4's "as a `PlanningUpdate` (§14)" wording should be
+  re-read as "as a `ManifestPatch` (the §14 vocabulary)", not "via the
+  FSM `PlanningUpdate` *state*"; if an audit-log entry for reconcile is
+  wanted, it needs a non-FSM `planning.reconciled` action or a
+  state-preserving `UserCommand.Reconcile`. Reconcile at Task 1.4.17.
+- **S4-10 — the §5.4 cross-command reconcile-preflight gate is not yet
+  wired.** Surfaced landing Task 1.4.13 incr 5. §5.4 / the §15 table
+  ("`forge run` | Yes | Manifest reconcile passes") say that on *every*
+  command except read-only ones and `forge reconcile` itself, Forge
+  re-renders `decomposition.md` and refuses if the on-disk file has
+  drifted — directing the operator to `forge reconcile` (editable-only
+  edits) or to edit `manifest.json` directly (out-of-region edits).
+  Task 1.4.13 ships the `forge reconcile` *command* (which contains the
+  render-and-diff logic, now reusable), but the **preflight gate on the
+  other state-changing commands** (`new` / `spec` / `run` / `resume` /
+  `refresh-cache` / `abandon`) is not wired into `Main`'s boot or the
+  orchestrator preconditions. v1 risk is low (Forge owns
+  `decomposition.md` between operator sessions, so unimported drift is
+  the operator's own un-reconciled edit), but a `forge run` that
+  silently ignores pending editable-region edits is a §5.4 gap.
+  Wiring it is a thin reuse of `Reconcile.parse` + `DocSync.renderManifest`
+  at the §11.0 precondition layer. Reconcile at Task 1.4.17 (decide:
+  wire in 1.4b polish vs defer to Phase 2).
 
 ## 5. Cross-references
 

@@ -10,14 +10,21 @@ import scala.util.control.NonFatal
 /** Task 1.4.4 D1 — renders `decomposition.md` from `manifest.json` per **M1** / §5.3.
   *
   * `manifest.json` is the machine source of truth; `decomposition.md` is a rendered view. DocSync is the one-way render
-  * (manifest → markdown). The inverse direction (`forge reconcile` reading operator edits back through the
-  * editable-region markers) is **M6** / Slice 1.4b Task 1.4.15 and does not live here.
+  * (manifest → markdown). The inverse direction — `forge reconcile` reading operator edits back through the
+  * editable-region markers (**M6** / §5.4) — parses in [[Reconcile]] and is driven by the `forge reconcile` handler; it
+  * reuses [[renderManifest]] here to round-trip a candidate manifest against the on-disk file.
   *
   * `renderDecomposition` is pure over the manifest, so re-rendering an unchanged manifest is byte-identical
   * (idempotent) — the property `forge reconcile` relies on to tell "operator edited the doc" from "Forge re-rendered
   * it". `writeDecomposition` persists the render via [[SpecStore.saveDecomposition]] (atomic temp+rename+fsync).
   */
 trait DocSync:
+  /** Render a *given* manifest directly, without loading it from the store. The reconcile flow (**M6** / §5.4) uses
+    * this to render a *candidate* manifest (the manifest as it would be after a parsed editable-region edit) and
+    * round-trip it against the on-disk `decomposition.md` — the candidate render matching the on-disk file is exactly
+    * the proof that every on-disk diff is explained by reconcilable editable-region edits and nothing else.
+    */
+  def renderManifest(manifest: Manifest): IO[Either[DocSyncError, String]]
   def renderDecomposition(feature: FeatureId): IO[Either[DocSyncError, String]]
   def writeDecomposition(feature: FeatureId): IO[Either[DocSyncError, Unit]]
 
@@ -35,6 +42,9 @@ final class FileDocSync(paths: ForgePaths, store: SpecStore) extends DocSync:
       case Right(manifest) => renderManifest(manifest)
     }
 
+  override def renderManifest(manifest: Manifest): IO[Either[DocSyncError, String]] =
+    renderManifestBlocking(manifest)
+
   override def writeDecomposition(feature: FeatureId): IO[Either[DocSyncError, Unit]] =
     renderDecomposition(feature).flatMap {
       case Left(err) => IO.pure(Left(err))
@@ -45,7 +55,7 @@ final class FileDocSync(paths: ForgePaths, store: SpecStore) extends DocSync:
         }
     }
 
-  private def renderManifest(manifest: Manifest): IO[Either[DocSyncError, String]] =
+  private def renderManifestBlocking(manifest: Manifest): IO[Either[DocSyncError, String]] =
     IO.blocking {
       if !os.exists(templateFile) then Left(DocSyncError.TemplateMissing(templateFile))
       else
