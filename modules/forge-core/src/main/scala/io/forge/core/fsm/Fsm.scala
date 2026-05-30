@@ -475,6 +475,12 @@ object Fsm:
       case FsmEvent.CheckDiscoveryComplete(piece, prNumber) if piece == state.p && prNumber == state.prNumber =>
         noop(feature)
 
+      // §8 discovery rules 1-3: the orchestrator's CI-readiness gate gave up (no checks / required check missing /
+      // too few observed). Route to NeedsHumanIntervention with the §8-mandated ResumeAfterHumanPush hint. The FSM
+      // stays CiPolicy-agnostic — `reason` is pre-rendered by the orchestrator (CiReadiness.evaluate).
+      case FsmEvent.CiReadinessBlocked(piece, prNumber, reason) if piece == state.p && prNumber == state.prNumber =>
+        toNeedsHumanIntervention(feature, reason, ResumeHint.ResumeAfterHumanPush(state.p, state.prNumber))
+
       case _ => noop(feature)
 
   private def pieceAwaitingReviewTransitions(

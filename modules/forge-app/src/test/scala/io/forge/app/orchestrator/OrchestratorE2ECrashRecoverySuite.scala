@@ -2,7 +2,6 @@ package io.forge.app.orchestrator
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
-import io.forge.app.config.ForgeConfig
 import io.forge.app.monitor.MonitorOutcome
 import io.forge.core.*
 import io.forge.core.fsm.{Feature, FsmState, SessionPhase, SettleOutcome}
@@ -68,7 +67,7 @@ class OrchestratorE2ECrashRecoverySuite extends munit.FunSuite:
         faultLog,
         hookCache,
         paths,
-        ForgeConfig.Default
+        testConfig
       )
       result <- orch1.drive(start).attempt
     yield result).unsafeRunSync()
@@ -102,7 +101,7 @@ class OrchestratorE2ECrashRecoverySuite extends munit.FunSuite:
         cleanLog,
         baseCache,
         paths,
-        ForgeConfig.Default
+        testConfig
       )
       out <- orch2.run(featureId)
       tail <- cleanLog.replay(featureId)

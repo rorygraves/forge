@@ -2,7 +2,6 @@ package io.forge.app.orchestrator
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
-import io.forge.app.config.ForgeConfig
 import io.forge.app.monitor.MonitorOutcome
 import io.forge.core.*
 import io.forge.core.fsm.{Feature, FsmState, SessionPhase, SettleOutcome}
@@ -76,7 +75,7 @@ class OrchestratorAtomicMergeSuite extends munit.FunSuite:
           faultLog,
           hookCache,
           paths,
-          ForgeConfig.Default
+          testConfig
         )
         result <- orch.drive(start).attempt
       yield result).unsafeRunSync()

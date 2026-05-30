@@ -10,6 +10,7 @@ import io.forge.core.manifest.Piece
 import io.forge.core.paths.ForgePaths
 import io.forge.core.pr.{CheckRollup, PrSnapshot, PrState}
 import io.forge.git.branch.{BranchError, BranchManager}
+import io.forge.git.branch.protection.RequiredChecksOverlay
 import io.forge.git.cli.{GhClient, GhError, GitClient, GitError, StatusEntry}
 import io.forge.specs.{
   ChangeCollector,
@@ -137,6 +138,11 @@ final class RealSideEffects(
         branchErr
       )
     yield FsmEvent.DesignPrSnapshotUpdated(openSnapshot(pr))).value
+
+  override def requiredChecksOverlay(feature: Feature): IO[Either[String, RequiredChecksOverlay]] =
+    branchManager
+      .requiredChecksOverlay(feature.id, feature.manifest.baseBranch, feature.branchProtectionCacheEpoch)
+      .map(_.left.map(branchErr))
 
   override def advancePieceBranch(feature: Feature, piece: PieceId): IO[Either[String, FsmEvent]] =
     (for

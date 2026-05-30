@@ -2,7 +2,6 @@ package io.forge.app.orchestrator
 
 import cats.effect.{IO, Ref}
 import cats.effect.unsafe.implicits.global
-import io.forge.app.config.ForgeConfig
 import io.forge.app.monitor.MonitorOutcome
 import io.forge.core.*
 import io.forge.core.fsm.{FsmState, SessionPhase, SettleOutcome}
@@ -69,7 +68,7 @@ class OrchestratorE2EHappyPathSuite extends munit.FunSuite:
         logImpl,
         hookCache,
         paths,
-        ForgeConfig.Default
+        testConfig
       )
       out <- orch.drive(start)
       states <- recorded.get
@@ -101,6 +100,56 @@ class OrchestratorE2EHappyPathSuite extends munit.FunSuite:
       out.manifest.pieces.forall(_.status == io.forge.core.manifest.PieceStatus.Merged),
       s"manifest: ${out.manifest.pieces}"
     )
+
+  tempFixture.test("§8 CI gate: no checks discovered after the window → NHI(ResumeAfterHumanPush)"): root =>
+    val paths = new ForgePaths(repoRoot = root)
+    val specStore = new FileSpecStore(paths)
+    val manifestStore = new FileManifestStore(paths)
+    val baseCache = new FileStateCache(paths)
+
+    val featureId = FeatureId("feat")
+    val p1 = PieceId("p1")
+    val piecePr = PrNumber(201)
+    val inProgress = piecePending(p1, 1).copy(
+      status = io.forge.core.manifest.PieceStatus.InProgress,
+      baseSha = Some(BaseSha),
+      prNumber = Some(piecePr)
+    )
+    val m = mkManifest(featureId, Vector(inProgress))
+    val start = featureAt(featureId, m, FsmState.PieceAwaitingCi(p1, piecePr))
+    // checkDiscoveryTimeoutSec = 0 → the second poll (monotonic has advanced past 0) trips §8 rule 1.
+    val cfg = testConfig.copy(ci = testConfig.ci.copy(checkDiscoveryTimeoutSec = 0))
+
+    val out = (for
+      logImpl <- FileActionLog(paths)
+      watcher <- FakePRWatcher.make
+      // two observed-empty snapshots: the first stamps the discovery anchor, the second trips the timeout.
+      _ <- watcher.offer(piecePr, snapshotResult(openSnapshot(piecePr)))
+      _ <- watcher.offer(piecePr, snapshotResult(openSnapshot(piecePr)))
+      monitor <- FakeSessionMonitor.make()
+      reviewer = FakeReviewerCall.happyPath
+      sideEffects = new FakeSideEffects(PrNumber(100), _ => piecePr)
+      orch = new Orchestrator(
+        sideEffects,
+        monitor,
+        watcher,
+        reviewer,
+        specStore,
+        manifestStore,
+        logImpl,
+        baseCache,
+        paths,
+        cfg
+      )
+      out <- orch.drive(start)
+    yield out).unsafeRunSync()
+
+    out.state match
+      case FsmState.NeedsHumanIntervention(reason, io.forge.core.fsm.ResumeHint.ResumeAfterHumanPush(p, pr)) =>
+        assertEquals(p, p1)
+        assertEquals(pr, piecePr)
+        assert(reason.contains("no CI checks discovered"), s"unexpected reason: $reason")
+      case other => fail(s"expected NHI(ResumeAfterHumanPush), got $other")
 
   tempFixture.test("two pieces: Refining advances to the next PieceImplementing, then FeatureDone"): root =>
     val paths = new ForgePaths(repoRoot = root)
@@ -144,7 +193,7 @@ class OrchestratorE2EHappyPathSuite extends munit.FunSuite:
         logImpl,
         hookCache,
         paths,
-        ForgeConfig.Default
+        testConfig
       )
       out <- orch.drive(start)
       states <- recorded.get

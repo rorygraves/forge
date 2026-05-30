@@ -5,13 +5,15 @@ import io.forge.agents.{DesignReview, PrReview, RefineOutcome as AgentRefineOutc
 import io.forge.app.config.ForgeConfig
 import io.forge.app.monitor.{MonitorOutcome, SessionLimits, SessionMonitor}
 import io.forge.app.reviewer.{ReviewerCall, ReviewerLimits, ReviewerOutcome}
-import io.forge.core.{PieceId, PrNumber}
+import io.forge.core.{CiPolicy, PieceId, PrNumber}
 import io.forge.core.cost.CostTotals
 import io.forge.core.fsm.{Feature, Fsm, FsmConfig, FsmEvent, FsmState, SessionPhase, UserCommand}
+import io.forge.core.log.ActionDraft
 import io.forge.core.manifest.{ManifestPatch, ManifestStore}
 import io.forge.core.pr.PrState
 import io.forge.core.review.{DesignReviewVerdict, PrReviewVerdict, RefineVerdict}
 import io.forge.core.state.{RebuildState, StateCache}
+import io.forge.git.branch.protection.{OverlaySource, RequiredChecksOverlay}
 import io.forge.git.watcher.{DecodedSnapshot, PRWatcher, PollBaseline, PollResult}
 import io.forge.specs.SpecStore
 
@@ -43,6 +45,13 @@ import scala.util.Try
   * **S2-5** writer-side invariant; the §11.5 crash window (manifest written, log not) is recovered by
   * `RebuildState.reconcile` on the next `run`.
   */
+/** §8 per-`PieceAwaitingCi`-visit CI-gate state, local to one `pieceCiWatcherIO` call: `gateEnteredAt` is the monotonic
+  * stamp of the first poll (the discovery-window anchor), and `disc` carries `CiReadiness`'s consecutive-green count.
+  */
+private final case class CiGate(gateEnteredAt: Option[FiniteDuration], disc: CiDiscoveryState)
+private object CiGate:
+  val initial: CiGate = CiGate(None, CiDiscoveryState.initial)
+
 final class Orchestrator(
     sideEffects: SideEffects,
     monitor: SessionMonitor,
@@ -63,6 +72,12 @@ final class Orchestrator(
     * ForgeConfig deferral); until then the 3-minute cap is hard-wired here as it is in the reviewer-call wiring.
     */
   private val reviewerWallClock: FiniteDuration = 3.minutes
+
+  /** §8 CI-readiness policy (§18 `ci.policy`). An unparseable value defaults to the §18 default rather than failing the
+    * run — the config layer (Task 1.4.9) owns validation.
+    */
+  private val ciPolicy: CiPolicy =
+    CiPolicy.fromString(config.ci.policy).getOrElse(CiPolicy.BranchProtectionThenObserved)
 
   /** S4-1 — cross-restart persistence of the PRWatcher poll cursor (built from `paths`, no constructor change). */
   private val baselineStore = new PollBaselineStore(paths)
@@ -301,6 +316,13 @@ final class Orchestrator(
       case EventSource.UserQa => userInput.map(RaceResult.FromUser.apply)
 
   private def watcherIO(feature: Feature, pr: PrNumber): IO[RaceResult] =
+    // §8: PieceAwaitingCi runs the CI-readiness gate (overlay promotion + discovery window + stableGreenPolls); the
+    // other watcher states consume one poll snapshot and hand it straight to the FSM.
+    feature.state match
+      case s: FsmState.PieceAwaitingCi => pieceCiWatcherIO(feature, s.p, pr)
+      case _ => plainWatcherIO(feature, pr)
+
+  private def plainWatcherIO(feature: Feature, pr: PrNumber): IO[RaceResult] =
     // S4-1: seed the cursor from the persisted baseline file so a restart mid-gate resumes where the last poll left
     // off, and persist `decoded.nextBaseline` after each Snapshot poll (the watcher's `stepOnce` sets the ref before
     // emitting, so `baselineRef.get` here reflects the just-decoded cursor).
@@ -321,17 +343,103 @@ final class Orchestrator(
       }
     }
 
+  /** §8 CI-readiness gate for a piece PR. Self-contained sub-loop: the gate clock + consecutive-green count live in one
+    * `Ref[CiGate]` **local to this call**, so they reset by construction on every re-entry to `PieceAwaitingCi` (e.g.
+    * after a fix-up re-push). The count MUST stay local — a `loop`-threaded ref could carry a stale green count across
+    * a fix-up and declare premature readiness. Elapsed time uses `IO.monotonic` (deterministic under `TestControl`).
+    * The overlay is fetched once per gate visit (it is cache-first inside `BranchManager`).
+    */
+  private def pieceCiWatcherIO(feature: Feature, piece: PieceId, pr: PrNumber): IO[RaceResult] =
+    sideEffects.requiredChecksOverlay(feature).flatMap {
+      case Left(reason) =>
+        IO.pure(RaceResult.FromWatcher(FsmEvent.HarnessError(s"required-checks overlay failed: $reason")))
+      case Right(overlay) =>
+        val auditUnauthorized =
+          if overlay.source == OverlaySource.Unauthorized then
+            log.append(feature.id, protectionUnauthorizedDraft(feature, piece, pr)).void
+          else IO.unit
+        for
+          _ <- auditUnauthorized
+          seed <- baselineStore.load(feature.id, pr)
+          baselineRef <- Ref.of[IO, PollBaseline](seed)
+          gateRef <- Ref.of[IO, CiGate](CiGate.initial)
+          ev <- watcher
+            .watch(pr, baselineRef)
+            .evalTap {
+              case _: PollResult.Snapshot => baselineRef.get.flatMap(baselineStore.save(feature.id, pr, _))
+              case _ => IO.unit
+            }
+            .evalMap(ciPollToEvent(feature, piece, pr, overlay, gateRef, _))
+            .unNone
+            .head
+            .compile
+            .lastOrError
+        yield RaceResult.FromWatcher(ev)
+    }
+
+  private def ciPollToEvent(
+      feature: Feature,
+      piece: PieceId,
+      pr: PrNumber,
+      overlay: RequiredChecksOverlay,
+      gateRef: Ref[IO, CiGate],
+      result: PollResult
+  ): IO[Option[FsmEvent]] =
+    result match
+      case PollResult.RateLimited(_) => IO.pure(None) // the watch stream absorbs back-off (S3-4)
+      case PollResult.Failed(err) => IO.pure(Some(FsmEvent.HarnessError(s"PR poll failed: $err")))
+      case PollResult.Snapshot(decoded) =>
+        IO.monotonic.flatMap { now =>
+          gateRef.get.flatMap { gate =>
+            val enteredAt = gate.gateEnteredAt.getOrElse(now)
+            val elapsed = now - enteredAt
+            CiReadiness.evaluate(ciPolicy, config.ci, overlay, decoded.snapshot, gate.disc, elapsed) match
+              case CiDecision.KeepPolling(next) =>
+                gateRef.set(CiGate(Some(enteredAt), next)).as(None)
+              case CiDecision.Forward(rollup) =>
+                val auditSkipped =
+                  if ciPolicy == CiPolicy.None then log.append(feature.id, ciSkippedDraft(feature, piece, pr)).void
+                  else IO.unit
+                auditSkipped.as(Some(FsmEvent.PrSnapshotUpdated(piece, decoded.snapshot.copy(requiredChecks = rollup))))
+              case CiDecision.Blocked(reason) =>
+                IO.pure(Some(FsmEvent.CiReadinessBlocked(piece, pr, reason)))
+          }
+        }
+
+  private def ciSkippedDraft(feature: Feature, piece: PieceId, pr: PrNumber): ActionDraft =
+    ActionDraft(
+      feature.id,
+      Some(piece),
+      actor = None,
+      role = None,
+      kind = "ci.skipped",
+      payload = ujson.Obj("prNumber" -> ujson.Num(pr.value.toDouble), "policy" -> ujson.Str("none"))
+    )
+
+  private def protectionUnauthorizedDraft(feature: Feature, piece: PieceId, pr: PrNumber): ActionDraft =
+    ActionDraft(
+      feature.id,
+      Some(piece),
+      actor = None,
+      role = None,
+      kind = "harness.protection_unauthorized",
+      payload = ujson.Obj(
+        "prNumber" -> ujson.Num(pr.value.toDouble),
+        "base" -> ujson.Str(feature.manifest.baseBranch.value)
+      )
+    )
+
   private def pollResultToEvent(feature: Feature, result: PollResult): IO[Option[FsmEvent]] =
     result match
       case PollResult.Snapshot(decoded) => watcherEventFor(feature.state, decoded).map(Some(_))
       case PollResult.RateLimited(_) => IO.pure(None) // the watch stream absorbs back-off (S3-4)
       case PollResult.Failed(err) => IO.pure(Some(FsmEvent.HarnessError(s"PR poll failed: $err")))
 
+  // PieceAwaitingCi is handled by pieceCiWatcherIO (the §8 gate), never by this generic path.
   private def watcherEventFor(state: FsmState, decoded: DecodedSnapshot): IO[FsmEvent] =
     val snap = decoded.snapshot
     state match
       case _: FsmState.DesignAwaitingMerge => IO.pure(FsmEvent.DesignPrSnapshotUpdated(snap))
-      case s: FsmState.PieceAwaitingCi => IO.pure(FsmEvent.PrSnapshotUpdated(s.p, snap))
       case s: FsmState.PieceAwaitingReview => IO.pure(FsmEvent.PrSnapshotUpdated(s.p, snap))
       case s: FsmState.PieceAwaitingMerge =>
         (snap.state, snap.mergeCommit, snap.mergedAt) match

@@ -90,6 +90,18 @@ class ResumeHintCoverageSuite extends munit.FunSuite:
       case ResumeHint.RunAnotherFixup(p, pr) => p == P1 && pr == P1Pr
       case _ => false
 
+  test("§8 CI readiness blocked (discovery rules 1-3) → NHI(ResumeAfterHumanPush)"):
+    assertNhi(
+      "ci readiness blocked",
+      featureIn(
+        FsmState.PieceAwaitingCi(P1, P1Pr),
+        pieces = Vector(pieceInProgress(P1, 1, prNumber = Some(P1Pr)), piecePending(P2, 2))
+      ),
+      FsmEvent.CiReadinessBlocked(P1, P1Pr, "no CI checks discovered")
+    ):
+      case ResumeHint.ResumeAfterHumanPush(p, pr) => p == P1 && pr == P1Pr
+      case _ => false
+
   test("§11.5 PR closed without merge → NHI(RunAnotherFixup)"):
     assertNhi(
       "piece pr closed",

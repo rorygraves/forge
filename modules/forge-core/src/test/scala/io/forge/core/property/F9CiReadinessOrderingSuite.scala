@@ -81,3 +81,17 @@ class F9CiReadinessOrderingSuite extends ScalaCheckSuite:
       (drafts.isEmpty :| s"CheckDiscoveryComplete emitted drafts: $drafts")
     }
   }
+
+  property("F9 — CiReadinessBlocked (§8 discovery gave up) → NHI(ResumeAfterHumanPush), one fsm.transition draft") {
+    forAll(genPieceId, Generators.genPrNumber) { (piece: PieceId, prNumber: PrNumber) =>
+      val staged = featureInAwaitingCi(piece, prNumber)
+      val (after, drafts) =
+        Fsm.transition(staged, FsmEvent.CiReadinessBlocked(piece, prNumber, "no CI checks discovered"))
+      after.state match
+        case FsmState.NeedsHumanIntervention(reason, ResumeHint.ResumeAfterHumanPush(p, pr)) =>
+          ((reason == "no CI checks discovered") :| s"reason not forwarded: $reason") &&
+          ((p == piece && pr == prNumber) :| s"hint piece/pr mismatch: $p/$pr") &&
+          (drafts.exists(_.kind == "fsm.transition") :| s"no fsm.transition draft: $drafts")
+        case other => falsified :| s"expected NHI(ResumeAfterHumanPush), got $other"
+    }
+  }

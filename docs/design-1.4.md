@@ -2012,6 +2012,54 @@ The MVP-gate enablers — Forge is unusable without these.
   `roadmap.md` §7.2.3 and in the S2-3 / S2-9 / S3-4 `design-rationale.md`
   entries; S3-2's lives in the §7.2.3 bullet.
 
+### Task 1.4.10b — §8 CI-readiness wiring (Task 1.4.10 follow-up)  ✅ landed 2026-05-30
+
+Surfaced by the **Task 1.4.16 pre-flight**: the §8 CI-readiness policy
+(`CiConfig`, `CiPolicy`, `BranchManager.requiredChecksOverlay`,
+`FsmEvent.CheckDiscoveryComplete`) was specified but **never wired into the
+orchestrator** in Task 1.4.10. The decoder always emits
+`requiredChecks.required = Vector.empty`, the FSM's `ciOutcome` correctly reads
+that as `Pending` (CI2), and no check-discovery timeout was wired — so **any
+piece PR stalled in `PieceAwaitingCi` forever**, blocking the MVP run regardless
+of target. Closed as its own PR before Task 1.4.16 (user decision 2026-05-30).
+Filed as design-rationale **CI8**.
+
+- [x] **CW1.** Pure `io.forge.app.orchestrator.CiReadiness` (`evaluate(policy,
+  ci, overlay, snapshot, state, elapsed) → CiDecision`) owning the §8 policy —
+  `None` → degenerate all-success stamp; `BranchProtectionThenObserved` → union
+  overlay (`overlay.required ++ config.ci.requiredChecksOverlay`), observed
+  fallback, discovery-timeout (rule 1), `minimumExpectedChecks` (rule 3),
+  missing-required (rule 2), and the `stableGreenPolls` consecutive-green
+  debounce. The FSM stays `CiPolicy`-agnostic (per `F9CiReadinessOrderingSuite`).
+  `CiReadinessSuite` (forge-app) covers every branch; `elapsed` is passed
+  explicitly so the timeout rules need no clock.
+- [x] **CW2.** Additive `FsmEvent.CiReadinessBlocked(piece, prNumber, reason)` +
+  a `pieceAwaitingCiTransitions` handler → `NHI(reason,
+  ResumeAfterHumanPush(p, prNumber))`. Ephemeral event → no Replay change. New
+  `ResumeHintCoverageSuite` + `F9CiReadinessOrderingSuite` rows; first producer
+  of `NHI(ResumeAfterHumanPush)` (resume side already existed).
+- [x] **CW3.** `SideEffects.requiredChecksOverlay(feature)` delegating to
+  `BranchManager` (base = `manifest.baseBranch`, epoch =
+  `branchProtectionCacheEpoch`); `RealSideEffects` impl + `RealSideEffectsSuite`
+  delegation test.
+- [x] **CW4.** `Orchestrator` wiring: `pieceCiWatcherIO` runs the gate as a
+  self-contained sub-loop with a per-visit `CiGate` ref (monotonic
+  discovery-window anchor + `CiDiscoveryState` green count; resets on re-entry by
+  construction). `KeepPolling` → continue the stream; `Forward(rollup)` → stamp
+  `required` + `PrSnapshotUpdated`; `Blocked` → `CiReadinessBlocked`. Emits the
+  `ci.skipped` (None) and `harness.protection_unauthorized`
+  (`OverlaySource.Unauthorized`) audit drafts.
+- [x] **CW5.** Reworked `OrchestratorTestKit.ciReadySnapshot` to observed-only
+  (the real decoder never populates `required`); added
+  `FakeSideEffects.requiredChecksOverlay` + a `testConfig` with
+  `stableGreenPolls = 1` (the §18 default of 2 would deadlock a single-snapshot
+  e2e — the watcher is the sole source in `PieceAwaitingCi`); added a §8-no-checks
+  NHI e2e. Build green: `forge-core` + `forge-app` (326) + `forge-it` compile;
+  `scalafmtCheckAll` clean.
+- [x] **CW6.** **§9 base-freshness-on-readiness deferred** to a follow-up
+  (designed-for; re-uses this task's `ResumeAfterHumanPush` plumbing). Recorded
+  in **CI8**.
+
 ### Task 1.4.16 — MVP-gate run
 
 The Phase-1 exit gate. Drive one small, contained,
@@ -3124,6 +3172,35 @@ ticks off only after Task 1.4.17 lands.
   isolation, unrelated to this change); `sbt scalafmtCheckAll` clean.
   Task 1.4.15 closed; 1.4b's remaining work is Task 1.4.16 (MVP gate)
   → Task 1.4.17 (section close + Phase 1 exit).
+- 2026-05-30 — **Task 1.4.10b — §8 CI-readiness wiring (Task 1.4.10
+  follow-up), all six CW items ticked.** Surfaced by the Task 1.4.16
+  pre-flight: the §8 CI-readiness policy was specified but never wired
+  into the orchestrator, so the decoder's always-empty `required` set
+  left every piece PR stalled in `PieceAwaitingCi` forever (no
+  check-discovery timeout to escape) — a hard blocker for the MVP run
+  regardless of target. Closed as its own PR before Task 1.4.16 (user
+  decision). New pure `CiReadiness.evaluate` owns the §8 policy (None
+  degenerate-stamp; union overlay; discovery-timeout / min-checks /
+  missing-required NHI rules; `stableGreenPolls` debounce) and
+  populates the snapshot's `required` set, which the orchestrator
+  stamps before forwarding `PrSnapshotUpdated` — keeping the FSM
+  `CiPolicy`-agnostic (per `F9CiReadinessOrderingSuite`). The gate runs
+  as a self-contained sub-loop in `Orchestrator.pieceCiWatcherIO` with
+  a per-visit `CiGate` ref (monotonic discovery anchor + green count,
+  resets on re-entry by construction). The §8 discovery-failure NHI
+  flows through a new additive `FsmEvent.CiReadinessBlocked` →
+  `NHI(ResumeAfterHumanPush)` (ephemeral → no Replay change; first
+  producer of that hint). `SideEffects.requiredChecksOverlay` delegates
+  to `BranchManager`; `ci.skipped` / `harness.protection_unauthorized`
+  audit drafts emitted. The e2e `ciReadySnapshot` was reworked to
+  observed-only (the real decoder never populates `required`) with a
+  `testConfig` `stableGreenPolls = 1` (the §18 default 2 would deadlock
+  a single-snapshot e2e); a §8-no-checks NHI e2e added. **§9
+  base-freshness-on-readiness deferred** to a follow-up (re-uses this
+  task's `ResumeAfterHumanPush` plumbing). Decision + deferral filed as
+  design-rationale **CI8**. Build green: `forge-core` 377 (+2),
+  `forge-app` 326 (+14), `forge-specs` / `forge-git` / `forge-agents`
+  unchanged; `forge-it` compiles; `sbt scalafmtCheckAll` clean.
 
 ## 4. Carry-forward (inherited + new)
 

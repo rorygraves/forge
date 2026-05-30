@@ -2,7 +2,6 @@ package io.forge.app.orchestrator
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
-import io.forge.app.config.ForgeConfig
 import io.forge.core.*
 import io.forge.core.fsm.{Feature, FsmState, ResumeHint, UserCommand}
 import io.forge.core.log.FileActionLog
@@ -44,7 +43,7 @@ class OrchestratorUserCommandSuite extends munit.FunSuite:
       logImpl,
       hookCache,
       paths,
-      ForgeConfig.Default
+      testConfig
     )
 
   // ---------------------------------------------------------------------------

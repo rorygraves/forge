@@ -4,6 +4,7 @@ import cats.effect.IO
 import io.forge.agents.{DesignReviewInput, PrReviewInput, RefineInput}
 import io.forge.core.{PieceId, PrNumber}
 import io.forge.core.fsm.{Feature, FsmEvent}
+import io.forge.git.branch.protection.RequiredChecksOverlay
 
 /** The orchestrator's effectful boundary (Task 1.4.10 J1/J2). Everything the loop engine cannot do with the pure
   * `Fsm.transition` + the atomic persist triad + the already-injectable `SessionMonitor` / `PRWatcher` / `ReviewerCall`
@@ -63,6 +64,14 @@ trait SideEffects:
   /** §11.2 step 13 — commit design assets + audit snapshot, `gh pr create`; success → `DesignPrSnapshotUpdated(open)`.
     */
   def commitDesignAndOpenPr(feature: Feature): IO[Either[String, FsmEvent]]
+
+  /** §8.1 — the branch-protection required-checks overlay for this feature's base branch (cache-first, keyed by
+    * feature/base/`branchProtectionCacheEpoch`). The orchestrator's `CiReadiness` gate unions this with
+    * `config.ci.requiredChecksOverlay`. `Left(reason)` on a non-degradable `gh` failure (rate-limit / other); the
+    * `Unauthorized`/`Unprotected` fallbacks degrade to an empty overlay (carried in `RequiredChecksOverlay.source`),
+    * not a `Left`.
+    */
+  def requiredChecksOverlay(feature: Feature): IO[Either[String, RequiredChecksOverlay]]
 
   /** §11.4 step 1 — `syncBase` + `createPieceBranch`; success → `BranchCreated(piece, branch, baseSha)`. */
   def advancePieceBranch(feature: Feature, piece: PieceId): IO[Either[String, FsmEvent]]

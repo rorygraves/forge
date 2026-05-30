@@ -24,7 +24,7 @@ import io.forge.core.manifest.Manifest
 import io.forge.core.paths.ForgePaths
 import io.forge.core.pr.PrState
 import io.forge.git.branch.{BaseFreshness, BaseSnapshot, BranchError, BranchManager, ForgeCommand, PreflightReport}
-import io.forge.git.branch.protection.RequiredChecksOverlay
+import io.forge.git.branch.protection.{OverlaySource, RequiredChecksOverlay}
 import io.forge.git.cli.{CommitResult, FastForwardResult, GhClient, GhError, GitClient, GitError, StatusEntry}
 import io.forge.specs.{DefaultChangeCollector, DocSync, DocSyncError, SpecStore, SpecStoreError}
 
@@ -124,6 +124,15 @@ class RealSideEffectsSuite extends munit.FunSuite:
     assert(ev.left.exists(_.contains(".env")), ev.toString)
     assert(!calls.exists(_.startsWith("git.commit")), calls.mkString(" | "))
     assert(!calls.exists(_.startsWith("bm.createPr")), calls.mkString(" | "))
+
+  // --- requiredChecksOverlay (§8 overlay delegation) ------------------------
+
+  tempFixture.test("requiredChecksOverlay delegates to BranchManager with feature id / base / epoch"): repo =>
+    val calls = ArrayBuffer.empty[String]
+    val se = sut(repo, calls = calls)
+    val ov = se.requiredChecksOverlay(feature(FsmState.PieceAwaitingCi(p1, PrNumber(7)))).unsafeRunSync()
+    assertEquals(ov, Right(RequiredChecksOverlay(Set("build"), java.time.Instant.EPOCH, OverlaySource.Protected)))
+    assert(calls.contains("bm.requiredChecksOverlay(feat,main,0)"), calls.mkString(" | "))
 
   // --- classifyCommitPush (fix-up) ------------------------------------------
 
@@ -275,7 +284,11 @@ class RealSideEffectsSuite extends munit.FunSuite:
         feature: FeatureId,
         base: BranchName,
         epoch: Long
-    ): IO[Either[BranchError, RequiredChecksOverlay]] = IO.raiseError(new NotImplementedError)
+    ): IO[Either[BranchError, RequiredChecksOverlay]] =
+      IO {
+        calls += s"bm.requiredChecksOverlay(${feature.value},${base.value},$epoch)"
+        Right(RequiredChecksOverlay(Set("build"), java.time.Instant.EPOCH, OverlaySource.Protected))
+      }
 
   private final class FakeGhClient(diff: String) extends GhClient:
     def prView(pr: PrNumber, fields: Vector[String]): IO[Either[GhError, ujson.Value]] =
