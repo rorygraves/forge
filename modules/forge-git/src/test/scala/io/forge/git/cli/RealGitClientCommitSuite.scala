@@ -48,6 +48,18 @@ class RealGitClientCommitSuite extends munit.FunSuite:
     val after = client.currentSha.unsafeRunSync().getOrElse(fail("currentSha after"))
     assertNotEquals(before, after, "HEAD must move after a real commit")
 
+  fixture.test("stage force-adds a gitignored-but-allowed path (Forge's .forge/specs source of truth)"): work =>
+    // The target repo gitignores `.forge/` so it doesn't dirty the worktree, but Forge force-includes its own
+    // `.forge/specs/...` source of truth into the design/piece commits (§10.1 rule 4). Without `-f`, `git add` refuses.
+    val client = RealGitClient(work)
+    os.write(work / ".gitignore", ".forge/\n")
+    os.write(work / ".forge" / "specs" / "feat" / "manifest.json", "{}\n", createFolders = true)
+    assertEquals(client.stage(Vector(".gitignore", ".forge/specs/feat/manifest.json")).unsafeRunSync(), Right(()))
+    assertEquals(client.commit("add design assets").unsafeRunSync(), Right(CommitResult.Committed))
+    // The ignored-but-forced file is now tracked (shows in HEAD), proving the force-add worked.
+    val tracked = os.proc("git", "ls-files", ".forge/specs/feat/manifest.json").call(cwd = work).out.text().trim
+    assertEquals(tracked, ".forge/specs/feat/manifest.json")
+
   fixture.test("commit on a clean tree → NothingToCommit (not an error)"): work =>
     val client = RealGitClient(work)
     // The seed commit already captured everything; nothing is staged.

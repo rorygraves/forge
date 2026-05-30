@@ -132,8 +132,11 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
     run(Vector("git", "status", "--porcelain")).map(_.map(_.isEmpty))
 
   override def stage(paths: Vector[String]): IO[Either[GitError, Unit]] =
+    // `-f`: callers only ever pass ChangeCollector-Allowed paths, and Forge's own source-of-truth lives under the
+    // gitignored `.forge/specs/...` (the repo gitignores `.forge/` so it doesn't dirty the worktree, §10.1 rule 4
+    // force-includes the specs). Without `-f`, `git add` refuses those ignored-but-allowed paths ("use -f").
     if paths.isEmpty then IO.pure(Right(()))
-    else run(Vector("git", "add", "-A", "--") ++ paths).map(_.map(_ => ()))
+    else run(Vector("git", "add", "-A", "-f", "--") ++ paths).map(_.map(_ => ()))
 
   override def status(includeIgnored: Boolean): IO[Either[GitError, Vector[StatusEntry]]] =
     val argv =
