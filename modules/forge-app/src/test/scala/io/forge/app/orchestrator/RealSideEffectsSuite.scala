@@ -28,6 +28,8 @@ import io.forge.git.branch.protection.RequiredChecksOverlay
 import io.forge.git.cli.{CommitResult, FastForwardResult, GhClient, GhError, GitClient, GitError, StatusEntry}
 import io.forge.specs.{DefaultChangeCollector, DocSync, DocSyncError, SpecStore, SpecStoreError}
 
+import fs2.Stream
+
 import scala.collection.mutable.ArrayBuffer
 
 import OrchestratorTestKit.*
@@ -57,11 +59,12 @@ class RealSideEffectsSuite extends munit.FunSuite:
       diff: String = "",
       pieceSpec: String = "piece spec body",
       design: String = "the design",
-      prNumber: PrNumber = PrNumber(42)
+      prNumber: PrNumber = PrNumber(42),
+      connector: Connector = new FakeConnector
   ): RealSideEffects =
     val paths = ForgePaths(repoRoot, repoRoot / "home")
     new RealSideEffects(
-      connector = new FakeConnector,
+      connector = connector,
       branchManager = new FakeBranchManager(calls, prNumber),
       git = new FakeGitClient(calls, status),
       gh = new FakeGhClient(diff),
@@ -175,16 +178,32 @@ class RealSideEffectsSuite extends munit.FunSuite:
     val res = se.designReviewInput(feature(FsmState.DesignReviewing(2)), 2).unsafeRunSync()
     assertEquals(res.map(i => (i.round, i.designMarkdown)), Right((2, "DESIGN")))
 
+  // --- C14 / N5: resume carries the driver system-prompt path -----------------
+
+  tempFixture.test("resumeDesignRevision passes the spec driver prompt path so Codex can re-prepend §7.10(a)"): repo =>
+    val resumeCalls = ArrayBuffer.empty[(String, os.Path, String)]
+    val paths = ForgePaths(repo, repo / "home")
+    val se = sut(repo, connector = new FakeConnector(resumeCalls))
+    val withSession = feature(FsmState.DesignReviewing(1)).copy(designSessionId = Some("sid-1"))
+    se.resumeDesignRevision(withSession, 1).unsafeRunSync()
+    assertEquals(resumeCalls.size, 1)
+    val (sid, promptPath, _) = resumeCalls.head
+    assertEquals(sid, "sid-1")
+    // Same file `launchSpec` spawned with — `<userPromptsDir>/specify.<cli>.md` — so the resumed Codex turn re-prepends
+    // the identical driver framing instead of trusting session memory (design-rationale C14, closed by v1.3 §7.10(a)).
+    assertEquals(promptPath, paths.userPromptsDir / "specify.claude.md")
+
   // ===========================================================================
   // Fakes
   // ===========================================================================
 
-  private final class FakeConnector extends Connector:
+  private final class FakeConnector(resumeCalls: ArrayBuffer[(String, os.Path, String)] = ArrayBuffer.empty)
+      extends Connector:
     val name = "claude"
     def runStreamingSpec(systemPromptPath: os.Path, initialUserMessage: String): IO[StreamingSession] =
       IO.raiseError(new NotImplementedError)
-    def resumeStreamingSpec(sessionId: String, message: String): IO[StreamingSession] =
-      IO.raiseError(new NotImplementedError)
+    def resumeStreamingSpec(sessionId: String, systemPromptPath: os.Path, message: String): IO[StreamingSession] =
+      IO.delay(resumeCalls += ((sessionId, systemPromptPath, message))) *> IO.pure(RealSideEffectsSuite.NoopStreaming)
     def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] =
       IO.raiseError(new NotImplementedError)
     def runFixup(prompt: FixupPrompt): IO[AgentSession] = IO.raiseError(new NotImplementedError)
@@ -283,3 +302,13 @@ class RealSideEffectsSuite extends munit.FunSuite:
   private final class FakeDocSync extends DocSync:
     def renderDecomposition(feature: FeatureId): IO[Either[DocSyncError, String]] = IO.pure(Right("decomp"))
     def writeDecomposition(feature: FeatureId): IO[Either[DocSyncError, Unit]] = IO.pure(Right(()))
+
+object RealSideEffectsSuite:
+  /** A bare resumed session; the C14 call-site test only inspects the captured resume arguments, never the session. */
+  private object NoopStreaming extends StreamingSession:
+    override val sessionId: String = "sid-1"
+    override val events: Stream[IO, AgentEvent] = Stream.empty
+    override def close(): IO[Unit] = IO.unit
+    override def kill(): IO[Unit] = IO.unit
+    override def send(input: String): IO[Unit] = IO.unit
+    override def answerQuestion(toolUseId: Option[String], answer: String): IO[Unit] = IO.unit

@@ -207,9 +207,10 @@ object Fsm:
 
       // §11.2 step 12: request_changes. Validate designSessionId per §11.0 step 5; on missing → NHI(ReopenDesign(None)).
       // On present → next revision round (gated by config.maxDesignReviewRounds).
-      // C14 awareness: when the orchestrator handles this transition by calling driver.resumeStreamingSpec(...), the
-      // Codex connector cannot re-apply --system-prompt-file (design-rationale C14). The orchestrator-side wiring (lands
-      // in Slice 4) must re-issue role framing in the revisionMessage for Codex. The FSM itself does not branch on Mode.
+      // C14 (closed, v1.3 §7.10(a) / Task 1.4.14): when the orchestrator handles this transition it calls
+      // driver.resumeStreamingSpec(sessionId, systemPromptPath, revisionMessage) — the trait now carries the driver
+      // prompt path so the Codex connector re-prepends the §7.10(a) system block on resume (Claude ignores it). The FSM
+      // itself does not branch on Mode.
       case FsmEvent.DesignReviewReceived(round, DesignReviewVerdict.RequestChanges(_)) =>
         requireSessionId(
           feature.designSessionId,

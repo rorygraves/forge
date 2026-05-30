@@ -31,9 +31,17 @@ trait Connector:
     * turn. Same rationale as `runStreamingSpec`: both pinned CLIs need a user message at spawn to produce events.
     * Returns a fresh `StreamingSession` whose `sessionId` is the new (post-resume) id — §6.1 invariant:
     * `feature.designSessionId` is updated to the *new* id (pinned CLIs guarantee `oldSessionId == newSessionId`).
+    *
+    * `systemPromptPath` is the same driver system-prompt file passed to the original `runStreamingSpec` spawn. It is
+    * carried here — symmetric with `runStreamingSpec` — so each connector can honour §7.10(a) on its own terms:
+    * `ClaudeConnector` ignores it (the CLI restores the system prompt server-side via `--resume`); `CodexConnector`
+    * re-prepends it via [[CodexPrompt.withSystemBlock]], because each `codex exec resume` is a fresh invocation that
+    * remembers nothing the adapter does not pass in. v1.3 §7.10(a) (forge-design-1.3) resolves design-rationale C14 by
+    * widening this trait rather than pushing the framing responsibility up into the orchestrator's resume message.
     */
   def resumeStreamingSpec(
       sessionId: String,
+      systemPromptPath: os.Path,
       message: String
   ): IO[StreamingSession]
 

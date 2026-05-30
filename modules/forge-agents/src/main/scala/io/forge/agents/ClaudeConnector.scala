@@ -66,8 +66,14 @@ final class ClaudeConnector(
   /** v1.2 §7.1 — resume a closed spec session by id. `--resume` argv carries the session id; the `message` is the user
     * message that drives the resumed turn. Same init-after-first-message contract as [[runStreamingSpec]], so the
     * message is mandatory. §6.1 invariant on the pinned CLI: the returned `sessionId` equals the input.
+    *
+    * `systemPromptPath` is **ignored**: `--resume` restores the original spawn's system prompt server-side, so
+    * re-supplying it would be redundant (and `--system-prompt-file` is deliberately omitted from the resume argv — see
+    * [[resumeStreamingSpecArgv]]). The parameter exists for the Codex side of the widened trait (v1.3 §7.10(a) /
+    * design-rationale C14); Claude honours the convention by construction.
     */
-  def resumeStreamingSpec(sessionId: String, message: String): IO[StreamingSession] =
+  def resumeStreamingSpec(sessionId: String, systemPromptPath: os.Path, message: String): IO[StreamingSession] =
+    val _ = systemPromptPath
     spawnStreaming(
       ClaudeConnector.resumeStreamingSpecArgv(binary, sessionId),
       message

@@ -292,10 +292,10 @@ Slice 5.**
   `forge spec`, `forge run`, `forge status`, `forge resume`,
   `forge reconcile`, `forge refresh-cache`, `forge abandon`,
   `forge rebuild-state`, `forge unlock --force`.
-- **C14 resolution** — orchestrator's resume code path either
-  re-issues Codex role framing in the resume message, or v1.3
-  widens the trait to carry `systemPromptPath`. Coupled with the
-  v1.3 spec decision; either way the orchestrator has to handle it.
+- **C14 resolution** — ✅ closed in Task 1.4.14 (option ii): v1.3 §7.1 /
+  §7.10(a) widens the trait to carry `systemPromptPath` on
+  `resumeStreamingSpec`; the orchestrator's resume path passes the
+  spawn-time `specify` prompt, Codex re-prepends it, Claude ignores it.
 - **S2-5 writer-side atomic-merge test** — ✅ closed in Task 1.4.11
   (`OrchestratorAtomicMergeSuite`): asserts the orchestrator persists
   `manifest.json` before the FSM transition action and the state-cache
@@ -647,10 +647,11 @@ do not block Slice 1.4 code.
 - **S2-10 — `audit.piece_merged` payload key tightened to `"p"`
   only.** v1.3 §19 should pin the payload schema explicitly
   (`{ p, prNumber, mergeCommit, mergedAt }`).
-- **C14 (spec half) — §7.10(a) "applies to resume" claim.** v1.3
-  must either drop the claim or widen the trait signature to carry
-  `systemPromptPath`. Coupled to the Slice 1.4 orchestrator
-  decision below.
+- **C14 (spec half) — §7.10(a) "applies to resume" claim. ✅ CLOSED
+  2026-05-30 at Task 1.4.14 (option ii).** `forge-design-1.3.md` §7.1 /
+  §7.10(a) widens the trait to carry `systemPromptPath` on
+  `resumeStreamingSpec`; Claude ignores it, Codex re-prepends the
+  block. Shipped coupled with the orchestrator half below.
 - **S3-6 — `gh pr create` has no `--json` flag.** v1.3
   design-rationale BM8 needs the wording corrected to name the
   stdout-URL parse contract (`gh pr create … | parse /pull/<n>/`);
@@ -676,10 +677,11 @@ do not block Slice 1.4 code.
 These need code in Slice 1.4, not just spec text. Each is a gating
 deliverable on the relevant sub-PR (Slice 1.4a or Slice 1.4b per §2.4).
 
-- **C14 (orchestrator half).** Slice 1.4b orchestrator's resume path
-  either re-issues Codex role framing in the resume message, or
-  (if v1.3 chose to widen the trait) calls the widened signature.
-  The two halves of C14 ship coupled.
+- **C14 (orchestrator half). ✅ CLOSED 2026-05-30 at Task 1.4.14.**
+  v1.3 chose to widen the trait (option ii), so the orchestrator's
+  resume path (`RealSideEffects.resumeDesign`) calls the widened
+  signature, passing `promptPath("specify")` — the same driver prompt
+  the spawn used. Both halves of C14 shipped coupled in Task 1.4.14.
 - **C15 — Native schema regression suite (landed in Task 1.4.7). ✅ CLOSED
   2026-05-29.** ≥19/20 bar on `reviewDesign` / `reviewPr` / `refine`
   for each connector — **met for all six method × connector pairs** in

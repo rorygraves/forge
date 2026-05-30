@@ -1863,38 +1863,40 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
 
 ### Task 1.4.14 — **C14** Codex resume role-framing closure
 
-The orchestrator-side half of **C14**. v1.3 (not yet
-written) chooses between (i) drop the §7.10(a) "applies to
-resume" claim, or (ii) widen the trait to carry
-`systemPromptPath`. Task 1.4.14 implements whichever v1.3 picks.
+The orchestrator-side half of **C14**. v1.3 chooses between (i) drop
+the §7.10(a) "applies to resume" claim, or (ii) widen the trait to
+carry `systemPromptPath`. **Task 1.4.14 picked (ii)** (user decision
+2026-05-30): keeping connector-specific framing inside the connector
+preserves the §7.1 seam, the trait becomes symmetric with
+`runStreamingSpec`, and the feared call-site churn is one production
+site now that the orchestrator is real.
 
-- [ ] **N1.** v1.3 spec decision filed in
-  `docs/forge-design-1.3.md` (new file per the §23
-  standalone-revisions rule). Task 1.4.14 adopts whichever
-  direction v1.3 specifies.
-- [ ] **N2.** **If (i):** Orchestrator's `resumeStreamingSpec`
-  call sites (§11.2 step 12, §11.3 step 2) embed role
-  framing in the `revisionMessage` / `feedbackMessage`
-  themselves — the message starts with the system-prompt
-  block before the actual feedback content. Document the
-  pattern in `Orchestrator`'s scaladoc at each call site
-  and centralise the framing construction in a new
-  `ReviewerPrompts.codexResumeFraming` helper.
-- [ ] **N3.** **If (ii):** Widen the `Connector.resumeStreamingSpec`
-  trait to carry `systemPromptPath`; update
-  `ClaudeConnector` (no-op — Claude restores via
-  `--resume`) and `CodexConnector` (reads the path and
-  prepends per §7.10(a)). Update every call site in
-  `forge-app`.
-- [ ] **N4.** Close **C14** in `design-rationale.md` —
-  "Action required" flips to "closed in Slice 1.4b Task 1.4.14
-  per v1.3 §7.10(a) revision (option <i|ii>)". Roadmap
-  §7.2.1 / §7.2.2 entries updated.
-- [ ] **N5.** Regression test against the resume path —
-  asserts the system-prompt content actually reaches
-  Codex on a resume call. Fake `Subprocess` is fine
-  (assert argv shape); the Task 1.4.7 regression suite is the
-  real-CLI bar.
+- [x] **N1.** v1.3 spec decision filed in
+  [`docs/forge-design-1.3.md`](forge-design-1.3.md) (new file per the
+  §23 standalone-revisions rule — full standalone copy of 1.2 with the
+  §7.1 / §7.10(a) / §11.2-12 / §11.3-2 / §23 / §24 edits folded in).
+  Option (ii) specified.
+- [~] **N2.** **If (i)** — **not taken.** (ii) was chosen, so no
+  in-message framing / `ReviewerPrompts.codexResumeFraming` helper.
+- [x] **N3.** **(ii) — landed.** Widened `Connector.resumeStreamingSpec`
+  to carry `systemPromptPath`; `ClaudeConnector` ignores it (no-op,
+  `--resume` restores the prompt; resume argv still omits
+  `--system-prompt-file`); `CodexConnector` re-prepends via
+  `CodexPrompt.withSystemBlock`, mirroring `runStreamingSpec`. Sole
+  production call site `RealSideEffects.resumeDesign` passes
+  `promptPath("specify")`; the four test fakes
+  (`ConnectorContractSuite`, `RoleSuite`, `FakeReviewerConnector`,
+  `RealSideEffectsSuite.FakeConnector`) updated.
+- [x] **N4.** Closed **C14** in `design-rationale.md` (Action-required
+  struck + CLOSED note, option ii). Roadmap §7.2.1 / §7.2.2 / §2.4
+  carry-forward C14 bullets flipped to ✅.
+- [x] **N5.** Regression coverage: `CodexConnectorSuite` resume test
+  asserts the system block reaches the combined prompt (fake CLI
+  echoes the positional arg); `ClaudeConnectorSuite` resume passes a
+  non-existent path to prove Claude never reads it;
+  `RealSideEffectsSuite` asserts the call site passes
+  `specify.<cli>.md`. The Task 1.4.7 `ReviewerRegressionSuite` stays
+  the real-CLI bar.
 
 ### Task 1.4.15 — Targeted polish (§2.5)
 
@@ -2939,6 +2941,33 @@ ticks off only after Task 1.4.17 lands.
   `sbt scalafmtCheckAll` / `compile` / `test` clean. **Still open in Task
   1.4.13:** M6 (`reconcile` — gated on Task 1.4.15), and M12's remaining
   IT coverage.
+- 2026-05-30 — **Task 1.4.14 — C14 Codex resume role-framing closure
+  (option ii, widen the trait).** User chose (ii) over (i) at scope-set:
+  keeping connector-specific framing inside the connector preserves the
+  §7.1 seam, and the call-site churn the slice-1 C14 note feared is one
+  production site now the orchestrator is real. Filed
+  [`forge-design-1.3.md`](forge-design-1.3.md) (N1) — a full standalone
+  copy of 1.2 per the §23 rule with the §7.1 trait
+  (`resumeStreamingSpec(sessionId, systemPrompt, message)`), §7.10(a)
+  (Codex re-prepends on resume; Claude ignores), §11.2-step-12 /
+  §11.3-step-2 call sites, §6.2 step 3, the verification appendix, the
+  summary table, and §23 / §24 conventions all folded. Widened the trait
+  + both connectors (N3): `ClaudeConnector` no-ops the path (`--resume`
+  restores the prompt; resume argv still omits `--system-prompt-file`),
+  `CodexConnector` re-prepends via `CodexPrompt.withSystemBlock` mirroring
+  `runStreamingSpec`; sole production call site
+  `RealSideEffects.resumeDesign` passes `promptPath("specify")`; the four
+  test fakes updated. Closed **C14** in `design-rationale.md` and the
+  roadmap §7.2.1 / §7.2.2 / §2.4 carry-forward bullets (N4). Regression
+  (N5): `CodexConnectorSuite` resume asserts the system block reaches the
+  combined prompt (fake-CLI echo), `ClaudeConnectorSuite` resume passes a
+  non-existent path to prove Claude never reads it, `RealSideEffectsSuite`
+  pins the call site passing `specify.<cli>.md`; the Task 1.4.7
+  `ReviewerRegressionSuite` stays the real-CLI bar. N2 (the option-(i)
+  branch) is N/A. Build green: `forge-app` 279 (+1), `forge-agents` 196
+  (resume tests modified in place, count unchanged), other counts
+  unchanged (`forge-core` 372, `forge-git` 188, `forge-specs` 132);
+  `sbt test` + `sbt scalafmtCheckAll` clean; `forge-it` compiles.
 
 ## 4. Carry-forward (inherited + new)
 
@@ -2952,7 +2981,9 @@ explicitly to v1.3 / Phase 2 with a durable home in
 
 - **C14** — Codex resume system-prompt prepending. Two
   halves: the spec-text decision (v1.3 §7.10(a)) and
-  the orchestrator implementation. **Resolves in Task 1.4.14.**
+  the orchestrator implementation. **✅ CLOSED in Task 1.4.14
+  (2026-05-30), option (ii) — trait widened to carry
+  `systemPromptPath`; both halves shipped coupled.**
 - **C15** — Native schema regression suite (originally
   Slice 1.1's PR-D in design-2.1.md, deferred per C15;
   now resolved as **Task 1.4.7 here**).

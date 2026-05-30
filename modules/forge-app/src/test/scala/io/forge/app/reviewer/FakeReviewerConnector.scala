@@ -36,7 +36,11 @@ final class FakeReviewerConnector(
 
   override def runStreamingSpec(systemPromptPath: os.Path, initialUserMessage: String): IO[StreamingSession] =
     IO.pure(NoopSession)
-  override def resumeStreamingSpec(sessionId: String, message: String): IO[StreamingSession] =
+  override def resumeStreamingSpec(
+      sessionId: String,
+      systemPromptPath: os.Path,
+      message: String
+  ): IO[StreamingSession] =
     IO.pure(NoopSession)
   override def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] = IO.pure(NoopSession)
   override def runFixup(prompt: FixupPrompt): IO[AgentSession] = IO.pure(NoopSession)

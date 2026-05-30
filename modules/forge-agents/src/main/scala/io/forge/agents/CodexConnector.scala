@@ -81,32 +81,34 @@ final class CodexConnector(
   /** v1.2 §7.1 — resume a previously-closed Codex spec session. The first turn of the resumed session runs `codex exec
     * resume --json <sessionId> <message>`.
     *
-    * **Known spec/code gap — design-rationale C14.** §7.10(a) says the system-prompt prepending convention "also
-    * applies to `resumeStreamingSpec`," but the shared trait signature (matched to Claude, which restores the prompt
-    * server-side via `--resume`) carries no `systemPromptPath`. This implementation cannot prepend a block it has no
-    * path to. The orchestrator that calls `resumeStreamingSpec` is expected to either re-issue the role framing in
-    * `message` or trust Codex's session memory of the spawn-time prompt. Resolution is parked for a v1.3 spec
-    * correction (widen the trait vs drop the §7.10(a) "applies to resume" claim).
+    * **§7.10(a) on resume — design-rationale C14, closed by v1.3.** Each `codex exec resume` is a fresh subprocess that
+    * remembers nothing the adapter does not pass in, so the original spawn's system block is re-prepended here via
+    * [[CodexPrompt.withSystemBlock]] — exactly as `runStreamingSpec` does for the first turn. The `systemPromptPath`
+    * arrives on the widened trait (v1.3 §7.10(a) / forge-design-1.3); it is the same driver prompt the orchestrator
+    * passed at spawn. Claude's adapter ignores the path (its `--resume` restores the prompt server-side); Codex needs
+    * it, and now has it.
     *
     * §6.1 invariant on the pinned CLI: the returned `sessionId` equals the input; the factory verifies and raises if
     * the CLI returns a mismatched `thread_id`. In-session resume turns (`send` / `answerQuestion`) carry the same check
     * via `CodexStreamingSession.runOneTurn` — see review comment #4.
     */
-  def resumeStreamingSpec(sessionId: String, message: String): IO[StreamingSession] =
-    val argv = CodexConnector.execResumeArgv(binary, sessionId, message)
-    CodexStreamingSession
-      .start(
-        firstTurnArgv = argv,
-        initialUserMessage = message,
-        systemPromptPath = None,
-        binary = binary,
-        cwd = cwd,
-        extraEnv = extraEnv,
-        parser = new CodexEventParser(priceTable, model),
-        initTimeout = initTimeout,
-        sessionIdHint = Some(sessionId)
-      )
-      .widen
+  def resumeStreamingSpec(sessionId: String, systemPromptPath: os.Path, message: String): IO[StreamingSession] =
+    IO.delay(CodexPrompt.withSystemBlock(systemPromptPath, message))
+      .flatMap: combined =>
+        val argv = CodexConnector.execResumeArgv(binary, sessionId, combined)
+        CodexStreamingSession
+          .start(
+            firstTurnArgv = argv,
+            initialUserMessage = message,
+            systemPromptPath = Some(systemPromptPath),
+            binary = binary,
+            cwd = cwd,
+            extraEnv = extraEnv,
+            parser = new CodexEventParser(priceTable, model),
+            initTimeout = initTimeout,
+            sessionIdHint = Some(sessionId)
+          )
+          .widen
 
   def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] =
     spawnHeadless(prompt.systemPromptPath, prompt.body).widen

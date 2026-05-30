@@ -166,8 +166,12 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     val sid = "sid-resume-1"
     val fake = fakeStreamingClaude(sid)
     val connector = ClaudeConnector(binary = fake.toString)
+    // C14: the widened trait carries `systemPromptPath`, but Claude ignores it — `--resume` restores the spawn-time
+    // system prompt server-side, and `resumeStreamingSpecArgv` (asserted above) omits `--system-prompt-file`. Pass a
+    // path that does not exist on disk to prove the adapter never reads it.
+    val ignoredPrompt = os.temp.dir() / "does-not-exist.md"
     val (returnedSid, events) = connector
-      .resumeStreamingSpec(sid, "next turn please")
+      .resumeStreamingSpec(sid, ignoredPrompt, "next turn please")
       .flatMap: session =>
         for
           drained <- session.events.compile.toVector

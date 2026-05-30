@@ -88,7 +88,7 @@ final class RealSideEffects(
   private def resumeDesign(feature: Feature, message: String): IO[ActiveSession] =
     IO.fromOption(feature.designSessionId)(
       new IllegalStateException("resume design driver: feature.designSessionId is empty")
-    ).flatMap(connector.resumeStreamingSpec(_, message))
+    ).flatMap(connector.resumeStreamingSpec(_, promptPath("specify"), message))
       .map(ActiveSession(SessionPhase.DesignRevision, _))
 
   // --- reviewer-input assembly ----------------------------------------------
