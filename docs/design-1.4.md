@@ -1930,23 +1930,62 @@ site now that the orchestrator is real.
 
 The MVP-gate enablers — Forge is unusable without these.
 
-- [ ] **O1.** Human-readable `NeedsHumanIntervention`
+- [x] **O1.** Human-readable `NeedsHumanIntervention`
   rendering — every reason × every `ResumeHint` pair has a
   one-paragraph human-readable description naming exactly
   the `forge resume --<hint>` (or `forge abandon`) the
   operator runs next. Six paths per §6.
-- [ ] **O2.** `forge status` formatting per **M4** —
+  **As landed (Task 1.4.15):** `TerminalReport.recovery` now renders a
+  one-paragraph operator description per `ResumeHint` variant (what
+  stopped, what to do by hand, the exact command). The reason string
+  is rendered verbatim by `nhiMessage`, so every reason × hint pair is
+  covered. The `match` is total over the sealed enum (a new variant
+  fails compilation), and `TerminalReportSuite` pins each variant's
+  command plus a data-driven row asserting every variant yields a
+  non-empty, `forge `-command-bearing paragraph. The FSM-side
+  production of these hints stays pinned by `ResumeHintCoverageSuite`
+  (forge-core).
+- [x] **O2.** `forge status` formatting per **M4** —
   golden-file test against fixture features in each
   state.
-- [ ] **O3.** `forge tail` smoke test —
+  **As landed (Task 1.4.15):** `StatusReportGoldenSuite` (forge-app)
+  renders `StatusReport.renderFeature` for a fixture feature in **all
+  19 FSM states** plus a no-cache row, comparing byte-for-byte to
+  checked-in goldens under
+  `modules/forge-app/src/test/resources/golden/status/`. Mirrors the
+  forge-specs `TemplateRenderSuite` idiom: `FORGE_UPDATE_GOLDEN=1` is
+  the only write path; a missing golden on a normal run fails (adding
+  an FSM state without committing its golden fails CI).
+- [x] **O3.** `forge tail` smoke test —
   open + first-line read on a synthetic
   `.forge/log/<feature>.jsonl`.
-- [ ] **O4.** Corrupted-cache `forge rebuild-state` proof —
+  **As landed (Task 1.4.15):** `ReadOnlyHandlerSuite` gains a test that
+  writes a real `Action` NDJSON line to a synthetic feature log, reads
+  it back via `TailCommand.existing`, and asserts the first line
+  decodes as an `Action` — proving the operator sees genuine NDJSON,
+  not arbitrary text (complements the existing read/missing/exit-code
+  tail tests).
+- [x] **O4.** Corrupted-cache `forge rebuild-state` proof —
   one test in `forge-app` deliberately mutates
   `<feature>.json`'s bytes mid-key, asserts
   `RebuildError.CacheCorrupt`, calls `rebuild-state`,
   asserts recovery to log-canonical Feature.
-- [ ] **O5.** Conditional watch items walked:
+  **As landed (Task 1.4.15):** added `RebuildError.CacheCorrupt(featureId,
+  detail)` and a strict-read seam `StateCache.loadStrict` (default impl
+  lifts `load`; `FileStateCache` overrides to surface the undecodable
+  case at the byte level). `load` / `verifyAgainstLog` keep their lenient
+  self-heal semantics unchanged; `loadStrict` is the report-don't-heal
+  variant. `RebuildStateCommand` probes the prior cache with it
+  (best-effort) so the success message names the corruption. The
+  forge-app test truncates a valid cache mid-key, asserts
+  `loadStrict → Left(CacheCorrupt)`, runs `rebuild-state` to exit 0,
+  and asserts the cache is recovered to the log-canonical `Drafting`;
+  a forge-core `FileStateCacheSuite` row pins `loadStrict`'s three
+  outcomes next to its siblings. (`RebuildState.run` itself never
+  returns `CacheCorrupt` — it reads the manifest + log, not the cache —
+  but `renderError`/`SpecRepl.rebuildMessage` gained the arm to keep
+  the matches total.)
+- [x] **O5.** Conditional watch items walked:
   - **S2-3** (ActionLog write durability) — measure under
     orchestrator load; if no perf cliff, document the
     `APPEND + SYNC` default as v1.3 baseline. If cliff
@@ -1962,6 +2001,16 @@ The MVP-gate enablers — Forge is unusable without these.
   - **S3-4** (`PRWatcher` rate-limit cliff) — only adjust
     threshold if 3-consecutive feels wrong under lived
     `forge run` cadence.
+  **As walked (Task 1.4.15):** all four roll into v1.3 as documented
+  defaults — none triggered a code change. No cost cliff surfaced
+  (Slice 1.4b ships no throughput-benchmark harness; the first
+  lived-cadence run is the Task 1.4.16 MVP gate). Notably **S2-9** is
+  moot as wired — the landed `Orchestrator` rebuilds via
+  `RebuildState.run` only at startup and persists via `cache.save` per
+  transition; `verifyAgainstLog` is not on the loop at all. Full
+  disposition (per item + the Task 1.4.16 re-trigger) recorded in
+  `roadmap.md` §7.2.3 and in the S2-3 / S2-9 / S3-4 `design-rationale.md`
+  entries; S3-2's lives in the §7.2.3 bullet.
 
 ### Task 1.4.16 — MVP-gate run
 
@@ -3034,6 +3083,47 @@ ticks off only after Task 1.4.17 lands.
   yet wired) filed in §4. **M6 ticked; M12 reconcile coverage
   ticked.** Task 1.4.13's remaining work is the section close
   (Task 1.4.17 / MVP gate).
+- 2026-05-30 — **Task 1.4.15 — targeted §2.5 polish (O1–O5), all
+  five ticked.** The MVP-gate enablers. **O1:** `TerminalReport.recovery`
+  upgraded to a one-paragraph operator description per `ResumeHint`
+  (situation + manual step + exact command); `TerminalReportSuite`
+  gains a data-driven totality row asserting every variant yields a
+  non-empty, `forge `-command-bearing paragraph (the FSM-side
+  production stays pinned by forge-core `ResumeHintCoverageSuite`).
+  **O2:** new `StatusReportGoldenSuite` golden-renders
+  `StatusReport.renderFeature` across all 19 FSM states + a no-cache
+  row to checked-in goldens under
+  `src/test/resources/golden/status/`, mirroring the forge-specs
+  `TemplateRenderSuite` `FORGE_UPDATE_GOLDEN` idiom (missing golden =
+  failure, never a silent write). **O3:** `ReadOnlyHandlerSuite` gains
+  a tail smoke test proving a synthetic log's first line decodes as a
+  real `Action` (genuine NDJSON). **O4:** added
+  `RebuildError.CacheCorrupt` + the strict-read seam
+  `StateCache.loadStrict` (default lifts `load`; `FileStateCache`
+  overrides). `load` / `verifyAgainstLog` keep lenient self-heal
+  semantics; `loadStrict` is the report-don't-heal variant that
+  `RebuildStateCommand` probes (best-effort) so the success message
+  names prior corruption. The forge-app proof truncates a valid cache
+  mid-key → `loadStrict` → `Left(CacheCorrupt)` → `rebuild-state`
+  recovers to log-canonical `Drafting`; a forge-core
+  `FileStateCacheSuite` row pins `loadStrict`'s three outcomes.
+  (`RebuildState.run` never returns `CacheCorrupt` — reads manifest +
+  log, not the cache; `renderError` / `SpecRepl.rebuildMessage` gained
+  the arm to stay total.) **O5:** all four conditional watch items
+  (**S2-3** / **S2-9** / **S3-2** / **S3-4**) walked and rolled into
+  v1.3 as documented defaults — none triggered a code change; no cost
+  cliff surfaced (no throughput-benchmark harness yet; first
+  lived-cadence run is the Task 1.4.16 MVP gate, the re-trigger).
+  S2-9 is moot as wired (`verifyAgainstLog` is not on the orchestrator
+  loop — startup uses `RebuildState.run`, steady-state uses
+  `cache.save`). Disposition recorded in `roadmap.md` §7.2.3 + the
+  S2-3 / S2-9 / S3-4 `design-rationale.md` entries. Build green:
+  `forge-core` 375 (+3), `forge-app` 312 (+24), `forge-specs` 141,
+  `forge-git` 188, `forge-agents` 196 (one pre-existing fake-CLI
+  flake in `ClaudeConnectorSuite`, deterministically 37/37 in
+  isolation, unrelated to this change); `sbt scalafmtCheckAll` clean.
+  Task 1.4.15 closed; 1.4b's remaining work is Task 1.4.16 (MVP gate)
+  → Task 1.4.17 (section close + Phase 1 exit).
 
 ## 4. Carry-forward (inherited + new)
 

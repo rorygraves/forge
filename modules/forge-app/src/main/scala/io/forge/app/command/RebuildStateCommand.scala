@@ -16,8 +16,13 @@ import io.forge.core.state.{FileStateCache, RebuildError, RebuildState}
   * **§15 read-only class — but it does write.** `rebuild-state` is classified read-only (no process lock) so it can
   * repair a feature while diagnosing it, yet [[RebuildState.run]] rewrites the cache and may append crash-recovery
   * repair drafts to the log. That is the command's whole purpose (recovery from a corrupt/stale cache), and not holding
-  * the lock is deliberate: a stuck `forge run` is exactly when an operator needs to inspect/rebuild. The §2.5 polish
-  * (O4 — proof against a deliberately corrupted cache) lands in Task 1.4.15.
+  * the lock is deliberate: a stuck `forge run` is exactly when an operator needs to inspect/rebuild.
+  *
+  * **Task 1.4.15 O4 — corrupt-cache reporting.** Before rebuilding, the command probes the prior on-disk cache with
+  * [[io.forge.core.state.StateCache.loadStrict]]. If it was present but undecodable, the success message names the
+  * corruption (`RebuildError.CacheCorrupt` detail) so the operator learns *why* their cache was wrong — the rebuild
+  * itself recovers the log-canonical `Feature` regardless. The probe is best-effort: a probe failure never blocks the
+  * rebuild (the rebuild reads the manifest + log, not the cache).
   */
 object RebuildStateCommand:
 
@@ -28,15 +33,28 @@ object RebuildStateCommand:
         FileActionLog(paths).flatMap { log =>
           val manifestStore = new FileManifestStore(paths)
           val cache = new FileStateCache(paths)
-          RebuildState.run(id, paths, manifestStore, log, cache).flatMap {
-            case Right(result) => Console[IO].println(renderSuccess(id, result)).as(ExitCode.Success)
-            case Left(err) => Console[IO].errorln(renderError(id, err)).as(ExitCode(1))
+          // Probe the prior cache so we can report corruption (O4). Best-effort: any IO failure degrades to "no prior
+          // issue noted" rather than aborting the rebuild, which reads the manifest + log and never the cache.
+          cache.loadStrict(id).attempt.flatMap { probed =>
+            val corruptDetail = probed.toOption.collect { case Left(RebuildError.CacheCorrupt(_, detail)) => detail }
+            RebuildState.run(id, paths, manifestStore, log, cache).flatMap {
+              case Right(result) => Console[IO].println(renderSuccess(id, result, corruptDetail)).as(ExitCode.Success)
+              case Left(err) => Console[IO].errorln(renderError(id, err)).as(ExitCode(1))
+            }
           }
         }
 
-  private[command] def renderSuccess(id: FeatureId, result: RebuildState.RebuildResult): String =
+  private[command] def renderSuccess(
+      id: FeatureId,
+      result: RebuildState.RebuildResult,
+      corruptDetail: Option[String] = None
+  ): String =
+    val verb = corruptDetail match
+      case Some(detail) =>
+        s"the on-disk state cache was corrupt ($detail); rebuilt it from the action log"
+      case None => "rebuilt state cache"
     val base =
-      s"forge rebuild-state ${id.value}: rebuilt state cache — state is ${StatusReport.stateLabel(result.feature.state)}."
+      s"forge rebuild-state ${id.value}: $verb — state is ${StatusReport.stateLabel(result.feature.state)}."
     if result.inFlightSessions.isEmpty then base
     else
       val sessions = result.inFlightSessions
@@ -54,3 +72,8 @@ object RebuildStateCommand:
       s"forge rebuild-state ${id.value}: action log is inconsistent — $cause. Operator intervention required."
     case RebuildError.InconsistentRecovery(reason) =>
       s"forge rebuild-state ${id.value}: state is unrecoverable — $reason. Operator intervention required."
+    // Defensive: RebuildState.run never returns CacheCorrupt (it reads the manifest + log, not the cache); a corrupt
+    // prior cache is reported via the renderSuccess `corruptDetail` path. This arm keeps the match total so a future
+    // path that does surface CacheCorrupt on the error channel still renders an operator message.
+    case RebuildError.CacheCorrupt(_, detail) =>
+      s"forge rebuild-state ${id.value}: state cache is corrupt — $detail. Re-run to rebuild from the action log."

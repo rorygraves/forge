@@ -100,3 +100,26 @@ class TerminalReportSuite extends munit.FunSuite:
       featureWith(FsmState.NeedsHumanIntervention("stuck", ResumeHint.AbortOrAbandon))
     )
     assert(r.message.contains(s"forge abandon ${featureId.value}"), r.message)
+
+  // Task 1.4.15 O1 — exhaustive coverage: every ResumeHint variant renders a non-empty, command-bearing paragraph. The
+  // per-variant tests above pin the exact command; this row guards the §6 "every reason × every hint" contract so a
+  // future variant can't ship with empty / command-less copy (the `recovery` match is already total at the type level).
+  test("recovery renders an actionable paragraph naming a forge command for every ResumeHint variant"):
+    val branch = BranchName("forge/feat/p1")
+    val allHints: Vector[ResumeHint] = Vector(
+      ResumeHint.ResumeAfterHumanPush(p1, pr),
+      ResumeHint.CommitAndPushHumanFix(p1, pr),
+      ResumeHint.RunAnotherFixup(p1, pr),
+      ResumeHint.ResolveLocalImplementationChanges(p1, branch),
+      ResumeHint.ReopenDesign(Some(pr)),
+      ResumeHint.ReopenDesign(None),
+      ResumeHint.ApplyPlanningUpdate(ManifestPatch("add piece", Vector.empty)),
+      ResumeHint.AbortOrAbandon
+    )
+    allHints.foreach { h =>
+      val text = TerminalReport.recovery(featureId, h)
+      assert(text.trim.nonEmpty, s"empty recovery copy for $h")
+      assert(text.contains("forge "), s"recovery for $h names no forge command: $text")
+      // A one-paragraph description, not a bare command: ends in real prose / contains a sentence.
+      assert(text.length > 40, s"recovery for $h is too terse to be a paragraph: $text")
+    }

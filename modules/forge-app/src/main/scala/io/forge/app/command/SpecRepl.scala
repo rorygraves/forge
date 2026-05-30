@@ -296,6 +296,7 @@ object SpecRepl:
       s"cannot rebuild state — manifest load failed: ${cause.getMessage}"
     case RebuildError.ReplayInconsistent(replay) => s"cannot rebuild state — action log is inconsistent: $replay"
     case RebuildError.InconsistentRecovery(reason) => s"cannot rebuild state — $reason"
+    case RebuildError.CacheCorrupt(_, detail) => s"cannot rebuild state — state cache is corrupt: $detail"
 
   private def specErr(e: SpecStoreError): String = e match
     case SpecStoreError.NotFound(p) => s"not found: $p"

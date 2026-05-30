@@ -26,6 +26,18 @@ object RebuildError:
     */
   final case class ManifestLoadFailed(featureId: FeatureId, cause: Throwable) extends RebuildError
 
+  /** §11.0 — the on-disk state cache (`.forge/state/<feature>.json`) is present but undecodable (truncated, partial
+    * flush, hand-edit). `detail` carries the decode-failure description for forensic context.
+    *
+    * This is **not** a fatal rebuild error: the §4 invariant makes the cache rebuildable from `manifest.json` + the
+    * action log, so a corrupt cache never blocks recovery — [[StateCache.load]] collapses it to `None` and
+    * [[StateCache.verifyAgainstLog]] rewrites it (appending `harness.cache_invalidated` with `reason =
+    * cache_unreadable`). It is surfaced explicitly only by the *strict* read [[StateCache.loadStrict]], so a caller
+    * that wants to *report* corruption (rather than silently heal it) can — `forge rebuild-state` (Task 1.4.15 O4)
+    * probes the prior cache this way to tell the operator their cache was corrupt before rebuilding from the log.
+    */
+  final case class CacheCorrupt(featureId: FeatureId, detail: String) extends RebuildError
+
   /** The action log fold returned a [[ReplayError]] (e.g. non-monotonic `seq`, cross-actor session resume, audit /
     * manifest PR mismatch). The lower-level cause is preserved so callers can pattern-match into it.
     */

@@ -47,6 +47,21 @@ trait StateCache:
     */
   def load(featureId: FeatureId): IO[Option[Feature]]
 
+  /** Strict counterpart to [[load]] — surfaces a present-but-undecodable cache as
+    * `Left(`[[RebuildError.CacheCorrupt]]`)` instead of collapsing it to `None`. A missing file is `Right(None)`; a
+    * clean read is `Right(Some(feature))`.
+    *
+    * `load` is deliberately lenient (the cache is rebuildable, so callers on the hot path treat corrupt and missing
+    * alike). `loadStrict` is for the caller that wants to *report* corruption rather than silently heal it — Task
+    * 1.4.15 O4's `forge rebuild-state` probes the prior cache with this so it can tell the operator the cache was
+    * corrupt before rebuilding from the action log.
+    *
+    * The default implementation lifts [[load]] (so it never reports `CacheCorrupt` — fine for in-memory fakes that
+    * can't be corrupt); [[FileStateCache]] overrides it to distinguish the undecodable case at the byte level.
+    */
+  def loadStrict(featureId: FeatureId): IO[Either[RebuildError, Option[Feature]]] =
+    load(featureId).map(Right(_))
+
   /** Write the `feature` atomically and durably. Implementation contract: write to a temp file in the same directory as
     * the target (so the rename is atomic on POSIX), `SYNC` the temp's contents, `Files.move` with `ATOMIC_MOVE` over
     * the target, then fsync the parent directory so the rename's directory entry is durable across a crash. The

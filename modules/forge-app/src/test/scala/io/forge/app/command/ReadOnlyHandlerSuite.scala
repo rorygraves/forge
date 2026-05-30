@@ -132,6 +132,30 @@ class ReadOnlyHandlerSuite extends munit.FunSuite:
     val lines = TailCommand.existing(new ForgePaths(root).featureLog(featureId)).unsafeRunSync()
     assertEquals(lines, Vector.empty[String])
 
+  // Task 1.4.15 O3 — smoke test: open + first-line read on a synthetic `.forge/log/<feature>.jsonl`, proving the line
+  // the operator sees is genuine NDJSON (decodes back to an `Action`), not just arbitrary text. Mirrors the §15 read-
+  // only contract — `existing` reads in place and never rewrites.
+  tempFixture.test("tail existing reads a synthetic log whose first line is parseable NDJSON"): root =>
+    val paths = new ForgePaths(root)
+    val logPath = paths.featureLog(featureId)
+    os.makeDir.all(logPath / os.up)
+    val action = Action(
+      seq = 1,
+      at = Instant.parse("2026-05-30T09:00:00Z"),
+      feature = featureId,
+      piece = None,
+      actor = None,
+      role = None,
+      kind = "user.command",
+      payload = ujson.Obj("command" -> "new")
+    )
+    os.write(logPath, upickle.default.write(action) + "\n")
+    val lines = TailCommand.existing(logPath).unsafeRunSync()
+    assertEquals(lines.size, 1)
+    val decoded = upickle.default.read[Action](lines.head)
+    assertEquals(decoded.kind, "user.command")
+    assertEquals(decoded.seq, 1L)
+
   tempFixture.test("tail on a feature with no log → exit 0 (nothing to tail)"): root =>
     val code = TailCommand.run(new ForgePaths(root), Vector(featureId.value)).unsafeRunSync()
     assertEquals(code, ExitCode.Success)
@@ -158,6 +182,40 @@ class ReadOnlyHandlerSuite extends munit.FunSuite:
   tempFixture.test("rebuild-state with no feature argument → exit 64 (usage)"): root =>
     val code = RebuildStateCommand.run(new ForgePaths(root), Vector.empty).unsafeRunSync()
     assertEquals(code, ExitCode(64))
+
+  // Task 1.4.15 O4 — corrupted-cache proof: a deliberately mutated `<feature>.json` is surfaced as `CacheCorrupt` by
+  // the strict probe, yet `rebuild-state` still recovers the log-canonical Feature (the rebuild reads manifest + log,
+  // never the cache).
+  tempFixture.test("rebuild-state recovers from a deliberately corrupted cache (O4)"): root =>
+    val paths = new ForgePaths(root)
+    seedManifest(paths)
+    val cache = new FileStateCache(paths)
+    // Write a valid cache, then truncate it mid-key so uPickle decode throws.
+    cache.save(featureId, Feature.initial(featureId, manifest()).copy(state = FsmState.DesignReady)).unsafeRunSync()
+    val stateFile = paths.stateFile(featureId)
+    val good = os.read(stateFile)
+    os.write.over(stateFile, good.substring(0, good.length / 2)) // mid-key truncation
+    // The strict probe reports the corruption (the lenient `load` would just say None).
+    cache.loadStrict(featureId).unsafeRunSync() match
+      case Left(RebuildError.CacheCorrupt(id, detail)) =>
+        assertEquals(id, featureId)
+        assert(detail.nonEmpty, detail)
+      case other => fail(s"expected Left(CacheCorrupt), got $other")
+    // rebuild-state recovers regardless and rewrites the cache to the log-canonical state (empty log → Drafting).
+    val code = RebuildStateCommand.run(paths, Vector(featureId.value)).unsafeRunSync()
+    assertEquals(code, ExitCode.Success)
+    assertEquals(cache.load(featureId).unsafeRunSync().map(_.state), Some(FsmState.Drafting: FsmState))
+    // The corrupt cache is gone — a strict re-read now decodes cleanly.
+    assertEquals(cache.loadStrict(featureId).unsafeRunSync().map(_.map(_.state)), Right(Some(FsmState.Drafting)))
+
+  test("renderSuccess names the prior corruption when a corruptDetail is supplied (O4)") {
+    val feature = Feature.initial(featureId, manifest()).copy(state = FsmState.Drafting)
+    val result = RebuildState.RebuildResult(feature, Vector.empty)
+    val text = RebuildStateCommand.renderSuccess(featureId, result, Some("JsonReadException: expected key"))
+    assert(text.contains("cache was corrupt"), text)
+    assert(text.contains("JsonReadException"), text)
+    assert(text.contains("drafting"), text)
+  }
 
   test("renderSuccess surfaces interrupted in-flight sessions") {
     val feature = Feature.initial(featureId, manifest()).copy(state = FsmState.PieceImplementing(PieceId("p1")))

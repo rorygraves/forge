@@ -737,6 +737,27 @@ defaults, not code changes.
   first rate-limit becomes a hard `Failed`, or the threshold
   becomes config-shaped), S3-4 is the anchor.
 
+**Walked at Slice 1.4b Task 1.4.15 O5 (2026-05-30) — all four roll into
+v1.3 as documented defaults; none triggered a code change.** No cost
+cliff was surfaced: Slice 1.4b ships no throughput-benchmark harness
+(the orchestrator e2e suites assert correctness, not steady-state write
+rate) and the first lived-cadence run is the Task 1.4.16 MVP gate, which
+had not yet run when 1.4b closed its polish. Per-item disposition:
+**S2-3** — keep `CREATE,APPEND,SYNC`; at the single-digit-actions/sec
+peak the spec cites, fsync is dominated by orchestrator/network latency.
+**S2-9** — moot for v1: the landed `Orchestrator` rebuilds via
+`RebuildState.run` **only at startup** (`Orchestrator.scala:74/100`) and
+persists steady-state via `cache.save` per transition
+(`Orchestrator.scala:185`); `verifyAgainstLog` is **not wired into the
+loop at all**, so the unconditional-write cost it flagged never lands on
+a hot path. **S3-2** — keep the process-local `BranchProtectionCache`;
+the ~150ms re-fetch is per-`forge resume`, not per-poll, so it is
+imperceptible. **S3-4** — keep the three-consecutive cliff; no lived
+`forge run` cadence yet to judge it against. **Re-trigger:** the Task
+1.4.16 MVP run, or Phase-2 lived cadence, is the first real observation
+point; any cliff there reopens the matching fallback (documented in
+`design-rationale.md` S2-3 / S2-9 / S3-4 and in the S3-2 bullet above).
+
 #### 7.2.4 No v1.3 spec change needed (durable explanation in design-rationale)
 
 - **S2-4 — `PrSnapshot` ownership doc mismatch.** v1.2 §3.2 was

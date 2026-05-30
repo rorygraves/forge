@@ -1,0 +1,5 @@
+feature stripe-webhook — "Add Stripe webhook receiver"  [ClaudeDriver]
+  state:   implementing piece p1
+  piece:   p1 — Wire the parser
+  last:    fsm.transition @ 2026-05-30T09:00:00Z
+  budget:  feature $1.50 / $25.00 · piece $0.75 / $8.00
