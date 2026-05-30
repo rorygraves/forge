@@ -2,6 +2,7 @@ package io.forge.app
 
 import cats.effect.{ExitCode, IO, IOApp}
 import cats.effect.std.Console
+import io.forge.app.bootstrap.AssetInstaller
 import io.forge.app.cli.{CliError, CliParser, CommandClass, Invocation}
 import io.forge.app.command.{unlock, CommandRouter, ReadOnlyContext, StateChangingContext, UnlockForceContext}
 import io.forge.app.config.{ConfigError, ForgeConfig, ForgeConfigLoader}
@@ -21,9 +22,10 @@ import scala.util.control.NonFatal
   *      **Resolve `repoRoot`** (parsed flag or `os.pwd`) and build [[ForgePaths]]; existence-check only. 3. **`unlock
   *      --force` short-circuit** — recovery must work even when `config.json` is missing/corrupt, so this command loads
   *      no config, installs no assets, constructs no connector, and acquires no lock. 4. **Load [[ForgeConfig]]** for
-  *      every other command. 5–6. **Install reviewer assets + construct the connector** for connector-bound commands —
-  *      *deferred to Task 1.4.10*, where the orchestrator handlers need them. The `Invocation.needsConnector` flag
-  *      already classifies the set so the wiring drops in without re-deriving it. 7. **Acquire the process lock** for
+  *      every other command. 5. **Install reviewer assets** ([[AssetInstaller.installIfMissing]]) for connector-bound
+  *      commands (`Invocation.needsConnector`) so the connector finds its `~/.forge/{schemas,prompts}` on first run;
+  *      idempotent. 6. **Construct the connector** — built on demand inside the orchestrator handlers
+  *      ([[io.forge.app.orchestrator.OrchestratorBuilder]]) under the lock bracket. 7. **Acquire the process lock** for
   *      state-changing commands (§15); read-only commands never lock. 8. **Phase-2 parse** ([[CliParser.phase2]]) into
   *      a concrete [[ForgeCommand]] — run *before* lock acquisition here so a usage error never grabs the lock and the
   *      parsed feature id is available for the lock metadata. 9. **Dispatch** via [[CommandRouter]]. 10. **On exit**
@@ -94,27 +96,52 @@ object Main extends IOApp:
     loadConfig(paths).flatMap {
       case Left(code) => IO.pure(code)
       case Right(config) =>
-        CliParser.phase2(invocation.name, invocation.rest) match
-          case Left(err) => usageError(err)
-          case Right(command) =>
-            // Task 1.4.10: for invocation.needsConnector commands, install reviewer assets + construct the connector
-            // here and fold them (plus the action log) into the Resource bracket below.
-            lockMetadata(command).flatMap { metadata =>
-              new FileProcessLock(paths).acquire(metadata, acceptStale = false).use {
-                case LockAcquireResult.Acquired =>
-                  CommandRouter.stateChanging(command, StateChangingContext(paths, config, invocation.rest))
-                case LockAcquireResult.Held(holder) =>
-                  Console[IO].errorln("forge: another process holds the lock." + holderSuffix(holder)).as(ExitCode(2))
-                case LockAcquireResult.Stale(holder) =>
-                  Console[IO]
-                    .errorln(
-                      "forge: a stale lock from a prior crashed run is present." + holderSuffix(Some(holder)) +
-                        " Run `forge unlock --force` to clear it."
-                    )
-                    .as(ExitCode(2))
-              }
-            }
+        installAssetsIfNeeded(invocation, paths).flatMap {
+          case Left(code) => IO.pure(code)
+          case Right(()) => runStateChangingWith(invocation, paths, config)
+        }
     }
+
+  /** Step 5 — first-run install of the reviewer assets the connector reads from `~/.forge/{schemas,prompts,templates}`.
+    * Only connector-bound commands (`needsConnector`) pay for it; idempotent (existing files are skipped). A failure is
+    * a config-class error (`78`) — the connector cannot bind its reviewer schemas/prompts without these files.
+    */
+  private def installAssetsIfNeeded(invocation: Invocation, paths: ForgePaths): IO[Either[ExitCode, Unit]] =
+    if !invocation.needsConnector then IO.pure(Right(()))
+    else
+      AssetInstaller.installIfMissing(paths).flatMap {
+        case Left(err) =>
+          Console[IO].errorln(s"forge: reviewer asset install failed: ${err.detail}").as(Left(ExitCode(78)))
+        case Right(assets) =>
+          val installed = assets.count(_.action == AssetInstaller.Action.Installed)
+          val note =
+            if installed > 0 then
+              Console[IO].errorln(s"forge: installed $installed reviewer asset(s) under ${paths.userForgeDir}")
+            else IO.unit
+          note.as(Right(()))
+      }
+
+  private def runStateChangingWith(invocation: Invocation, paths: ForgePaths, config: ForgeConfig): IO[ExitCode] =
+    CliParser.phase2(invocation.name, invocation.rest) match
+      case Left(err) => usageError(err)
+      case Right(command) =>
+        // Reviewer assets are installed in step 5 (installAssetsIfNeeded); the connector + action log are constructed
+        // on demand inside the orchestrator handlers (OrchestratorBuilder), which run under this lock bracket.
+        lockMetadata(command).flatMap { metadata =>
+          new FileProcessLock(paths).acquire(metadata, acceptStale = false).use {
+            case LockAcquireResult.Acquired =>
+              CommandRouter.stateChanging(command, StateChangingContext(paths, config, invocation.rest))
+            case LockAcquireResult.Held(holder) =>
+              Console[IO].errorln("forge: another process holds the lock." + holderSuffix(holder)).as(ExitCode(2))
+            case LockAcquireResult.Stale(holder) =>
+              Console[IO]
+                .errorln(
+                  "forge: a stale lock from a prior crashed run is present." + holderSuffix(Some(holder)) +
+                    " Run `forge unlock --force` to clear it."
+                )
+                .as(ExitCode(2))
+          }
+        }
 
   private def loadConfig(paths: ForgePaths): IO[Either[ExitCode, ForgeConfig]] =
     ForgeConfigLoader.load(paths).flatMap {

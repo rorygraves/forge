@@ -88,7 +88,12 @@ lazy val `forge-app` = (project in file("modules/forge-app"))
     // Slice 4 PR-A: ship the in-tree reviewer assets (`assets/reviewer/{schemas,prompts}/...`,
     // `assets/templates/...`) on the forge-app classpath. AssetInstaller reads them from there
     // and copies into the user's `~/.forge/` on first run.
-    Compile / unmanagedResourceDirectories += (LocalRootProject / baseDirectory).value / "assets"
+    Compile / unmanagedResourceDirectories += (LocalRootProject / baseDirectory).value / "assets",
+    // Run `forge` in a forked JVM with the parent terminal's stdin connected, so the interactive
+    // `forge spec` line-mode REPL reads cleanly from the console (`sbt "forge-app/run ..."`).
+    Compile / run / fork := true,
+    Compile / run / connectInput := true,
+    Compile / run / outputStrategy := Some(StdoutOutput)
   )
 
 // Integration tests against real claude/codex/gh CLIs. Built last (Slice 1+). Intentionally NOT in root's
