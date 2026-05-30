@@ -15,7 +15,10 @@ piece branch.
 
 - Fix exactly what `failures.md` names. Don't expand scope or
   refactor unrelated code — that risks new review rounds.
-- Re-run the tests and build that failed; confirm they pass now.
+- **Do not re-run the project's full build or test suite.** Forge's CI gate
+  re-verifies the PR remotely after you settle; a cold full build can take
+  many minutes and trip the per-phase settle timeout. Reason from
+  `failures.md` and the code; keep any command to a fast, targeted check.
 - If a failure is ambiguous or you disagree with a blocker, ask the
   human with `AskUserQuestion` rather than guessing.
 
@@ -27,5 +30,6 @@ and pushes to the existing PR after you settle.
 
 ## When you are done
 
-Stop once the recorded failures are resolved and the build is green.
-Forge commits, pushes, and re-enters the CI/review gate.
+Stop once your change resolves the recorded failures. **Do not wait on a
+green local build** — Forge commits, pushes, and the CI gate re-verifies;
+settling promptly avoids the per-phase timeout.

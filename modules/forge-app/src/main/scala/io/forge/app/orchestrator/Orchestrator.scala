@@ -7,7 +7,7 @@ import io.forge.app.monitor.{MonitorOutcome, SessionLimits, SessionMonitor}
 import io.forge.app.reviewer.{ReviewerCall, ReviewerLimits, ReviewerOutcome}
 import io.forge.core.{CiPolicy, PieceId, PrNumber}
 import io.forge.core.cost.CostTotals
-import io.forge.core.fsm.{Feature, Fsm, FsmConfig, FsmEvent, FsmState, SessionPhase, UserCommand}
+import io.forge.core.fsm.{Feature, Fsm, FsmConfig, FsmEvent, FsmState, ResumeHint, SessionPhase, UserCommand}
 import io.forge.core.log.ActionDraft
 import io.forge.core.manifest.{ManifestPatch, ManifestStore}
 import io.forge.core.pr.PrState
@@ -91,9 +91,26 @@ final class Orchestrator(
         IO.raiseError(new RuntimeException(s"forge: cannot rebuild state for ${featureId.value}: $err"))
       case Right(rebuilt) =>
         // Restart recovery: route any in-flight driver session to NHI before racing any source.
-        val (feature0, drafts) = RestartRecovery.recover(rebuilt.feature, rebuilt.inFlightSessions, fsmConfig)
-        (if drafts.nonEmpty then persistTransition(feature0, drafts) else IO.unit) >> drive(feature0)
+        val (feature0, drafts0) = RestartRecovery.recover(rebuilt.feature, rebuilt.inFlightSessions, fsmConfig)
+        // §15 / TerminalReport: a few NHI hints are documented to "continue with `forge run`"
+        // (ResolveLocalImplementationChanges, ApplyPlanningUpdate) — there is no `forge resume --flag` for them.
+        // Apply the stored hint's Resume here so `forge run` honours that contract; the flag-gated hints
+        // (after-human-push / commit-human-fix / run-fixup) and the manual ones (ReopenDesign → `forge spec`,
+        // AbortOrAbandon → `forge abandon`) are left for their explicit commands.
+        val (feature1, drafts1) = resumeIfRunRecoverable(feature0)
+        val drafts = drafts0 ++ drafts1
+        (if drafts.nonEmpty then persistTransition(feature1, drafts) else IO.unit) >> drive(feature1)
     }
+
+  /** §15: `forge run` resumes the NHI hints whose [[io.forge.app.command.TerminalReport.recovery]] names `forge run`
+    * as the recovery (the others have explicit `forge resume --flag` / `forge spec` / `forge abandon` paths). Applied
+    * once at startup; if the resumed work re-NHIs, `drive` stops at the new terminal and the next `forge run` retries.
+    */
+  private def resumeIfRunRecoverable(feature: Feature): (Feature, Vector[io.forge.core.log.ActionDraft]) =
+    feature.state match
+      case FsmState.NeedsHumanIntervention(_, hint) if Orchestrator.runRecoverableHint(hint) =>
+        Fsm.transition(feature, FsmEvent.UserCommandReceived(UserCommand.Resume(hint)), fsmConfig)
+      case _ => (feature, Vector.empty)
 
   /** Apply a single operator `UserCommand` (`forge resume` / `forge abandon`, Task 1.4.13 M5 / M8) against the
     * persisted feature, then drive to a loop-terminal state.
@@ -646,6 +663,17 @@ final class Orchestrator(
     case _ => false
 
 object Orchestrator:
+  /** The `NeedsHumanIntervention` hints whose `TerminalReport.recovery` directs the operator to `forge run` (they have
+    * no `forge resume --flag`): the implement driver left local changes to resolve, or a refinery planning update is
+    * approved. `forge run` applies their `Resume` at startup (see `resumeIfRunRecoverable`). The flag-gated hints
+    * (`ResumeAfterHumanPush` / `CommitAndPushHumanFix` / `RunAnotherFixup`) and the manual ones (`ReopenDesign` →
+    * `forge spec`, `AbortOrAbandon` → `forge abandon`) are deliberately excluded.
+    */
+  def runRecoverableHint(hint: ResumeHint): Boolean = hint match
+    case _: ResumeHint.ResolveLocalImplementationChanges => true
+    case _: ResumeHint.ApplyPlanningUpdate => true
+    case _ => false
+
   /** Result of [[Orchestrator.applyUserCommand]] (Task 1.4.13 M5 / M8). */
   enum CommandOutcome:
     /** The command applied; the feature was then driven to this loop-terminal state. */

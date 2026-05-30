@@ -13,9 +13,14 @@ piece's acceptance criteria pass.
 ## How to work
 
 - Implement only what this piece requires. Do not start later pieces.
-- Make the acceptance criteria pass. Add or update tests as the spec
-  asks; run them and the build before you finish.
+- Make the acceptance criteria pass. Add or update tests as the spec asks.
 - Match the surrounding code's style, naming, and structure.
+- **Do not run the project's full build or test suite.** Forge's CI gate
+  verifies the PR remotely after you settle, and a fix-up loop handles any
+  failures. A cold `sbt`/`gradle`/`npm` build can take many minutes and will
+  trip the per-phase settle timeout, aborting the piece. Reason about
+  correctness from the code; keep any command you do run to a fast, targeted
+  check — never a full compile/test cycle.
 - If a decision genuinely needs the human, ask with `AskUserQuestion`.
 
 ## Committing — do NOT commit
@@ -28,5 +33,7 @@ audit trail and the staging-policy check.
 
 ## When you are done
 
-Stop once the acceptance criteria pass and the build is green. Forge
-detects the settle, runs the staging classifier, and proceeds.
+Stop once the code change is complete and satisfies the spec's acceptance
+criteria. **Do not wait on a green build** — Forge detects the settle, runs
+the staging classifier, opens the PR, and the CI gate verifies it; if CI
+fails, Forge runs a fix-up pass. Settling promptly is part of the contract.
