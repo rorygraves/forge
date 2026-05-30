@@ -2060,28 +2060,34 @@ Filed as design-rationale **CI8**.
   (designed-for; re-uses this task's `ResumeAfterHumanPush` plumbing). Recorded
   in **CI8**.
 
-### Task 1.4.16 — MVP-gate run
+### Task 1.4.16 — MVP-gate run  🟢 in flight (2026-05-30)
 
 The Phase-1 exit gate. Drive one small, contained,
 low-variance feature through Forge from `forge new` to
 merged-`FeatureDone`.
 
-- [ ] **P1.** Pick the MVP target. Roadmap §2.4 explicitly
-  excludes "have Forge build its own Slice 5 (TUI)".
-  Candidates per §2.4 closing:
-  - A small `forge-git` helper (e.g. a `branchExists`
-    abstraction for shared use across BranchManager
-    callers).
-  - A narrow `forge-app` reporting/replay feature
-    (e.g. `forge replay <feature>` reading the action
-    log and printing a human summary).
-  - One of the v1.3 spec-text corrections (S2-6, S2-7,
-    S2-10, S3-6, S3-7, S3-8) with the matching code
-    test.
-  Recommend the v1.3 spec-text correction route — it
-  exercises every reviewer + driver phase against
-  small, well-bounded scope (text + one test). File
-  the choice in this checklist before Task 1.4.16 begins.
+> **In flight — findings in [`docs/slice-4/mvp-friction.md`](slice-4/mvp-friction.md).**
+> Per the user's call, the run is driven against an **external test repo**
+> (`llm4s/szork`) rather than self-hosting on this repo — cleaner first run,
+> and it exercises the §8 CI gate against real GitHub Actions. Target feature:
+> **`image-creds-dedup`** (de-duplicate szork's image-credential check). As the
+> first real end-to-end run of `forge-app`, it surfaced **8 integration gaps**
+> (the gate's purpose). Six are fixed in-flight (on branch
+> `run-enablement-asset-bootstrap`; gap #1 = Task 1.4.10b on `main`); gap #7
+> (designSessionId durability) is deferred; gap #8 (NHI resume wiring) +
+> implement-prompt/settle-cap tuning (S4-5) are being addressed to let the run
+> complete. Full table + commits in the friction doc. The run reached
+> spec → design review → design PR (merged) → `DesignReady` → implement
+> (correct code produced) before the gap-#8/cap block.
+
+- [x] **P1.** MVP target **filed: `image-creds-dedup` in `llm4s/szork`**
+  (de-duplicate the image-credential feature-flag check into one
+  `SzorkConfig.imageCredsAvailable` helper + a unit test). Chosen over the
+  in-repo candidates (forge-git helper / spec-text correction) with the
+  maintainer (2026-05-30): an external test repo keeps experimental PRs off
+  this repo's history and gives the §8 CI gate a real GitHub-Actions surface
+  (szork has a `backend` + `frontend` CI workflow). Single-piece, low-variance,
+  exercises every reviewer + driver phase.
 - [ ] **P2.** Drive end-to-end:
   - `forge new "<title>"`.
   - `forge spec <feature>` — interactive REPL until
@@ -3201,6 +3207,22 @@ ticks off only after Task 1.4.17 lands.
   design-rationale **CI8**. Build green: `forge-core` 377 (+2),
   `forge-app` 326 (+14), `forge-specs` / `forge-git` / `forge-agents`
   unchanged; `forge-it` compiles; `sbt scalafmtCheckAll` clean.
+- 2026-05-30 — **Task 1.4.16 MVP-gate run started** against external
+  test repo `llm4s/szork` (feature `image-creds-dedup`), real GitHub
+  Actions CI + branch protection. First real end-to-end `forge-app`
+  run; surfaced **8 integration gaps** — full table, fixes, commits,
+  tuning findings, and operational notes in
+  [`docs/slice-4/mvp-friction.md`](slice-4/mvp-friction.md). Run reached
+  spec → design review → design PR #9 (merged) → `DesignReady` →
+  implement (correct code produced). Gaps 1–6 fixed in-flight (gap 1 =
+  Task 1.4.10b on `main`; 2–6 on branch `run-enablement-asset-bootstrap`:
+  asset bootstrap `d38a378`, driver permission flags `c4de01f`, specify
+  prompt schema `c4887b3`, `git add -f` `75492bb`, empty-conclusion
+  decode `a78244c`). Gap 7 (designSessionId not in the action log →
+  §11.3 resume fails after rebuild) deferred. Gap 8 (NHI
+  `ResolveLocalImplementationChanges` / `ApplyPlanningUpdate` have no
+  working `forge run` resume) + the implement-prompt build-self-verify
+  settle-cap breach (S4-5) being addressed to let the run complete.
 
 ## 4. Carry-forward (inherited + new)
 
