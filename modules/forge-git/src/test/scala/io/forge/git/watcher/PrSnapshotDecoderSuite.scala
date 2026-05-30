@@ -58,7 +58,8 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
         assertEquals(snap.mergeable, Some(true))
       case other => fail(s"expected Right, got $other")
 
-  test("open-checks-running: in-progress checks land under observed, no conclusions"):
+  // build's conclusion is "" (gh's real in-progress shape, MVP-run finding) and lint's is null — both decode to None.
+  test("open-checks-running: in-progress checks (conclusion '' or null) land under observed, no conclusions"):
     decodeFixture("open-checks-running.json") match
       case Right(DecodedSnapshot(snap, _, _)) =>
         assertEquals(snap.requiredChecks.required, Vector.empty[CheckResult])
