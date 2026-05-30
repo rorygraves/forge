@@ -25,29 +25,35 @@ object TerminalReport:
 
   final case class Rendered(message: String, exitCode: ExitCode)
 
-  def render(feature: Feature): Rendered =
+  /** Render a loop-terminal feature. `command` is the operator command whose drive produced this state (`run`,
+    * `resume`, `abandon`) so the message prefix matches what the operator typed — `forge resume` and `forge abandon`
+    * both drive the loop via [[io.forge.app.orchestrator.Orchestrator.applyUserCommand]] and reuse this renderer.
+    */
+  def render(feature: Feature, command: String = "run"): Rendered =
     feature.state match
       case FsmState.FeatureDone =>
         Rendered(
-          s"forge run ${feature.id.value}: ✓ feature complete — all pieces merged and refined.",
+          s"forge $command ${feature.id.value}: ✓ feature complete — all pieces merged and refined.",
           ExitCode.Success
         )
       case FsmState.Abandoned(reason) =>
-        Rendered(s"forge run ${feature.id.value}: feature is abandoned — $reason", ExitCode(1))
+        Rendered(s"forge $command ${feature.id.value}: feature is abandoned — $reason", ExitCode(1))
       case FsmState.NeedsHumanIntervention(reason, hint) =>
-        Rendered(nhiMessage(feature.id, reason, hint), ExitCode(1))
+        Rendered(nhiMessage(feature.id, command, reason, hint), ExitCode(1))
       case other =>
         Rendered(
-          s"forge run ${feature.id.value}: stopped in non-terminal state $other — this is a bug, please report it.",
+          s"forge $command ${feature.id.value}: stopped in non-terminal state $other — this is a bug, please report it.",
           ExitCode(70)
         )
 
-  private def nhiMessage(id: FeatureId, reason: String, hint: ResumeHint): String =
-    s"""forge run ${id.value}: needs human intervention — $reason
+  private def nhiMessage(id: FeatureId, command: String, reason: String, hint: ResumeHint): String =
+    s"""forge $command ${id.value}: needs human intervention — $reason
        |  → ${recovery(id, hint)}""".stripMargin
 
-  /** The concrete recovery action for each [[ResumeHint]]. */
-  private def recovery(id: FeatureId, hint: ResumeHint): String = hint match
+  /** The concrete recovery action for each [[ResumeHint]]. Public so `forge resume`'s hint-mismatch message
+    * ([[ResumeFeature]]) can name the recovery the feature actually awaits.
+    */
+  def recovery(id: FeatureId, hint: ResumeHint): String = hint match
     case ResumeHint.ResumeAfterHumanPush(p, prNumber) =>
       s"after pushing your fix to PR #${prNumber.value}, run: forge resume ${id.value} --after-human-push ${p.value}"
     case ResumeHint.CommitAndPushHumanFix(p, prNumber) =>

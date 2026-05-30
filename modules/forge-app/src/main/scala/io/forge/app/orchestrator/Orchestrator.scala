@@ -80,6 +80,48 @@ final class Orchestrator(
         (if drafts.nonEmpty then persistTransition(feature0, drafts) else IO.unit) >> drive(feature0)
     }
 
+  /** Apply a single operator `UserCommand` (`forge resume` / `forge abandon`, Task 1.4.13 M5 / M8) against the
+    * persisted feature, then drive to a loop-terminal state.
+    *
+    * The command is applied as a one-shot `Fsm.transition` **before** any entry hook fires, so abandoning a mid-flight
+    * feature records the `Abandoned` transition without first re-spawning its driver, and resuming from
+    * `NeedsHumanIntervention` lands the new active state before the loop's entry hooks run. `deriveCommand` builds the
+    * command from the freshly-rebuilt feature: `forge resume` reads the authoritative [[io.forge.core.fsm.ResumeHint]]
+    * (which carries the PR number) off the persisted NHI state, while `forge abandon` ignores the feature. It may
+    * reject up front with `Left(reason)`.
+    *
+    * Restart recovery is deliberately skipped (unlike [[run]]): a feature in NHI has no live driver session, and
+    * `abandon` overrides any in-flight session unconditionally.
+    */
+  def applyUserCommand(
+      featureId: io.forge.core.FeatureId,
+      deriveCommand: Feature => Either[String, UserCommand]
+  ): IO[Orchestrator.CommandOutcome] =
+    RebuildState.run(featureId, paths, manifestStore, log, cache).flatMap {
+      case Left(err) =>
+        IO.raiseError(new RuntimeException(s"forge: cannot rebuild state for ${featureId.value}: $err"))
+      case Right(rebuilt) => applyUserCommandTo(rebuilt.feature, deriveCommand)
+    }
+
+  /** The persist-and-drive half of [[applyUserCommand]], split out so the e2e suites can drive it from a constructed
+    * `Feature` (same rationale as [[drive]]) rather than seeding a full action-log history. A command the FSM does not
+    * act on (state unchanged and no drafts) is surfaced as a [[Orchestrator.CommandOutcome.Rejected]] rather than
+    * silently driving an unchanged feature.
+    */
+  private[orchestrator] def applyUserCommandTo(
+      feature0: Feature,
+      deriveCommand: Feature => Either[String, UserCommand]
+  ): IO[Orchestrator.CommandOutcome] =
+    deriveCommand(feature0) match
+      case Left(reason) => IO.pure(Orchestrator.CommandOutcome.Rejected(feature0.state, reason))
+      case Right(cmd) =>
+        val (f1, drafts) = Fsm.transition(feature0, FsmEvent.UserCommandReceived(cmd), fsmConfig)
+        if f1.state == feature0.state && drafts.isEmpty then
+          IO.pure(
+            Orchestrator.CommandOutcome.Rejected(feature0.state, s"command had no effect in state ${feature0.state}")
+          )
+        else persistTransition(f1, drafts) >> drive(f1).map(Orchestrator.CommandOutcome.Driven.apply)
+
   /** Drive a feature from the given state to a loop-terminal state. Exposed for the J5 e2e suites, which construct the
     * starting `Feature` directly rather than seeding a full action-log history through `run`.
     */
@@ -489,6 +531,18 @@ final class Orchestrator(
   private def isLoopTerminal(state: FsmState): Boolean = state match
     case _: FsmState.NeedsHumanIntervention | FsmState.FeatureDone | _: FsmState.Abandoned => true
     case _ => false
+
+object Orchestrator:
+  /** Result of [[Orchestrator.applyUserCommand]] (Task 1.4.13 M5 / M8). */
+  enum CommandOutcome:
+    /** The command applied; the feature was then driven to this loop-terminal state. */
+    case Driven(terminal: Feature)
+
+    /** The command did not apply in the current state; nothing was mutated. `reason` is operator-facing — e.g. a `forge
+      * resume` flag that names a different hint than the one the `NeedsHumanIntervention` carries, or a `forge abandon`
+      * against an already-terminal feature.
+      */
+    case Rejected(currentState: FsmState, reason: String)
 
 /** Loop-local tag for which source produced the racing event — drives the source-driven session-clear rule. */
 private enum RaceResult:

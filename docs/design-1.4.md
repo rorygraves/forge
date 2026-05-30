@@ -1718,7 +1718,7 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
   renders from the manifest and points at `forge run` /
   `rebuild-state`. The §2.5 golden-file formatting polish is
   Task 1.4.15 O2; this is the v1 rendering.
-- [ ] **M5.** `forge resume <feature> --<hint>` — variants
+- [x] **M5.** `forge resume <feature> --<hint>` — variants
   per §15 / §6 `ResumeHint`:
   - `--after-human-push` → `ResumeAfterHumanPush(p, prNumber)`.
   - `--commit-human-fix` → `CommitAndPushHumanFix(p, prNumber)`.
@@ -1728,6 +1728,20 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
     surface as explicit flags or are inferred from current
     `NeedsHumanIntervention` state.
   Bumps `branchProtectionCacheEpoch` per §8.1.
+  **As landed (Task 1.4.13 incr 2):** the three CLI flags carry only
+  feature + piece; the authoritative `ResumeHint` (with its
+  `prNumber`) is read off the persisted `NeedsHumanIntervention`
+  state, so the flag + piece act as a safety check (`ResumeFeature.
+  matchHint` rejects a flag that names a different hint kind or
+  piece than the one the NHI awaits, naming the correct recovery via
+  `TerminalReport.recovery`). The other four hints are **not** new
+  flags: they are reached via `forge run` / `forge spec` /
+  `forge abandon` per the NHI render (TerminalReport), matching the
+  §15 three-flag surface. The epoch bump is the FSM's
+  (`Fsm.handleResume`), asserted in `OrchestratorUserCommandSuite`.
+  `forge resume` then **drives the feature forward** to its next
+  loop-terminal state (the recovery complement to `forge run`) via
+  the shared `Orchestrator.applyUserCommand`.
 - [ ] **M6.** `forge reconcile <feature>` — runs **M2** /
   §5.4 manifest reconcile against `decomposition.md`'s
   HTML-comment editable regions. Re-renders if no edits
@@ -1736,9 +1750,18 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
 - [ ] **M7.** `forge refresh-cache <feature>` — bumps
   `branchProtectionCacheEpoch` only; no state mutation
   beyond that (per §15).
-- [ ] **M8.** `forge abandon <feature>` — emits
+- [x] **M8.** `forge abandon <feature>` — emits
   `UserCommandReceived(UserCommand.Abandon(reason))`;
   Orchestrator transitions to `Abandoned(reason)`.
+  **As landed (Task 1.4.13 incr 2):** `AbandonFeature` applies
+  `UserCommand.Abandon` as a one-shot transition (via the shared
+  `Orchestrator.applyUserCommand`), persisting the terminal
+  `Abandoned` through the J4 manifest→log→cache pipeline. Applied
+  **before** any entry hook so abandoning a mid-flight feature does
+  not re-spawn its driver. v1 has no `--reason` flag (CLI parses the
+  feature only), so the reason is captured generically; an
+  already-terminal feature (`FeatureDone` / `Abandoned`) is rejected
+  with exit 1.
 - [x] **M9.** `forge rebuild-state <feature>` — calls
   `RebuildState.run` directly; reports any
   `RebuildError`. Per §2.5 polish, prove this on a
@@ -1773,12 +1796,17 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
   unit tests in `modules/forge-app/src/test/`; the
   MVP-gate end-to-end run (Task 1.4.16) exercises the integration
   surface.
-  **Partial (Task 1.4.13 incr 1):** `ReadOnlyHandlerSuite` (15 cases)
-  covers the read-only trio (`status` / `tail` / `rebuild-state`)
-  plus `MainSuite`'s read-only routing row updated to assert exit 0
-  (was the not-implemented `70` shell). Remaining handler unit tests
-  (`spec` / `resume` / `reconcile` / `refresh-cache` / `abandon`) +
-  the IT surface land with their increments / Task 1.4.16.
+  **Partial (Task 1.4.13 incr 1 + 2):** `ReadOnlyHandlerSuite` (15
+  cases) covers the read-only trio (`status` / `tail` /
+  `rebuild-state`); `MainSuite`'s read-only routing row asserts exit
+  0. Incr 2 adds `OrchestratorUserCommandSuite` (4 cases — the
+  orchestrator `applyUserCommand` apply→persist→drive half for
+  resume + abandon, against real `File*` stores) and
+  `UserCommandHandlerSuite` (9 cases — the pure `deriveResume` /
+  `deriveAbandon` CLI-flag→`UserCommand` derivation + the git-free
+  manifest-not-found short-circuit). Remaining handler unit tests
+  (`spec` / `reconcile` / `refresh-cache`) + the IT surface land with
+  their increments / Task 1.4.16.
 
 ### Task 1.4.14 — **C14** Codex resume role-framing closure
 
@@ -2781,6 +2809,32 @@ ticks off only after Task 1.4.17 lands.
   unchanged (`forge-core` 371, `forge-git` 188, `forge-agents` 196,
   `forge-specs` 132); `sbt clean compile test` + `sbt scalafmtCheckAll`
   clean.
+- 2026-05-30 — **Task 1.4.13 increment 2 — the UserCommand pair
+  (`resume` M5 / `abandon` M8).** Wired the two operator commands that
+  inject a `UserCommand` into the FSM. Added one shared
+  `Orchestrator.applyUserCommand(featureId, derive)` (+ a
+  `private[orchestrator] applyUserCommandTo(feature0, derive)` test
+  seam mirroring `drive`): rebuild state → apply the derived command
+  as a **one-shot `Fsm.transition` before any entry hook** → persist
+  via the J4 manifest→log→cache pipeline → drive to a loop-terminal
+  state. Returns a `CommandOutcome.{Driven, Rejected}` so an
+  unapplicable command (resume when not in NHI, abandon when already
+  terminal, or an FSM no-op) reports exit 1 without mutating. The
+  CLI-flag→hint mapping lives in the handlers: `ResumeFeature` reads
+  the authoritative `ResumeHint` (with its `prNumber`) off the
+  persisted NHI state and validates the flag + piece against it
+  (`matchHint`, naming the correct recovery on mismatch via the
+  now-public `TerminalReport.recovery`); `AbandonFeature` supplies a
+  generic reason (no `--reason` flag in v1). `TerminalReport.render`
+  gained a `command` label param (default `"run"`) so resume/abandon
+  reuse it with the right prefix. `forge resume` **drives forward**
+  (recovery complement to `forge run`). New `OrchestratorUserCommandSuite`
+  (4) + `UserCommandHandlerSuite` (9). **Still open in Task 1.4.13:**
+  M2 (`spec` REPL), M6 (`reconcile`), M7 (`refresh-cache`), and M12's
+  remaining handler/IT coverage. Build green: `forge-app` 259 (+13),
+  other counts unchanged (`forge-core` 371, `forge-git` 188,
+  `forge-agents` 196, `forge-specs` 132); `sbt clean compile test` +
+  `sbt scalafmtCheckAll` clean; `forge-it` compiles.
 
 ## 4. Carry-forward (inherited + new)
 
