@@ -105,8 +105,13 @@ final class Orchestrator(
 
   /** The persist-and-drive half of [[applyUserCommand]], split out so the e2e suites can drive it from a constructed
     * `Feature` (same rationale as [[drive]]) rather than seeding a full action-log history. A command the FSM does not
-    * act on (state unchanged and no drafts) is surfaced as a [[Orchestrator.CommandOutcome.Rejected]] rather than
-    * silently driving an unchanged feature.
+    * act on at all (the whole `Feature` is unchanged AND no drafts) is surfaced as a
+    * [[Orchestrator.CommandOutcome.Rejected]] rather than silently driving an unchanged feature.
+    *
+    * The no-op test compares the **whole** feature, not just `state`: `forge refresh-cache`
+    * (`UserCommand.RefreshCache`, M7) bumps `branchProtectionCacheEpoch` without a lifecycle transition or any drafts,
+    * so a `state`-only check would wrongly reject it as a no-op. resume/abandon always change `state` or emit drafts,
+    * so this is behaviour-preserving for them.
     */
   private[orchestrator] def applyUserCommandTo(
       feature0: Feature,
@@ -116,7 +121,7 @@ final class Orchestrator(
       case Left(reason) => IO.pure(Orchestrator.CommandOutcome.Rejected(feature0.state, reason))
       case Right(cmd) =>
         val (f1, drafts) = Fsm.transition(feature0, FsmEvent.UserCommandReceived(cmd), fsmConfig)
-        if f1.state == feature0.state && drafts.isEmpty then
+        if f1 == feature0 && drafts.isEmpty then
           IO.pure(
             Orchestrator.CommandOutcome.Rejected(feature0.state, s"command had no effect in state ${feature0.state}")
           )

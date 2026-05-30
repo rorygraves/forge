@@ -1771,9 +1771,32 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
   HTML-comment editable regions. Re-renders if no edits
   detected; surfaces `ManifestPatch` if edits valid; refuses
   if edits outside editable regions.
-- [ ] **M7.** `forge refresh-cache <feature>` — bumps
+- [x] **M7.** `forge refresh-cache <feature>` — bumps
   `branchProtectionCacheEpoch` only; no state mutation
   beyond that (per §15).
+  **As landed (Task 1.4.13 incr 4):** added `UserCommand.RefreshCache`
+  + a cross-cutting `Fsm` handler that returns the same `FsmState` with
+  `branchProtectionCacheEpoch + 1` and no drafts — it mirrors
+  `handleResume`'s epoch bump but **without** the lifecycle state
+  change, keeping `Fsm.transition` pure and total. `RefreshCacheFeature`
+  (mirroring `AbandonFeature`) drives the bump through the shared
+  `UserCommandDriver` → `Orchestrator.applyUserCommand` apply→persist
+  pipeline; `deriveRefreshCache` rejects terminal
+  `FeatureDone`/`Abandoned` and allows every other state.
+  `Orchestrator.applyUserCommandTo`'s no-op backstop was widened from
+  "`state` unchanged + no drafts" to "whole `Feature` unchanged + no
+  drafts" so the epoch-only bump is driven (behaviour-preserving for
+  resume/abandon, which always change `state` or emit drafts). Note: the
+  epoch is an in-process counter — `Replay.foldEvents` replays `state`
+  only and `StateCacheEntry` doesn't persist it across processes (same
+  as `resume`); the persist pipeline still runs (empty draft append +
+  cache refresh) and leaves the lifecycle state untouched. Tests: FSM
+  epoch+state assertion in `FsmReviewFixesSuite` (mirroring its resume
+  §8.1 epoch-bump test), pure `deriveRefreshCache` cases in
+  `UserCommandHandlerSuite` (the shared `UserCommandDriver`
+  manifest-not-found short-circuit is already covered there from
+  incr 2), and an apply→persist case (epoch +1, state unchanged,
+  persisted) + a terminal-reject case in `OrchestratorUserCommandSuite`.
 - [x] **M8.** `forge abandon <feature>` — emits
   `UserCommandReceived(UserCommand.Abandon(reason))`;
   Orchestrator transitions to `Abandoned(reason)`.
@@ -1830,8 +1853,13 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
   `deriveAbandon` CLI-flag→`UserCommand` derivation + the git-free
   manifest-not-found short-circuit). Incr 3 adds `SpecReplSuite` (13
   cases — the `forge spec` `runLoop` / `finalizeDone` / `classifyStart`
-  seams). Remaining handler unit tests (`reconcile` / `refresh-cache`)
-  + the IT surface land with their increments / Task 1.4.16.
+  seams). Incr 4 adds the `refresh-cache` coverage: the pure
+  `deriveRefreshCache` cases in `UserCommandHandlerSuite`, an
+  apply→persist case (epoch +1, lifecycle state unchanged, persisted) +
+  a terminal-reject case in `OrchestratorUserCommandSuite`, and the
+  `RefreshCache` epoch-bump + state-preserved assertion in
+  `FsmReviewFixesSuite`. Remaining handler unit tests (`reconcile`) +
+  the IT surface land with their increments / Task 1.4.16.
 
 ### Task 1.4.14 — **C14** Codex resume role-framing closure
 
@@ -2888,6 +2916,29 @@ ticks off only after Task 1.4.17 lands.
   unchanged (`forge-core` 188 unit, `forge-git`, `forge-agents` 196,
   `forge-specs`); `sbt test` + `sbt scalafmtCheckAll` clean; `forge-it`
   compiles.
+- 2026-05-30 — **Task 1.4.13 increment 4 — `forge refresh-cache`
+  (M7).** Wired the manual branch-protection cache-invalidation command.
+  Added `UserCommand.RefreshCache` + a cross-cutting `Fsm` handler that
+  returns the same `FsmState` with `branchProtectionCacheEpoch + 1` and
+  no drafts — it mirrors `handleResume`'s epoch bump but **without** the
+  lifecycle state change, keeping `Fsm.transition` pure and total.
+  `RefreshCacheFeature` (mirroring `AbandonFeature`) drives the bump
+  through the shared `UserCommandDriver` → `Orchestrator.applyUserCommand`
+  apply→persist pipeline; `deriveRefreshCache` rejects terminal
+  `FeatureDone`/`Abandoned` and allows every other state. The
+  `applyUserCommandTo` no-op backstop was widened from "`state` unchanged
+  + no drafts" to "whole `Feature` unchanged + no drafts" so an
+  epoch-only bump is driven (behaviour-preserving for resume/abandon).
+  §15: the epoch bump is the only mutation. New tests: `RefreshCache`
+  epoch+state assertion in `FsmReviewFixesSuite`, the pure
+  `deriveRefreshCache` cases in `UserCommandHandlerSuite`, and the
+  apply→persist + terminal-reject cases in
+  `OrchestratorUserCommandSuite`. Build green: `forge-core` 372 (+1),
+  `forge-app` 278 (+6), other counts unchanged (`forge-git` 188,
+  `forge-agents` 196, `forge-specs` 132);
+  `sbt scalafmtCheckAll` / `compile` / `test` clean. **Still open in Task
+  1.4.13:** M6 (`reconcile` — gated on Task 1.4.15), and M12's remaining
+  IT coverage.
 
 ## 4. Carry-forward (inherited + new)
 

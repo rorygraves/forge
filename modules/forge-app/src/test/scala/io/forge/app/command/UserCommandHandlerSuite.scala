@@ -53,6 +53,24 @@ class UserCommandHandlerSuite extends munit.FunSuite:
     assert(AbandonFeature.deriveAbandon(feature(FsmState.Abandoned("done"))).isLeft)
 
   // ---------------------------------------------------------------------------
+  // RefreshCacheFeature.deriveRefreshCache (M7)
+  // ---------------------------------------------------------------------------
+
+  test("deriveRefreshCache: an active state yields RefreshCache"):
+    assertEquals(
+      RefreshCacheFeature.deriveRefreshCache(feature(FsmState.PieceImplementing(p1))),
+      Right(UserCommand.RefreshCache)
+    )
+
+  test("deriveRefreshCache: NeedsHumanIntervention is refreshable (NHI is non-terminal)"):
+    val nhi = FsmState.NeedsHumanIntervention("stuck", ResumeHint.AbortOrAbandon)
+    assertEquals(RefreshCacheFeature.deriveRefreshCache(feature(nhi)), Right(UserCommand.RefreshCache))
+
+  test("deriveRefreshCache: an already-terminal feature is rejected"):
+    assert(RefreshCacheFeature.deriveRefreshCache(feature(FsmState.FeatureDone)).isLeft)
+    assert(RefreshCacheFeature.deriveRefreshCache(feature(FsmState.Abandoned("done"))).isLeft)
+
+  // ---------------------------------------------------------------------------
   // ResumeFeature.deriveResume
   // ---------------------------------------------------------------------------
 
@@ -94,4 +112,8 @@ class UserCommandHandlerSuite extends munit.FunSuite:
   tempFixture.test("forge resume on a non-existent feature → exit 1"): root =>
     val cmd = ForgeCommand.ResumeAfterHumanPush(featureId, p1)
     val code = ResumeFeature.execute(new ForgePaths(root), ForgeConfig.Default, cmd).unsafeRunSync()
+    assertEquals(code, ExitCode(1))
+
+  tempFixture.test("forge refresh-cache on a non-existent feature → exit 1"): root =>
+    val code = RefreshCacheFeature.execute(new ForgePaths(root), ForgeConfig.Default, featureId).unsafeRunSync()
     assertEquals(code, ExitCode(1))

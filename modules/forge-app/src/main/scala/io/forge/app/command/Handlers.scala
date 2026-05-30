@@ -249,13 +249,29 @@ object AbandonFeature:
       case _: FsmState.Abandoned => Left("feature is already abandoned")
       case _ => Right(UserCommand.Abandon(Reason))
 
+/** Task 1.4.13 M7 — `forge refresh-cache <feature>`. The manual branch-protection cache-invalidation command (§15):
+  * applies `UserCommand.RefreshCache`, which bumps `branchProtectionCacheEpoch` only — no lifecycle state mutation. The
+  * bump flows through the same load → build → apply → persist pipeline as `resume` / `abandon`; a terminal feature is
+  * rejected (a completed or abandoned feature has no live cache worth invalidating).
+  */
+object RefreshCacheFeature:
+
+  def execute(paths: ForgePaths, config: io.forge.app.config.ForgeConfig, featureId: FeatureId): IO[ExitCode] =
+    UserCommandDriver.run(paths, config, featureId, "refresh-cache", deriveRefreshCache)
+
+  private[command] def deriveRefreshCache(feature: Feature): Either[String, UserCommand] =
+    feature.state match
+      case FsmState.FeatureDone => Left("feature is already complete; nothing to refresh")
+      case _: FsmState.Abandoned => Left("feature is abandoned; nothing to refresh")
+      case _ => Right(UserCommand.RefreshCache)
+
 object reconcile:
   def run(ctx: StateChangingContext, command: ForgeCommand.Reconcile): IO[ExitCode] =
     Handlers.notImplemented(s"forge reconcile ${command.feature.value}", "Task 1.4.13")
 
 object refreshCache:
   def run(ctx: StateChangingContext, command: ForgeCommand.RefreshCache): IO[ExitCode] =
-    Handlers.notImplemented(s"forge refresh-cache ${command.feature.value}", "Task 1.4.10")
+    RefreshCacheFeature.execute(ctx.paths, ctx.config, command.feature)
 
 object abandon:
   def run(ctx: StateChangingContext, command: ForgeCommand.Abandon): IO[ExitCode] =

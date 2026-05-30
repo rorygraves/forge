@@ -202,3 +202,9 @@ enum UserCommand derives ReadWriter:
 
   /** `/done` in the spec REPL (§11.1). Drives `InteractiveSpec → DesignReviewing(1)`. */
   case Done
+
+  /** `forge refresh-cache <feature>` (§15) — manual branch-protection cache invalidation. Bumps
+    * `branchProtectionCacheEpoch` only; the FSM stays in its current state (no lifecycle transition). Mirrors the epoch
+    * bump that `Resume` performs in `handleResume`, but without the accompanying state change.
+    */
+  case RefreshCache

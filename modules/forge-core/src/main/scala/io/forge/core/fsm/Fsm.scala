@@ -90,6 +90,13 @@ object Fsm:
           if feature.state.isInstanceOf[FsmState.NeedsHumanIntervention] =>
         Some(handleResume(feature, hint))
 
+      // §15 `forge refresh-cache`: bump the branch-protection cache epoch only — no lifecycle transition. Mirrors the
+      // epoch bump in `handleResume` but stays in the current state and emits no drafts (the state is unchanged, so
+      // there is no `fsm.transition` to record). The terminal-state guard lives in the command derivation
+      // (`deriveRefreshCache`); the pure FSM stays total here.
+      case FsmEvent.UserCommandReceived(UserCommand.RefreshCache) =>
+        Some((feature.copy(branchProtectionCacheEpoch = feature.branchProtectionCacheEpoch + 1), Vector.empty))
+
       case FsmEvent.BudgetBreached(scope, message) if !isTerminal(feature.state) =>
         val _ = scope
         Some(toNeedsHumanIntervention(feature, s"budget exceeded: $message", hintFromState(feature)))

@@ -110,6 +110,55 @@ class OrchestratorUserCommandSuite extends munit.FunSuite:
       case other => fail(s"expected Rejected, got $other")
 
   // ---------------------------------------------------------------------------
+  // refresh-cache (M7) — bumps branchProtectionCacheEpoch only, no lifecycle change
+  // ---------------------------------------------------------------------------
+
+  tempFixture.test("refresh-cache bumps the epoch by 1, leaves the lifecycle state unchanged, and persists"): root =>
+    val paths = new ForgePaths(repoRoot = root)
+    val cache = new FileStateCache(paths)
+    val nhi = FsmState.NeedsHumanIntervention("stuck", ResumeHint.RunAnotherFixup(p1, PrNumber(7)))
+    val m = mkManifest(featureId, Vector(piecePending(p1, 1)))
+    val start = featureAt(featureId, m, nhi)
+
+    val outcome = (for
+      watcher <- FakePRWatcher.make
+      orch <- orchestratorFor(root, watcher, new HookStateCache(cache, _ => IO.unit))
+      out <- orch.applyUserCommandTo(start, _ => Right(UserCommand.RefreshCache))
+    yield out).unsafeRunSync()
+
+    outcome match
+      case Orchestrator.CommandOutcome.Driven(terminal) =>
+        // §15: no lifecycle transition — the driven terminal state is the same NHI state we seeded.
+        assertEquals(terminal.state, nhi: FsmState)
+        assertEquals(terminal.branchProtectionCacheEpoch, start.branchProtectionCacheEpoch + 1)
+        // Persisted through the J4 pipeline: a fresh load reads the unchanged state (and the bumped epoch) back.
+        val reloaded = cache.load(featureId).unsafeRunSync()
+        assertEquals(reloaded.map(_.state), Some(nhi: FsmState))
+        assertEquals(reloaded.map(_.branchProtectionCacheEpoch), Some(start.branchProtectionCacheEpoch + 1))
+      case other => fail(s"expected Driven(NHI), got $other")
+
+  tempFixture.test("refresh-cache on a terminal feature is rejected without mutation"): root =>
+    val paths = new ForgePaths(repoRoot = root)
+    val cache = new FileStateCache(paths)
+    val m = mkManifest(featureId, Vector(piecePending(p1, 1)))
+    val start = featureAt(featureId, m, FsmState.FeatureDone)
+
+    val outcome = (for
+      watcher <- FakePRWatcher.make
+      orch <- orchestratorFor(root, watcher, new HookStateCache(cache, _ => IO.unit))
+      // A terminal feature is rejected up front; deriveRefreshCache (unit-tested in UserCommandHandlerSuite) is
+      // `private[command]`, so the rejection is reproduced here as the same inline Left the resume/abandon cases use.
+      out <- orch.applyUserCommandTo(start, _ => Left("feature is already complete; nothing to refresh"))
+    yield out).unsafeRunSync()
+
+    outcome match
+      case Orchestrator.CommandOutcome.Rejected(state, _) =>
+        assertEquals(state, FsmState.FeatureDone: FsmState)
+        // No transition was applied, so no cache was written.
+        assertEquals(cache.load(featureId).unsafeRunSync(), None)
+      case other => fail(s"expected Rejected, got $other")
+
+  // ---------------------------------------------------------------------------
   // resume
   // ---------------------------------------------------------------------------
 
