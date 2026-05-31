@@ -5,7 +5,7 @@ that first; everything below is Claude-Code-specific.
 
 ## TL;DR
 
-- **Implementation contract:** [`docs/forge-design-1.2.md`](docs/forge-design-1.2.md). The 1.1 revision is kept in-tree as an evolution record but is superseded.
+- **Implementation contract:** [`docs/forge-design-1.3.md`](docs/forge-design-1.3.md). The 1.1 and 1.2 revisions are kept in-tree only as superseded stubs that point here (full prior text in git history); §-numbers are preserved, so any "v1.2 §N" reference resolves to the same §N in 1.3.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
 - **Active implementation plan:** [`docs/design-2.0.md`](docs/design-2.0.md)
   (Slice 2.0 — Phase-2 run observability, 🟡 open 2026-05-31). The most
@@ -118,11 +118,11 @@ their CLIs. A few cross-cutting points that show up while working on
   un-tick" later. Don't tick the roadmap bullet — that happens only
   after a code review on the whole section. See `AGENTS.md`
   §"Per-section implementation plans".
-- **Spec edits go to the next revision file.** Don't edit
-  `forge-design-1.2.md` in place — open a `forge-design-1.3.md` (per
-  the §23 "standalone revisions" rule). The exception is the small
-  inline pointer to `roadmap.md` already in §17, which exists to keep
-  readers oriented.
+- **Spec edits go to the next revision file.** The live spec is
+  `forge-design-1.3.md`; don't edit it in place — open a
+  `forge-design-1.4.md` (per the §23 "standalone revisions" rule). The
+  exception is the small inline pointer to `roadmap.md` already in §17,
+  which exists to keep readers oriented.
 - **Don't introduce `langfuse` / `llm4s` / API-direct calls** in
   v1 code. The orchestrator talks to CLIs only (§3.3, §22).
 - **Verify integration tests with real CLIs**, not mocks, whenever the

@@ -1,8 +1,8 @@
 # Forge — design rationale
 
-> Why the live spec ([`forge-design-1.2.md`](forge-design-1.2.md)) looks the way it does. Each item names a decision, what was rejected, and what to read in the live spec for the resulting contract. Older entries reference §-numbers in v1.1 — those sections survived intact into v1.2 unless explicitly noted.
+> Why the live spec ([`forge-design-1.3.md`](forge-design-1.3.md)) looks the way it does. Each item names a decision, what was rejected, and what to read in the live spec for the resulting contract. Older entries reference §-numbers in v1.1 / v1.2 — those sections survived intact into v1.3 (the numbering is preserved across revisions) unless explicitly noted.
 >
-> The design went through twelve iterations (0.1 → 0.9 → 1.0 → 1.1 → 1.2) with delta-only commentaries at each step. Those commentaries have been removed from the tree; this document preserves the non-obvious rationale a future contributor would want before re-litigating a settled question. Decisions already explicit in the live spec's §22 (rejects) or §20 (v2 candidates) are not repeated here.
+> The design went through several iterations (0.1 → 0.9 → 1.0 → 1.1 → 1.2 → 1.3) with delta-only commentaries at each step. Those commentaries have been removed from the tree; this document preserves the non-obvious rationale a future contributor would want before re-litigating a settled question. Decisions already explicit in the live spec's §22 (rejects) or §20 (v2 candidates) are not repeated here.
 
 ---
 

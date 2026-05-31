@@ -27,15 +27,15 @@ Concretely, v1:
 - One branch per piece off `main`, one PR, one CI run, human-merged.
 - Per-feature action log; resumable on every failure.
 
-`docs/forge-design-1.2.md` is the implementation contract.
+`docs/forge-design-1.3.md` is the implementation contract.
 
 ## Documentation map
 
 | File | What it is |
 |---|---|
-| [`docs/forge-design-1.2.md`](docs/forge-design-1.2.md) | v1 implementation contract (≈1450 lines) |
-| [`docs/forge-design-1.1.md`](docs/forge-design-1.1.md) | Prior revision; kept in-tree as an evolution record (superseded by 1.2) |
-| [`docs/design-rationale.md`](docs/design-rationale.md) | Non-obvious tradeoffs preserved from the 0.1 → 1.2 design evolution |
+| [`docs/forge-design-1.3.md`](docs/forge-design-1.3.md) | v1 implementation contract (the live spec; §-numbers preserved from 1.1/1.2) |
+| [`docs/forge-design-1.2.md`](docs/forge-design-1.2.md) · [`1.1`](docs/forge-design-1.1.md) | Prior revisions; superseded stubs pointing at 1.3 (full text in git history) |
+| [`docs/design-rationale.md`](docs/design-rationale.md) | Non-obvious tradeoffs preserved from the 0.1 → 1.3 design evolution |
 | [`docs/roadmap.md`](docs/roadmap.md) | Multi-horizon roadmap: MVP → MLP → 1.0 → 2.0 (Forge-instance pivot) → 3.0+ |
 | [`docs/slice-0/slice-0-report.md`](docs/slice-0/slice-0-report.md) | CLI capability-validation results that grounded v1.1 |
 | [`docs/slice-1/slice-1-findings.md`](docs/slice-1/slice-1-findings.md) | Slice-1 runtime findings that grounded v1.2 (superseded by 1.2, kept as evolution record) |
@@ -56,7 +56,7 @@ modules/
 ```
 
 Module ownership maps onto the build order in
-[`docs/forge-design-1.2.md` §17](docs/forge-design-1.2.md#17-build-order-de-risked).
+[`docs/forge-design-1.3.md` §17](docs/forge-design-1.3.md#17-build-order-de-risked).
 
 ## Building and testing
 

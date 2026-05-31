@@ -1,12 +1,12 @@
 # Forge — product roadmap
 
-> Companion to [`forge-design-1.2.md`](forge-design-1.2.md). The design doc is
+> Companion to [`forge-design-1.3.md`](forge-design-1.3.md). The design doc is
 > the implementation contract for v1; this document is the multi-horizon plan
 > the design lives inside. Early phases are concrete (and trace directly into
 > §17 of the design); later phases capture direction and have not yet been
 > turned into specs.
 >
-> **Status:** draft v0.9 — 2026-05-31. **Phase 1 (MVP) ✅ COMPLETE — Slices 1.1, 1.2, 1.3, and 1.4 all closed.** Phase 2 (MLP) is now open; first slice is Slice 2.0 (run observability, §3.1).
+> **Status:** draft v0.10 — 2026-05-31. **Phase 1 (MVP) ✅ COMPLETE — Slices 1.1, 1.2, 1.3, and 1.4 all closed.** Phase 2 (MLP) is open; **Slice 2.0 (run observability, §3.1) is in progress** — Tier 1 (`cost.update` + `session.complete` writers) and the first Tier 2 item (`forge stats`) have landed; work-vs-wait markers + Tier 3 remain. Audit trail in [`design-2.0.md`](design-2.0.md). The §3.1 checkboxes flip only at the section-level code review on Slice 2.0 close (per the roadmap-tick convention).
 > Slice 1.1 (Task 1.1.1 → Task 1.1.5 in [`design-2.1.md`](design-2.1.md)) ships
 > both connectors against the v1.2 §7.1 streaming-spec trait with
 > real-CLI integration tests in `forge-it`. Slice 1.2 (Task 1.2.1 → Task 1.2.7 in
@@ -36,7 +36,7 @@
 | Phase | Outcome | Source of detail |
 |---|---|---|
 | 0 — Slice 0 | CLI capabilities validated | [`slice-0/slice-0-report.md`](slice-0/slice-0-report.md) |
-| 1 — Testability MVP | Forge ships its own next slice | `forge-design-1.2.md` §17 slices 1–4 |
+| 1 — Testability MVP | Forge ships its own next slice | `forge-design-1.3.md` §17 slices 1–4 |
 | 2 — MLP | Pleasant single-repo daily-driver | §17 slice 5 + polish |
 | 3 — v1.0 | Single-repo, OSS-ready, role-pluggable | §20 v2 candidates + role-trait refactor |
 | 4 — v2.0 | Forge-instance pivot (multi-repo, daemon, parallel, containerised) | Needs its own design doc (`forge-design-2.0.md`) before work starts |
@@ -402,6 +402,14 @@ and TUI (§3.2) below both *consume* this data — so observability lands first.
 Findings: [`slice-4/mvp-friction.md`](slice-4/mvp-friction.md); evidence:
 [`slice-4/mvp-run/image-creds-dedup/`](slice-4/mvp-run/image-creds-dedup/).
 
+> **Progress (2026-05-31):** Tier 1 ✅ (Tasks 2.0.1 `cost.update` writer +
+> 2.0.2 `session.complete`, D2 turn/piece-reset bug fixed en route) and Tier 2
+> Task 2.0.3 `forge stats <feature>` ✅ landed. Remaining: Task 2.0.4
+> (work-vs-wait markers + the `forge stats` wait column) and Tier 3
+> (Tasks 2.0.5–2.0.6). The checkboxes below stay `[ ]` until the Slice 2.0
+> section code review (Task 2.0.7 close-out); per-Task detail and dated status
+> log live in [`design-2.0.md`](design-2.0.md).
+
 **Tier 1 — close the capture gap (the machinery already exists):**
 
 - [ ] **Wire the `cost.update` writer.** Draft a `cost.update` action from each
@@ -658,7 +666,7 @@ project guidelines + project state; post inline comments.
 ## 7. Divergences from the v1 spec
 
 Tracked here so they don't surprise anyone mid-implementation. None
-require changes to the v1 contract (1.1 / 1.2); all are deliberately
+require changes to the v1 contract (now `forge-design-1.3.md`); all are deliberately
 deferred to Phase 3+.
 
 | Long-term direction | v1 spec stance | Phase that resolves it |

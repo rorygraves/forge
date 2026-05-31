@@ -236,9 +236,9 @@ log fixes both.
   must explicitly carry deferrals forward" gate.
 - Reconcile any §19 payload-shape decisions (D1) into the spec — if the
   §19 `cost.update` / a new `session.complete` schema needs documenting,
-  open it in the next-revision spec file per the "spec edits go to the next
-  revision" rule (do **not** edit `forge-design-1.2.md` / `-1.3.md` in
-  place).
+  open it in the next-revision spec file (`forge-design-1.4.md`) per the "spec
+  edits go to the next revision" rule (do **not** edit the live spec
+  `forge-design-1.3.md` in place).
 - Full unit suite green; `forge-it` compiles. Tick roadmap §3.1 only after
   a section-level code review.
 - **Exit re-validation:** ideally re-run the MVP-gate feature (or an
@@ -369,8 +369,8 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
   reuses the same payload. `cost.update`'s §19 field set is unchanged (the spec
   already documents it); the **new** kind is `session.complete`
   (`{ phase, piece, durationMs, model, turnCostUsd, success }`), which §19 does
-  not yet list — file it in the next-revision spec at Task 2.0.7 (do not edit
-  `forge-design-1.2.md` / `-1.3.md` in place).
+  not yet list — file it in the next-revision spec (`forge-design-1.4.md`) at
+  Task 2.0.7 (do not edit the live spec `forge-design-1.3.md` in place).
 - **D2 — turn/piece cost-total reset ownership.** ✅ Fixed standalone
   2026-05-31 (`Orchestrator.store` resets `turn`; `PieceImplementing` entry
   resets `piece` on a new piece), with `OrchestratorCostScopeResetSuite`.
@@ -387,9 +387,9 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
 - Source findings: [`slice-4/mvp-friction.md`](slice-4/mvp-friction.md);
   run evidence under
   [`slice-4/mvp-run/image-creds-dedup/`](slice-4/mvp-run/image-creds-dedup/).
-- Spec: [`forge-design-1.2.md`](forge-design-1.2.md) §12 (budget caps),
-  §19 (action-log kinds incl. `cost.update`), §6 (`Feature` projections);
-  [`forge-design-1.3.md`](forge-design-1.3.md) §1 (Slice 1–3 reconciliation).
+- Spec: [`forge-design-1.3.md`](forge-design-1.3.md) (the live contract) §12
+  (budget caps), §19 (action-log kinds incl. `cost.update`), §6 (`Feature`
+  projections); §1 carries the Slice 1–3 spec reconciliations.
 - Code anchors: `Replay.applyCostUpdate`
   (`forge-core/.../log/Replay.scala:333`), `CostTotals`
   (`forge-core/.../cost/Cost.scala`), `AgentEvent`

@@ -11,10 +11,11 @@ Codex CLIs to take a feature from intent → design → piece-by-piece
 implementation → PR → merge. Cross-model review; human-in-the-loop;
 incremental merge.
 
-The implementation contract is [`docs/forge-design-1.2.md`](docs/forge-design-1.2.md).
-1.1 is kept in-tree as an evolution record but is superseded. If the
-spec and this file disagree, the spec wins — and please open a PR to
-fix this file.
+The implementation contract is [`docs/forge-design-1.3.md`](docs/forge-design-1.3.md).
+The 1.1 and 1.2 revisions are kept in-tree only as superseded stubs that point
+here (their full text is in git history); §-numbers are preserved, so a "v1.2 §N"
+reference resolves to the same §N in 1.3. If the spec and this file disagree, the
+spec wins — and please open a PR to fix this file.
 
 ## Current state
 
@@ -201,7 +202,7 @@ Where to look first when starting a task:
 
 | Question | File |
 |---|---|
-| What's the v1 contract? | `docs/forge-design-1.2.md` |
+| What's the v1 contract? | `docs/forge-design-1.3.md` |
 | What's actively being worked on right now? | `docs/design-<slice-id>.md` for the open Slice (see "Per-section implementation plans" below) |
 | Why was X decided that way? | `docs/design-rationale.md` |
 | What's the phase plan beyond v1? | `docs/roadmap.md` |
@@ -309,7 +310,7 @@ task:
 
 | Layer | File | Purpose | Lifecycle |
 |---|---|---|---|
-| Contract | `docs/forge-design-1.2.md` | What the system is *for*; signatures and invariants. | Standalone revisions (`forge-design-1.x.md`) when corrections land. |
+| Contract | `docs/forge-design-1.3.md` | What the system is *for*; signatures and invariants. | Standalone revisions (`forge-design-1.x.md`) when corrections land. |
 | Phase plan | `docs/roadmap.md` | Direction, exit criteria, gates between phases. | Stays terse; ticks bullets `[~]` → `[x]` only after a section's code review passes. |
 | Implementation plan | `docs/design-<slice-id>.md` | Per-Task checklist for one Slice, broken into numbered Tasks. | Created when work on the Slice starts; lives until the Slice closes; ticks granular checkboxes as items land. |
 
@@ -534,7 +535,8 @@ design.
 ## Documentation discipline
 
 - **Spec changes** → next `forge-design-1.x.md` (standalone, per §23).
-  Don't edit `forge-design-1.2.md` in place.
+  The live spec is `forge-design-1.3.md`; don't edit it in place — open
+  `forge-design-1.4.md`.
 - **Non-obvious tradeoff worth preserving** → `docs/design-rationale.md`
   with a cross-reference into the current spec.
 - **Phase-level direction** → `docs/roadmap.md`.
