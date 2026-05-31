@@ -397,6 +397,43 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
   modules); `forge-it` compiles. **Exit criterion #5 met.** Tier-3 remaining:
   Task 2.0.6 (clean resume-from-NHI). `FORGE_DRIVER_RAW_DUMP_DIR` is filed for
   the Task 2.0.7 spec reconciliation alongside the other §19 additions.
+- 2026-05-31 — **Task 2.0.6 clean resume-from-NHI landed (contained half;
+  driver-respawn-avoidance split forward — D3 resolved).** Scoping surfaced that
+  the existing resume machinery is **already append-only**: `Fsm.handleResume`
+  emits an `fsm.transition` draft (NHI→target) and never truncates, and
+  Task 2.0.4 already brackets the NHI as an `intervention` wait (enter on NHI
+  entry, `leave` on the resume transition). So exit #6's "a resume that does not
+  rewrite the log + a coherent timeline" was largely already satisfied; the only
+  remaining reason the MVP run *truncated* was that the resume **re-spawns the
+  driver from scratch** (re-paying ~\$10 of exploration), which is the large
+  half. Per **D3** + exit #6's "or document the cost as a watch item" clause, the
+  contained half ships now and the driver-respawn-avoidance rolls forward (see
+  §4 D3). Delivered: a new explicit **`audit.resume_from_nhi`** marker
+  (`{ hint, from, to, reason }`) stamped at the single FSM resume seam
+  (`Fsm.handleResume`), so **both** resume paths emit it — `forge resume --<flag>`
+  and `forge run`'s startup auto-resume of the run-recoverable hints — making the
+  committed timeline self-describing across a resume without any truncation. The
+  kind is `audit.resume_from_nhi` (not `audit.resume`) deliberately: a `*.resume`
+  suffix collides with `Replay`'s `<actor>.resume` session-resume dispatch; the
+  snake-case name mirrors `audit.piece_merged` and is a no-op projection in
+  `Replay` (verified). The marker is emitted only on a real state move (a no-op
+  resume — e.g. `ApplyPlanningUpdate` whose patch fails to apply, staying in NHI
+  — records nothing). `forge stats` folds an `audit.resume_from_nhi` **count**
+  (not timed) and renders a "N operator resume(s)… (recovered in place, not
+  truncated)" footnote, so a multi-resume run reads as *recovered*, not stuck.
+  New `FsmResumeMarkerSuite` (6: marker payload for RunAnotherFixup /
+  ResolveLocalImplementationChanges / ReopenDesign / AbortOrAbandon, marker
+  precedes the transition, no-op resume emits nothing) +
+  `FeatureFoldEventsSuite` +1 (the marker is a no-op projection and the timeline
+  folds coherently across the resume boundary) + `StatsReportSuite` +4 (fold
+  count, resumeCount 0, render note, omit-when-zero) +
+  `OrchestratorUserCommandSuite` +1 (end-to-end: a `forge resume` appends the
+  marker, the pre-NHI log line survives byte-for-byte, the log only grows).
+  `forge-core` 391, `forge-app` 358 (full unit suite green); `forge-it`
+  compiles. **Exit criterion #6 met** (contained half + documented watch item
+  for the respawn-avoidance). `audit.resume_from_nhi` is filed for the Task 2.0.7
+  §19 spec reconciliation alongside `session.complete` and the `fsm.transition`
+  `wait` field. **Tier 3 complete; only Task 2.0.7 (close-out) remains.**
 
 ## 4. Carry-forward (inherited + new)
 
@@ -440,8 +477,27 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
   Task 2.0.7, confirm whether the spec describes the cap semantics
   differently and, if so, file a design-rationale note rather than editing
   the spec in place.
-- **D3 — resume-from-NHI scope.** Task 2.0.6 may exceed a contained change;
-  any split rolls forward with a recorded disposition.
+- **D3 — resume-from-NHI scope.** ✅ Resolved **split** 2026-05-31. Task 2.0.6
+  shipped the contained half — the explicit `audit.resume_from_nhi` marker at the
+  FSM resume seam + `forge stats` count/footnote — which, on top of the
+  already-append-only resume machinery and Task 2.0.4's NHI wait-bracketing,
+  satisfies exit #6. The **large half rolls forward**: a resume that detects
+  already-committed driver work on the piece branch and **skips re-spawning the
+  implement/fix-up driver** (the ~\$10 re-exploration cost that *was* the real
+  reason the MVP run truncated rather than resumed). It is deferred because it
+  touches git branch inspection + driver `--resume` semantics and would have to
+  revisit `RestartRecovery`'s deliberate "no transparent resume" stance
+  (headless worktrees may carry partial uncommitted changes) — too large for a
+  Tier-3 debuggability item, and exit #6 explicitly sanctions documenting the
+  cost as a watch item instead. **Watch item:** until the respawn-avoidance
+  lands, each resume from an implement/fix-up NHI re-pays the driver's full
+  exploration; the per-turn cost cap (S4-5 tuning) bounds the blast radius.
+  Place this in a later Phase-2 slice (alongside the S4-5 tuning that has the
+  same lived-data driver) at Task 2.0.7. **Gap #7 (`designSessionId`
+  durability)** was *not* pulled in — Task 2.0.6 added a new audit kind but did
+  not touch the spec-`/done` session-id persistence surface, so per §4's
+  "in-scope only if cheap" gate it stays a standalone §11.3 durability fix;
+  confirm its disposition at Task 2.0.7.
 - **D4 — human-wait marker representation.** ✅ Resolved 2026-05-31:
   **flag on the existing `fsm.transition` payload** (not a dedicated `audit.*`
   action). Entering/leaving a human-blocking state stamps

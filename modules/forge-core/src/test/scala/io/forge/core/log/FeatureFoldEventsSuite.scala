@@ -194,6 +194,45 @@ class FeatureFoldEventsSuite extends munit.FunSuite:
     val Right(result) = Feature.foldEvents(seed, log): @unchecked
     assertEquals(result.feature.cost, CostTotals(BigDecimal(1.04), BigDecimal(0.62), BigDecimal(0.20)))
 
+  // --- audit.resume_from_nhi (Task 2.0.6) — a no-op projection at the replay layer ---
+
+  private def auditResumeAction(seq: Long, hint: ResumeHint, from: FsmState, to: FsmState): Action =
+    Action(
+      seq = seq,
+      at = at(seq.toInt),
+      feature = FeatureA,
+      piece = None,
+      actor = Some("operator"),
+      role = None,
+      kind = "audit.resume_from_nhi",
+      payload = ujson.Obj(
+        "hint" -> writeJs[ResumeHint](hint),
+        "from" -> writeJs[FsmState](from),
+        "to" -> writeJs[FsmState](to),
+        "reason" -> ujson.Str("ci exhausted")
+      )
+    )
+
+  test(
+    "foldEvents — audit.resume_from_nhi is a no-op projection and the timeline folds coherently across the resume boundary"
+  ):
+    val seed = featureIn(
+      FsmState.PieceAwaitingCi(P1, P1Pr),
+      pieces = Vector(pieceInProgress(P1, 1, prNumber = Some(P1Pr), attempts = 3), piecePending(P2, 2))
+    )
+    val nhi =
+      FsmState.NeedsHumanIntervention("ci exhausted", ResumeHint.RunAnotherFixup(P1, P1Pr))
+    // …PieceAwaitingCi → NHI → (operator resumes) → PieceCiFailed. The marker sits on the boundary.
+    val log = Vector(
+      fsmTransitionAction(0L, FsmState.PieceAwaitingCi(P1, P1Pr), nhi, piece = Some(P1)),
+      auditResumeAction(1L, ResumeHint.RunAnotherFixup(P1, P1Pr), nhi, FsmState.PieceCiFailed(P1, P1Pr, attempt = 3)),
+      fsmTransitionAction(2L, nhi, FsmState.PieceCiFailed(P1, P1Pr, attempt = 3), piece = Some(P1))
+    )
+    val Right(result) = Feature.foldEvents(seed, log): @unchecked
+    // the marker neither advances state nor counts as a transition — the two fsm.transitions do
+    assertEquals(result.feature.state, FsmState.PieceCiFailed(P1, P1Pr, attempt = 3))
+    assertEquals(result.observedTransitions.size, 2)
+
   // --- audit.piece_merged ---
 
   private def auditMergedAction(seq: Long, piece: PieceId, pr: PrNumber): Action =

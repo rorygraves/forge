@@ -25,6 +25,9 @@ import upickle.default as upickle
   *   - `cost.update` (Task 2.0.1) — the running `featureTotalUsd` is the §13 single-writer authoritative total; its
   *     last value pins the feature-total cost (and its mere presence proves cost data was captured even if every turn's
   *     `turnCostUsd` happened to be zero).
+  *   - `audit.resume_from_nhi` (Task 2.0.6) — one per operator resume from needs-human-intervention. Counted (not
+  *     timed) and surfaced as a footnote, so a run recovered in place across several NHI boundaries reads as recovered
+  *     rather than stuck. Its mere presence is the evidence the timeline was *appended to*, not truncated-and-replayed.
   *
   * A log produced before the Slice-2.0 capture gap closed (the szork MVP run had **zero** cost entries) has neither
   * kind: the report degrades to "no session data recorded" rather than crashing (design-2.0 §1 Task 2.0.3 "an empty /
@@ -73,7 +76,13 @@ object StatsReport:
       /** The wait kind of an interval still open at the end of the log — the loop was parked on a human when the record
         * ended (process crashed / killed mid-wait). `Some` ⇒ render an "end unknown" caveat rather than an interval.
         */
-      unclosedWaitKind: Option[String]
+      unclosedWaitKind: Option[String],
+      /** Number of `audit.resume_from_nhi` markers (Task 2.0.6) — operator resumes from needs-human-intervention. A
+        * non-zero count means the run was recovered in place (append-only) rather than truncated-and-replayed, and
+        * explains why the timeline crosses NHI boundaries. Surfaced as a footnote so a multi-resume run reads as
+        * recovered, not stuck.
+        */
+      resumeCount: Int
   ):
     /** Total bracketed (closed) human-wait across all kinds. Excludes any [[unclosedWaitKind]] interval (no end ⇒ no
       * measurable duration).
@@ -172,7 +181,8 @@ object StatsReport:
       featureUsd = featureUsd,
       costAvailable = costUpdates.nonEmpty || summedUsd > 0,
       waitMsByKind = waits.byKind,
-      unclosedWaitKind = waits.open.map(_._2)
+      unclosedWaitKind = waits.open.map(_._2),
+      resumeCount = actions.count(_.kind == "audit.resume_from_nhi")
     )
 
   /** Accumulator for the [[foldWaits]] walk: closed wait time per kind, plus the one currently-open interval (if any).
@@ -266,7 +276,15 @@ object StatsReport:
               "(process stopped mid-wait); its duration is unknown and excluded from the waiting total."
           )
         case None => Vector.empty
-    durationNote ++ costNote ++ waitNote
+    val resumeNote =
+      if summary.resumeCount > 0 then
+        val plural = if summary.resumeCount == 1 then "resume" else "resumes"
+        Vector(
+          s"  note: ${summary.resumeCount} operator $plural from needs-human-intervention recorded " +
+            "(timeline recovered in place, not truncated)."
+        )
+      else Vector.empty
+    durationNote ++ costNote ++ waitNote ++ resumeNote
 
   /** Human label for a wait kind (the [[WaitOrder]] mapping); falls back to the raw tag for an unrecognised kind. */
   private def waitLabel(kind: String): String =

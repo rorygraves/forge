@@ -4,7 +4,7 @@ import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import io.forge.core.*
 import io.forge.core.fsm.{Feature, FsmState, ResumeHint, UserCommand}
-import io.forge.core.log.FileActionLog
+import io.forge.core.log.{Action, ActionDraft, FileActionLog}
 import io.forge.core.manifest.FileManifestStore
 import io.forge.core.paths.ForgePaths
 import io.forge.core.state.FileStateCache
@@ -196,3 +196,51 @@ class OrchestratorUserCommandSuite extends munit.FunSuite:
         // §8.1: every forge resume bumps the branch-protection cache epoch (start was 0).
         assertEquals(terminal.branchProtectionCacheEpoch, start.branchProtectionCacheEpoch + 1)
       case other => fail(s"expected Driven(FeatureDone), got $other")
+
+  // Task 2.0.6: a resume appends an `audit.resume_from_nhi` marker rather than truncating the log — the pre-NHI entries
+  // survive untouched and `forge stats` can read a coherent timeline across the resume boundary (design-2.0 §0 #6).
+  tempFixture.test("resume from NHI appends an audit.resume_from_nhi marker and leaves the pre-NHI log intact"): root =>
+    val paths = new ForgePaths(repoRoot = root)
+    val pr = PrNumber(200)
+    val piece = piecePending(p1, 1).copy(
+      status = io.forge.core.manifest.PieceStatus.InProgress,
+      baseSha = Some(BaseSha),
+      prNumber = Some(pr)
+    )
+    val m = mkManifest(featureId, Vector(piece))
+    val hint = ResumeHint.ResumeAfterHumanPush(p1, pr)
+    val start = featureAt(featureId, m, FsmState.NeedsHumanIntervention("CI never reported", hint))
+
+    // A pre-NHI entry already on the log: it must survive the resume byte-for-byte (append-only, no truncation).
+    val priorDraft =
+      ActionDraft(featureId, Some(p1), actor = None, role = None, kind = "fsm.transition", payload = ujson.Obj())
+
+    val logLines = (for
+      seedLog <- FileActionLog(paths)
+      _ <- seedLog.appendAll(featureId, Vector(priorDraft))
+      preResume <- IO.blocking(os.read.lines(paths.featureLog(featureId)).toVector)
+      watcher <- FakePRWatcher.make
+      _ <- watcher.offer(pr, snapshotResult(ciReadySnapshot(pr)))
+      hookCache = new HookStateCache(
+        new FileStateCache(paths),
+        f =>
+          f.state match
+            case s: FsmState.PieceAwaitingMerge => watcher.offer(s.prNumber, snapshotResult(mergedSnapshot(s.prNumber)))
+            case _ => IO.unit
+      )
+      orch <- orchestratorFor(root, watcher, hookCache)
+      _ <- orch.applyUserCommandTo(start, _ => Right(UserCommand.Resume(hint)))
+      postResume <- IO.blocking(os.read.lines(paths.featureLog(featureId)).toVector)
+    yield (preResume, postResume)).unsafeRunSync()
+
+    val (preResume, postResume) = logLines
+    val actions = postResume.map(upickle.default.read[Action](_))
+    // The pre-NHI line is intact (still the head, byte-for-byte) and the log only grew (append-only).
+    assertEquals(preResume.size, 1)
+    assertEquals(postResume.take(1), preResume)
+    assert(postResume.size > preResume.size, "the log only grew — nothing was truncated")
+    // Exactly one resume marker landed, carrying the hint and the piece.
+    val markers = actions.filter(_.kind == "audit.resume_from_nhi")
+    assertEquals(markers.size, 1)
+    assertEquals(markers.head.piece, Some(p1))
+    assertEquals(markers.head.payload("reason").str, "CI never reported")

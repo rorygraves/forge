@@ -87,6 +87,19 @@ class StatsReportSuite extends munit.FunSuite:
     }
     Action(nextSeq(), Instant.parse(atTs), featureId, None, None, None, "fsm.transition", base)
 
+  /** An `audit.resume_from_nhi` marker (Task 2.0.6) — the orchestrator's wire shape for an operator resume from NHI. */
+  private def auditResume(piece: Option[PieceId] = None): Action =
+    Action(
+      nextSeq(),
+      Instant.parse("2026-05-31T10:00:00Z"),
+      featureId,
+      piece,
+      actor = Some("operator"),
+      role = None,
+      "audit.resume_from_nhi",
+      ujson.Obj("hint" -> ujson.Str("RunAnotherFixup"), "reason" -> ujson.Str("ci exhausted"))
+    )
+
   // --- fold ----------------------------------------------------------------
 
   test("fold aggregates turns / wall-clock / cost per phase and a feature total"):
@@ -198,6 +211,26 @@ class StatsReportSuite extends munit.FunSuite:
     assert(summary.waitMsByKind.isEmpty)
     assertEquals(summary.unclosedWaitKind, None)
 
+  test(
+    "fold counts audit.resume_from_nhi markers and the per-phase timeline stays coherent across the resume boundary"
+  ):
+    // An Implement turn settles, the run NHIs + is resumed in place, then a second Implement (fix-up) turn settles. The
+    // resume marker must neither be counted as a session nor disturb the per-phase aggregation (Task 2.0.6).
+    val actions = Vector(
+      sessionComplete(SessionPhase.Implement, Some(p1), Some(9000), BigDecimal("1.50")),
+      auditResume(Some(p1)),
+      sessionComplete(SessionPhase.Implement, Some(p1), Some(3000), BigDecimal("0.50"))
+    )
+    val summary = StatsReport.fold(actions)
+    assertEquals(summary.resumeCount, 1)
+    val implement = summary.phases.find(_.phase == SessionPhase.Implement).getOrElse(fail("expected implement phase"))
+    assertEquals(implement.turns, 2, "the resume marker is not a session — both Implement turns still aggregate")
+    assertEquals(implement.knownDurationMs, 12000L)
+
+  test("fold of a never-resumed run has resumeCount 0"):
+    val summary = StatsReport.fold(Vector(sessionComplete(SessionPhase.Spec, None, Some(5000), BigDecimal("1.50"))))
+    assertEquals(summary.resumeCount, 0)
+
   // --- render --------------------------------------------------------------
 
   test("render shows a per-phase table with a total row"):
@@ -244,6 +277,24 @@ class StatsReportSuite extends munit.FunSuite:
     val summary = StatsReport.fold(Vector(sessionComplete(SessionPhase.Spec, None, Some(5000), BigDecimal("1.50"))))
     val text = StatsReport.render(featureId, summary)
     assert(!text.contains("waiting (human)"), text)
+
+  test("render notes operator resumes (timeline recovered in place, not truncated)"):
+    val summary = StatsReport.fold(
+      Vector(
+        sessionComplete(SessionPhase.Implement, Some(p1), Some(9000), BigDecimal("1.50")),
+        auditResume(Some(p1)),
+        auditResume(Some(p1)),
+        sessionComplete(SessionPhase.Implement, Some(p1), Some(3000), BigDecimal("0.50"))
+      )
+    )
+    val text = StatsReport.render(featureId, summary)
+    assert(text.contains("2 operator resumes from needs-human-intervention"), text)
+    assert(text.contains("recovered in place"), text)
+
+  test("render of a never-resumed run omits the resume note"):
+    val summary = StatsReport.fold(Vector(sessionComplete(SessionPhase.Spec, None, Some(5000), BigDecimal("1.50"))))
+    val text = StatsReport.render(featureId, summary)
+    assert(!text.contains("operator resume"), text)
 
   test("render notes an open wait (process stopped mid-wait)"):
     val summary = StatsReport.fold(

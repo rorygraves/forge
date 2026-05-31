@@ -889,8 +889,21 @@ object Fsm:
       currentPieceSessionId = if outcome.clearCurrentPieceSession then None else bumped.currentPieceSessionId,
       designPrFeedbackRound = if outcome.resetDesignPrFeedback then 0 else bumped.designPrFeedbackRound
     )
+    // Slice 2.0 Task 2.0.6 — emit an explicit `audit.resume_from_nhi` marker alongside the lifecycle transition so the
+    // committed timeline records *that* an operator resumed from NHI and *via which* hint, without anyone truncating
+    // the log to retry (the MVP-run rewind that corrupted the timing record, design-2.0 §0 #6). The marker is purely
+    // additive (append-only, `Replay` no-ops it) and rides the same atomic batch as the transition. A resume that does
+    // not actually move state (e.g. `ApplyPlanningUpdate` whose patch fails to apply, which stays in NHI) records
+    // nothing — there was no resume boundary to mark.
     if from == outcome.toState then (mutated, Vector.empty)
-    else (mutated, Vector(fsmTransitionDraft(feature, from, outcome.toState)))
+    else
+      (
+        mutated,
+        Vector(
+          resumeMarkerDraft(feature, hint, from, outcome.toState),
+          fsmTransitionDraft(feature, from, outcome.toState)
+        )
+      )
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -1073,6 +1086,39 @@ object Fsm:
         payload("wait") = ujson.Obj("edge" -> ujson.Str("leave"), "kind" -> ujson.Str(leaveKind))
       case (None, None) => ()
     ActionDraft(feature.id, piece, actor, role, "fsm.transition", payload)
+
+  /** Slice 2.0 Task 2.0.6 — the `audit.resume_from_nhi` marker written when a feature resumes from
+    * `NeedsHumanIntervention`. It records the resume boundary explicitly (`{ hint, from, to, reason }`) so the
+    * committed timeline is self-describing across a resume and the operator never needs to truncate-and-replay the log
+    * to retry a transient failure (the MVP-run rewind that corrupted the timing record, design-2.0 §0 #6). Both resume
+    * paths emit it because both flow through [[handleResume]]: `forge resume --<flag>` (operator command) and `forge
+    * run`'s startup auto-resume of the run-recoverable hints. The `piece` column carries the hint's piece where it has
+    * one (so per-piece audit queries see it); `reason` is the NHI's own message. Audit-only: a no-op projection in
+    * `Replay` (like `audit.piece_merged`).
+    */
+  private def resumeMarkerDraft(feature: Feature, hint: ResumeHint, from: FsmState, to: FsmState): ActionDraft =
+    val piece = hint match
+      case ResumeHint.ResumeAfterHumanPush(p, _) => Some(p)
+      case ResumeHint.CommitAndPushHumanFix(p, _) => Some(p)
+      case ResumeHint.RunAnotherFixup(p, _) => Some(p)
+      case ResumeHint.ResolveLocalImplementationChanges(p, _) => Some(p)
+      case _ => None
+    val reason = from match
+      case FsmState.NeedsHumanIntervention(r, _) => r
+      case _ => ""
+    ActionDraft(
+      feature.id,
+      piece,
+      actor = Some("operator"),
+      role = None,
+      kind = "audit.resume_from_nhi",
+      payload = ujson.Obj(
+        "hint" -> upickle.default.writeJs[ResumeHint](hint),
+        "from" -> upickle.default.writeJs[FsmState](from),
+        "to" -> upickle.default.writeJs[FsmState](to),
+        "reason" -> ujson.Str(reason)
+      )
+    )
 
   /** §19 / Slice 2.0 Task 2.0.4 — classify a state as a human-blocking wait, returning its wait-kind tag (or `None`
     * when the loop is doing work, not parked on the operator). These are the states where the loop blocks on a human:
