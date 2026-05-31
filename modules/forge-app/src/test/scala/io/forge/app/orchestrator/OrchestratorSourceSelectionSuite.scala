@@ -33,6 +33,20 @@ class OrchestratorSourceSelectionSuite extends munit.FunSuite:
 
   import EventSource.*
 
+  test(
+    "gap #13: PieceAwaitingReview watcher emits only on a human override (else None, so the reviewer wins the race)"
+  ):
+    val noop = OrchestratorTestKit.openSnapshot(Pr) // OPEN, no reviewDecision, no unseen comments
+    assertEquals(Orchestrator.pieceReviewWatcherEvent(P1, noop), None, "a no-op poll must not win the reviewer race")
+    val changesRequested = noop.copy(reviewDecision = Some(io.forge.core.pr.ReviewDecision.ChangesRequested))
+    assert(
+      Orchestrator.pieceReviewWatcherEvent(P1, changesRequested).isDefined,
+      "CHANGES_REQUESTED is a human override"
+    )
+    val withComment =
+      noop.copy(unseenComments = Vector(io.forge.core.pr.PrComment("c1", "alice", "please fix", Started, None, None)))
+    assert(Orchestrator.pieceReviewWatcherEvent(P1, withComment).isDefined, "an unseen human comment is an override")
+
   // Each row: (label, state, activeSession, expected sources).
   private val rows: Vector[(String, FsmState, Option[ActiveSession], Vector[EventSource])] = Vector(
     ("Drafting", FsmState.Drafting, None, Vector.empty),

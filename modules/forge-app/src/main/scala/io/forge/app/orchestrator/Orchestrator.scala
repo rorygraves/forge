@@ -10,7 +10,7 @@ import io.forge.core.cost.CostTotals
 import io.forge.core.fsm.{Feature, Fsm, FsmConfig, FsmEvent, FsmState, ResumeHint, SessionPhase, UserCommand}
 import io.forge.core.log.ActionDraft
 import io.forge.core.manifest.{ManifestPatch, ManifestStore}
-import io.forge.core.pr.PrState
+import io.forge.core.pr.{PrState, ReviewDecision}
 import io.forge.core.review.{DesignReviewVerdict, PrReviewVerdict, RefineVerdict}
 import io.forge.core.state.{RebuildState, StateCache}
 import io.forge.git.branch.protection.{OverlaySource, RequiredChecksOverlay}
@@ -102,9 +102,9 @@ final class Orchestrator(
         (if drafts.nonEmpty then persistTransition(feature1, drafts) else IO.unit) >> drive(feature1)
     }
 
-  /** §15: `forge run` resumes the NHI hints whose [[io.forge.app.command.TerminalReport.recovery]] names `forge run`
-    * as the recovery (the others have explicit `forge resume --flag` / `forge spec` / `forge abandon` paths). Applied
-    * once at startup; if the resumed work re-NHIs, `drive` stops at the new terminal and the next `forge run` retries.
+  /** §15: `forge run` resumes the NHI hints whose [[io.forge.app.command.TerminalReport.recovery]] names `forge run` as
+    * the recovery (the others have explicit `forge resume --flag` / `forge spec` / `forge abandon` paths). Applied once
+    * at startup; if the resumed work re-NHIs, `drive` stops at the new terminal and the next `forge run` retries.
     */
   private def resumeIfRunRecoverable(feature: Feature): (Feature, Vector[io.forge.core.log.ActionDraft]) =
     feature.state match
@@ -448,21 +448,26 @@ final class Orchestrator(
 
   private def pollResultToEvent(feature: Feature, result: PollResult): IO[Option[FsmEvent]] =
     result match
-      case PollResult.Snapshot(decoded) => watcherEventFor(feature.state, decoded).map(Some(_))
+      case PollResult.Snapshot(decoded) => watcherEventFor(feature.state, decoded)
       case PollResult.RateLimited(_) => IO.pure(None) // the watch stream absorbs back-off (S3-4)
       case PollResult.Failed(err) => IO.pure(Some(FsmEvent.HarnessError(s"PR poll failed: $err")))
 
-  // PieceAwaitingCi is handled by pieceCiWatcherIO (the §8 gate), never by this generic path.
-  private def watcherEventFor(state: FsmState, decoded: DecodedSnapshot): IO[FsmEvent] =
+  // PieceAwaitingCi is handled by pieceCiWatcherIO (the §8 gate), never by this generic path. Returns None to keep
+  // polling (so a no-op poll doesn't win the source race), Some(event) to drive a transition.
+  private def watcherEventFor(state: FsmState, decoded: DecodedSnapshot): IO[Option[FsmEvent]] =
     val snap = decoded.snapshot
     state match
-      case _: FsmState.DesignAwaitingMerge => IO.pure(FsmEvent.DesignPrSnapshotUpdated(snap))
-      case s: FsmState.PieceAwaitingReview => IO.pure(FsmEvent.PrSnapshotUpdated(s.p, snap))
+      case _: FsmState.DesignAwaitingMerge => IO.pure(Some(FsmEvent.DesignPrSnapshotUpdated(snap)))
+      case s: FsmState.PieceAwaitingReview =>
+        // gap #13: in PieceAwaitingReview the reviewer one-shot races this watcher. A no-op snapshot must NOT win
+        // (it would cancel the in-flight reviewer every poll → the verdict never arrives). Only emit when the human
+        // actually overrode (CHANGES_REQUESTED / unseen comment); otherwise keep polling and let the reviewer finish.
+        IO.pure(Orchestrator.pieceReviewWatcherEvent(s.p, snap))
       case s: FsmState.PieceAwaitingMerge =>
         (snap.state, snap.mergeCommit, snap.mergedAt) match
           case (PrState.Merged, Some(mc), Some(ma)) =>
-            IO.realTimeInstant.map(now => FsmEvent.Merged(s.p, s.prNumber, mc, ma, now))
-          case _ => IO.pure(FsmEvent.PrSnapshotUpdated(s.p, snap))
+            IO.realTimeInstant.map(now => Some(FsmEvent.Merged(s.p, s.prNumber, mc, ma, now)))
+          case _ => IO.pure(Some(FsmEvent.PrSnapshotUpdated(s.p, snap)))
       case other =>
         IO.raiseError(new IllegalStateException(s"PRWatcher source selected for non-watcher state $other"))
 
@@ -673,6 +678,18 @@ object Orchestrator:
     case _: ResumeHint.ResolveLocalImplementationChanges => true
     case _: ResumeHint.ApplyPlanningUpdate => true
     case _ => false
+
+  /** §11.5 — a human override on a piece PR: a `CHANGES_REQUESTED` review decision or any unseen (non-bot) comment.
+    * Forge's own reviewer verdict does not flow through the watcher; it arrives via the reviewer source.
+    */
+  def isHumanOverride(snap: io.forge.core.pr.PrSnapshot): Boolean =
+    snap.reviewDecision.contains(ReviewDecision.ChangesRequested) || snap.unseenComments.nonEmpty
+
+  /** gap #13: the PieceAwaitingReview watcher emits ONLY on a human override, so a no-op poll cannot win the source
+    * race and cancel the in-flight reviewer one-shot (which is the primary verdict source). `None` ⇒ keep polling.
+    */
+  def pieceReviewWatcherEvent(p: PieceId, snap: io.forge.core.pr.PrSnapshot): Option[FsmEvent] =
+    Option.when(isHumanOverride(snap))(FsmEvent.PrSnapshotUpdated(p, snap))
 
   /** Result of [[Orchestrator.applyUserCommand]] (Task 1.4.13 M5 / M8). */
   enum CommandOutcome:
