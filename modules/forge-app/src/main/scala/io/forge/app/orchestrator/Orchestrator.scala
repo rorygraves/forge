@@ -183,7 +183,8 @@ final class Orchestrator(
   ): IO[Feature] =
     if isLoopTerminal(feature.state) then IO.pure(feature)
     else
-      val entry = if justEntered then runEntryHook(feature, driverRef) else IO.pure(Option.empty[FsmEvent])
+      val entry =
+        if justEntered then runEntryHook(feature, driverRef, totalsRef) else IO.pure(Option.empty[FsmEvent])
       entry.flatMap {
         // An entry-hook-synthesized event: apply, persist, then re-run the entry hook (steps chain).
         case Some(event) =>
@@ -222,15 +223,19 @@ final class Orchestrator(
   // ---------------------------------------------------------------------------
 
   /** Returns `Some(event)` to apply + re-enter the entry hook, or `None` to fall through to the source race. */
-  private def runEntryHook(feature: Feature, driverRef: Ref[IO, Option[ActiveSession]]): IO[Option[FsmEvent]] =
+  private def runEntryHook(
+      feature: Feature,
+      driverRef: Ref[IO, Option[ActiveSession]],
+      totalsRef: Ref[IO, CostTotals]
+  ): IO[Option[FsmEvent]] =
     feature.state match
       case FsmState.Drafting =>
-        sideEffects.launchSpec(feature).flatMap(as => store(driverRef, as).as(Some(spawned(as, None))))
+        sideEffects.launchSpec(feature).flatMap(as => store(driverRef, totalsRef, as).as(Some(spawned(as, None))))
 
       case FsmState.InteractiveSpec =>
         driverRef.get.flatMap {
           case Some(_) => IO.pure(None)
-          case None => sideEffects.launchSpec(feature).flatMap(as => store(driverRef, as).as(None))
+          case None => sideEffects.launchSpec(feature).flatMap(as => store(driverRef, totalsRef, as).as(None))
         }
 
       case s: FsmState.DesignReviewing =>
@@ -239,7 +244,7 @@ final class Orchestrator(
           case None if s.round > 1 =>
             sideEffects
               .resumeDesignRevision(feature, s.round)
-              .flatMap(as => store(driverRef, as).as(Some(resumed(as, feature.designSessionId, None))))
+              .flatMap(as => store(driverRef, totalsRef, as).as(Some(resumed(as, feature.designSessionId, None))))
           case _ => IO.pure(None)
         }
 
@@ -248,7 +253,7 @@ final class Orchestrator(
           case None =>
             sideEffects
               .resumeDesignFeedback(feature, s.prNumber, s.round)
-              .flatMap(as => store(driverRef, as).as(Some(resumed(as, feature.designSessionId, None))))
+              .flatMap(as => store(driverRef, totalsRef, as).as(Some(resumed(as, feature.designSessionId, None))))
           case Some(_) => IO.pure(None)
         }
 
@@ -263,36 +268,51 @@ final class Orchestrator(
         else
           driverRef.get.flatMap {
             case None =>
-              sideEffects
-                .launchImplement(feature, s.p)
-                .flatMap(as => store(driverRef, as).as(Some(spawned(as, Some(s.p)))))
+              // A new piece's first driver turn: reset the per-piece cost accumulator (§6 / §12 — `piece` resets on
+              // the next `PieceImplementing`). A fix-up turn (PieceFixingUp/CiFailed/ReviewFailed) is the *same* piece,
+              // so it does NOT reset `piece` — only `store` resets `turn` there.
+              totalsRef.update(_.copy(piece = BigDecimal(0))) >>
+                sideEffects
+                  .launchImplement(feature, s.p)
+                  .flatMap(as => store(driverRef, totalsRef, as).as(Some(spawned(as, Some(s.p)))))
             case Some(_) => IO.pure(None)
           }
 
       case s: FsmState.PieceCiFailed =>
         sideEffects
           .launchFixup(feature, s.p, s.attempt)
-          .flatMap(as => store(driverRef, as).as(Some(spawned(as, Some(s.p)))))
+          .flatMap(as => store(driverRef, totalsRef, as).as(Some(spawned(as, Some(s.p)))))
 
       case s: FsmState.PieceReviewFailed =>
         sideEffects
           .launchFixup(feature, s.p, s.attempt)
-          .flatMap(as => store(driverRef, as).as(Some(spawned(as, Some(s.p)))))
+          .flatMap(as => store(driverRef, totalsRef, as).as(Some(spawned(as, Some(s.p)))))
 
       case s: FsmState.PieceFixingUp =>
         driverRef.get.flatMap {
           case None =>
             sideEffects
               .launchFixup(feature, s.p, s.attempt)
-              .flatMap(as => store(driverRef, as).as(Some(spawned(as, Some(s.p)))))
+              .flatMap(as => store(driverRef, totalsRef, as).as(Some(spawned(as, Some(s.p)))))
           case Some(_) => IO.pure(None)
         }
 
       // Watcher / reviewer / user-Q&A states have no entry side effect: fall through to the race.
       case _ => IO.pure(None)
 
-  private def store(driverRef: Ref[IO, Option[ActiveSession]], as: ActiveSession): IO[Unit] =
-    driverRef.set(Some(as))
+  /** A driver turn begins here: store the freshly spawned/resumed session and reset the per-turn cost accumulator to
+    * zero. The orchestrator owns this reset per the [[io.forge.app.monitor.SessionMonitor]] contract — the monitor only
+    * ever *adds* each `CostUpdate` delta. Without the reset, `CostTotals.turn` accrues across turns and the §12
+    * per-turn cap (`maxTurnCostUsd`) effectively checks cumulative feature spend rather than this turn's. Per-piece
+    * reset is the caller's responsibility (only a *new* piece's first turn resets `piece`; a fix-up turn on the same
+    * piece keeps accumulating).
+    */
+  private def store(
+      driverRef: Ref[IO, Option[ActiveSession]],
+      totalsRef: Ref[IO, CostTotals],
+      as: ActiveSession
+  ): IO[Unit] =
+    driverRef.set(Some(as)) >> totalsRef.update(_.copy(turn = BigDecimal(0)))
 
   // ---------------------------------------------------------------------------
   // Sub-phase II — source race

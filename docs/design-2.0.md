@@ -272,7 +272,18 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
   shape — totals-only vs full §19) and **D2** (latent bug: `CostTotals.turn`
   / `.piece` are never reset by the orchestrator despite the
   `SessionMonitor` contract assigning it the reset, so the per-turn cost
-  cap currently checks cumulative spend). No code landed yet.
+  cap currently checks cumulative spend).
+- 2026-05-31 — **D2 fixed standalone** (ahead of the rest of Task 2.0.1).
+  `Orchestrator.store` now resets `CostTotals.turn` to zero at every
+  driver-turn boundary (spawn/resume), and the `PieceImplementing` entry
+  hook resets `CostTotals.piece` on a new piece's first turn (a same-piece
+  fix-up keeps the per-piece total). This corrects the §12 per-turn cap so
+  it checks per-turn rather than cumulative spend. New
+  `OrchestratorCostScopeResetSuite` (2 tests): a two-piece run proves both
+  scopes reset on each new piece (and no false `TurnBudgetBreached`), and an
+  implement→CI-fail→fix-up run proves the same-piece fix-up carries `piece`
+  while resetting `turn`. `forge-app` 331 tests green. The `cost.update`
+  writer half of Task 2.0.1 (D1) is still pending.
 
 ## 4. Carry-forward (inherited + new)
 
@@ -303,9 +314,12 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
   `{ provider, model, inputTokens, outputTokens, usd, ... }`. Settle while
   implementing Task 2.0.1; if it changes the §19 contract, document in the
   next-revision spec.
-- **D2 — turn/piece cost-total reset ownership.** The fix lands in
-  Task 2.0.1; if it changes the §12 cap semantics in a way the spec
-  describes differently, file a design-rationale note rather than editing
+- **D2 — turn/piece cost-total reset ownership.** ✅ Fixed standalone
+  2026-05-31 (`Orchestrator.store` resets `turn`; `PieceImplementing` entry
+  resets `piece` on a new piece), with `OrchestratorCostScopeResetSuite`.
+  This restores the §12 per-turn cap to a true per-turn check. At
+  Task 2.0.7, confirm whether the spec describes the cap semantics
+  differently and, if so, file a design-rationale note rather than editing
   the spec in place.
 - **D3 — resume-from-NHI scope.** Task 2.0.6 may exceed a contained change;
   any split rolls forward with a recorded disposition.
