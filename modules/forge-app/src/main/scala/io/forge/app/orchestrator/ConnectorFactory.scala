@@ -46,7 +46,8 @@ object ConnectorFactory:
             reviewerModel = Some(ClaudeReviewerModel),
             reviewerTimeout = ReviewerCap,
             driverPermissionMode = config.claude.permissionMode,
-            driverAllowedTools = config.claude.allowedTools
+            driverAllowedTools = config.claude.allowedTools,
+            driverDisallowedTools = config.claude.disallowedTools
           )
         )
       case Mode.CodexDriver =>

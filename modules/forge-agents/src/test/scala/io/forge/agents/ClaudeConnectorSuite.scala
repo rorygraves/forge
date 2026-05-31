@@ -65,8 +65,24 @@ class ClaudeConnectorSuite extends munit.FunSuite:
       ClaudeConnector.headlessArgv("claude", os.Path("/tmp/impl.md"), "do it", "acceptEdits", Vector("Edit"))
     assert(headless.containsSlice(List("--permission-mode", "acceptEdits")), clue = headless)
     assert(headless.containsSlice(List("--allowedTools", "Edit")), clue = headless)
+    // disallowedTools (e.g. the `Task` sub-agent spawner) is appended when supplied (S4-5: a focused driver must not
+    // fan out into sub-agents that re-scan the repo + run the heavy build).
+    val withDisallow = ClaudeConnector.headlessArgv(
+      "claude",
+      os.Path("/tmp/impl.md"),
+      "do it",
+      "acceptEdits",
+      Vector("Edit"),
+      Vector("Task")
+    )
+    assert(withDisallow.containsSlice(List("--disallowedTools", "Task")), clue = withDisallow)
+    assertEquals(
+      ClaudeConnector.driverPermissionFlags("default", Vector.empty, Vector("Task")).take(1),
+      List("--disallowedTools")
+    )
     // Default-arg call (used by existing tests) stays flag-free.
     assert(!ClaudeConnector.streamingSpecArgv("claude", os.Path("/tmp/spec.md")).contains("--permission-mode"))
+    assert(!ClaudeConnector.streamingSpecArgv("claude", os.Path("/tmp/spec.md")).contains("--disallowedTools"))
 
   test("encodeUserMessageJson wraps text in the wire shape `--input-format stream-json` expects"):
     val frame = ClaudeConnector.encodeUserMessageJson("hello")

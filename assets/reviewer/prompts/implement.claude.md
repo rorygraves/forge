@@ -13,6 +13,10 @@ piece's acceptance criteria pass.
 ## How to work
 
 - Implement only what this piece requires. Do not start later pieces.
+- **Work directly and narrowly.** The piece spec names the exact files and
+  changes. Read those files (plus `design.md` for context) and edit them — do
+  **not** scan the whole repo or spawn sub-agents (the `Task` tool is
+  disabled). This is a small, well-specified change, not an exploration.
 - Make the acceptance criteria pass. Add or update tests as the spec asks.
 - Match the surrounding code's style, naming, and structure.
 - **Do not run the project's full build or test suite.** Forge's CI gate
