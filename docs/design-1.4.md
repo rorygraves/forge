@@ -3551,6 +3551,23 @@ expected-vs-actual.
   Wiring it is a thin reuse of `Reconcile.parse` + `DocSync.renderManifest`
   at the §11.0 precondition layer. Reconcile at Task 1.4.17 (decide:
   wire in 1.4b polish vs defer to Phase 2).
+- **S4-11 — run observability is not captured (the MVP gate proved Forge
+  works but can't measure itself).** Surfaced post-Task-1.4.16 reviewing the
+  szork run. The action log holds `fsm.transition` + timestamps only, and the
+  timestamps conflate Forge-working / waiting-on-human / operator-relaunch time.
+  Token counts + per-turn cost flow through the orchestrator
+  (`ClaudeEventParser` → `AgentEvent.CostUpdate`, consumed by
+  `RealSessionMonitor` for the cost cap) but are **discarded** afterwards: the
+  §19 `cost.update` action is fully specified and replayable
+  (`Replay.applyCostUpdate` `Replay.scala:333`, `CostTotals` on `Feature`) yet
+  **no app-layer code ever writes it** (the szork run's log has zero cost
+  entries — the cost-projection subsystem is unfed). Per-phase duration
+  (`AgentEvent.Result.durationMs`) is parsed and dropped; `num_turns` is not
+  modelled; driver-session transcripts are not captured (only reviewers have the
+  opt-in `FORGE_REVIEWER_RAW_DUMP_DIR`). **Disposition: deferred to Phase 2 as
+  Slice 2.0 (roadmap §3.1, "instrument before optimise") — six tiered items.**
+  Resolved as a roadmap slice, not in 1.4; Task 1.4.17 records the deferral.
+  Design-rationale **B6** carries the "spec'd-but-unwired" note.
 
 ## 5. Cross-references
 

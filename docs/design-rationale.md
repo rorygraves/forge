@@ -57,6 +57,13 @@
 **Rejected:** Logging full Bash commands by default. Quickly leaks secrets and dominates log size.
 **In v1.1:** §19 (`<actor>.tool_use` — paths/command summaries only).
 
+### B6. `cost.update` is specified and replayable but unwired in v1 (deferred to Slice 2.0)
+**Status:** Deferred decision, surfaced post-Task-1.4.16 (the MVP-gate run). Carry-forward S4-11; roadmap Slice 2.0 (§3.1).
+**Finding:** §19 defines a `cost.update` action and §6 a `CostTotals` projection on `Feature`. The replay path is complete (`Replay.applyCostUpdate`, `Replay.scala:333`) and exercised by tests. But **no app-layer code drafts a `cost.update` action** — token counts + per-turn cost are parsed from the CLI (`ClaudeEventParser` → `AgentEvent.CostUpdate`), consumed by `RealSessionMonitor` for the §12 cost-cap check, and then discarded. The szork run's action log has zero cost entries, so the entire cost-projection subsystem is dead infrastructure in v1. Same shape as the §8 CI gate before Task 1.4.10b: spec'd, replay-ready, never plugged in.
+**Why deferred, not fixed in 1.4:** the MVP gate's job was to prove the lifecycle runs end-to-end, which it did. Observability is a distinct workstream (cost writer + timing event + `forge stats` + work-vs-wait marking + transcript capture + clean resume) that Phase 2 needs *before* prompt-iteration and the TUI, both of which consume the data. Folding it into the just-passed gate would muddy a clean Phase-1 close.
+**Action required:** Slice 2.0 Tier-1 wires the `cost.update` writer (a few lines — draft from the `CostUpdate` the monitor already receives) and adds a `session.complete` timing event. Until then per-run cost/latency is only observable live from the CLI, not from the committed log.
+**In the spec today:** §19 (`cost.update` payload), §6 (`Feature.cost` / `CostTotals`), §12 (cost caps — the only live consumer of the cost stream).
+
 ---
 
 ## Manifest & decomposition

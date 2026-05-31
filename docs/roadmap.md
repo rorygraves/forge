@@ -311,13 +311,17 @@ Slice 5.**
 - **Targeted polish (§2.5)** lands as part of Slice 1.4b, not as a
   separate slice.
 
-**MVP gate (Slice 1.4b exit, Phase 1 exit gate):** drive a small, concrete,
-low-variance feature through Forge end-to-end. Pick a contained
-target — a small `forge-git` helper, a narrow `forge-app`
-reporting/replay feature, or one of the v1.3 spec-text corrections
-with tests. **Do not** pick "have Forge build its own Slice 2.1 (TUI)" —
-TUI is a subjective UX-iteration loop, the wrong shape for a first
-self-hosted run.
+**MVP gate (Slice 1.4b exit, Phase 1 exit gate): ✅ PASSED 2026-05-31.**
+Drove the feature `image-creds-dedup` end-to-end through Forge against the
+external test repo `llm4s/szork` (real GitHub Actions CI + branch protection),
+`forge new` → `forge spec` → `forge run` → `FeatureDone`, both PRs merged. The
+full §11 lifecycle ran, including the §8 CI gate on both paths (fail→fix-up→
+green). The run surfaced 13 integration gaps (12 fixed, gap #7 deferred) and a
+class of **observability gaps now captured as Slice 2.0** (§3.1) — Forge cannot
+yet measure its own cost/latency. Task 1.4.16 audit trail in
+[`design-1.4.md`](design-1.4.md); findings in
+[`slice-4/mvp-friction.md`](slice-4/mvp-friction.md). The formal Slice 1.4
+close-out (Task 1.4.17) flips the §2.4 bullets `[~]` → `[x]`.
 
 ### 2.5 Targeted polish in Phase 1
 
@@ -372,20 +376,77 @@ for any new feature on this repo.
 
 Maps to design §17 slice 5 plus the polish that only real use surfaces.
 
-### 3.1 Slice 2.1 — TUI
+### 3.1 Slice 2.0 — Run observability (instrument before optimise)
+
+**Why this is first.** The Phase-1 MVP-gate run (Task 1.4.16) proved Forge
+*works* but also proved we cannot *measure* it. The action log captures FSM
+transitions + timestamps only, and the timestamps conflate three different
+things — Forge working, Forge waiting on a human, and the operator stopping the
+run to patch code and relaunch. Token counts and per-turn cost flow through the
+orchestrator at runtime (`ClaudeEventParser` → `AgentEvent.CostUpdate`) but are
+consumed by the cost-cap check and then **discarded**: the §19 `cost.update`
+action is fully specified and replayable (`Replay.applyCostUpdate`, `CostTotals`
+on `Feature`) yet **no app-layer code ever writes it** — the szork run's log has
+zero cost entries, so the entire cost-projection subsystem is dead
+infrastructure. The one hard efficiency datum from the run — gap #10's 2.18M
+tokens / 21 min / $9.56 implement turn — was read off the live CLI and is now
+unrecoverable. Phase 2's exit criterion ("you'd choose Forge over running Claude
+directly") is unmeasurable until this is fixed, and the prompt-iteration (§3.3)
+and TUI (§3.2) below both *consume* this data — so observability lands first.
+Findings: [`slice-4/mvp-friction.md`](slice-4/mvp-friction.md); evidence:
+[`slice-4/mvp-run/image-creds-dedup/`](slice-4/mvp-run/image-creds-dedup/).
+
+**Tier 1 — close the capture gap (the machinery already exists):**
+
+- [ ] **Wire the `cost.update` writer.** Draft a `cost.update` action from each
+  `AgentEvent.CostUpdate` the monitor already receives; `Replay.applyCostUpdate`
+  (`Replay.scala:333`) + `CostTotals` (`Cost.scala`) already project it. This is
+  the single highest-value fix — without it the cost subsystem is unfed.
+- [ ] **`session.complete` audit event** carrying `{phase, piece, durationMs,
+  model, turnCostUsd, success}`, built from the `AgentEvent.Result(success,
+  durationMs)` the parser already produces (`AgentEvent.scala:36`). Closes the
+  per-phase timing + attribution gap in one event. (Optionally model `num_turns`,
+  which is currently not captured at all.)
+
+**Tier 2 — make the data answerable:**
+
+- [ ] **`forge stats <feature>`** — fold the log into a per-phase cost /
+  wall-clock / turn-count breakdown. Turns the captured data into a direct answer
+  to "did this run efficiently".
+- [ ] **Separate working-time from wait-time** — stamp a marker when the loop
+  blocks on a human (`DesignAwaitingMerge`, `*NeedsHumanInput`,
+  `PieceAwaitingMerge`) so a 35-min "waiting for the operator to merge" no longer
+  reads as Forge being slow.
+
+**Tier 3 — debuggability & the dev loop itself:**
+
+- [ ] **Generalise the reviewer raw-dump to driver sessions** — an opt-in
+  per-session NDJSON sink (today only reviewers have `FORGE_REVIEWER_RAW_DUMP_DIR`,
+  `ClaudeConnector.scala:419`). Makes "what did the implement driver actually do
+  for $9.56" answerable after the fact, not only live.
+- [ ] **Clean resume-from-NHI that preserves history.** The truncate-and-replay
+  recovery used ~13× during the MVP run corrupts the timing record (seq 0/1 share
+  an identical timestamp because replay rewrites early transitions in a batch) and
+  re-pays full driver exploration on each relaunch (gap #10's compounding cost). A
+  resume that doesn't rewrite the log fixes both.
+
+**Exit:** a completed run's cost, latency, and turn-count are reconstructable
+from the committed log alone, broken down per phase, via `forge stats`.
+
+### 3.2 Slice 2.1 — TUI
 
 Termflow + Elm architecture. Panes per §3.1: status, active (streaming /
 log tail / Q&A / idle). Subjective; iterate based on what feels wrong
 during real use.
 
-### 3.2 Prompt iteration
+### 3.3 Prompt iteration
 
 The four role prompts (driver-spec, driver-implement, reviewer-design,
 reviewer-code) ship with v1 placeholders. After ~5–10 real features:
 revise based on observed failure modes, not on lab fixtures. Track
 prompt diffs in git; they're load-bearing for behaviour.
 
-### 3.3 OSS-readiness scaffolding
+### 3.4 OSS-readiness scaffolding
 
 - README that's actually useful to a stranger.
 - Config templates committed (`.forge/config.example.json`).

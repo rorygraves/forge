@@ -100,6 +100,17 @@ Commits below are on branch `run-enablement-asset-bootstrap` unless noted.
 
 ## Phase-2 / v1.3 carry-forwards
 
+- **Run observability — now Slice 2.0** (roadmap §3.1, "instrument before
+  optimise"). The run proved Forge works but can't *measure* itself: the action
+  log holds FSM transitions + timestamps only (and the timestamps conflate
+  working / waiting-on-human / operator-relaunch time); token counts + per-turn
+  cost flow through the orchestrator (`ClaudeEventParser` → `AgentEvent.CostUpdate`)
+  but are dropped after the cost-cap check — `cost.update` is fully spec'd (§19)
+  and replayable (`Replay.applyCostUpdate`, `CostTotals`) yet **never written**
+  (zero cost entries in this run's log). gap #10's $9.56/2.18M-token figure was
+  read live and is now unrecoverable. Six tiered items in the roadmap slice
+  (wire `cost.update`, `session.complete` timing event, `forge stats`,
+  work-vs-wait marking, driver transcript dump, clean resume-from-NHI).
 - **Gap #7** (designSessionId durability) — log the spec session id so
   `RebuildState`/`forge run` can reconstruct it; required for §11.3 to survive
   a rebuild.
