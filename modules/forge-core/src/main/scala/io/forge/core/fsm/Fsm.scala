@@ -1060,7 +1060,36 @@ object Fsm:
       "to" -> upickle.default.writeJs[FsmState](to)
     )
     extras.foreach { case (k, v) => payload(k) = v }
+    // Slice 2.0 Task 2.0.4 — bracket human-wait intervals in the committed timeline. Entering a human-blocking state
+    // (`humanWaitKind`) stamps an `enter` marker carrying the wait kind; leaving one stamps a `leave` marker. A direct
+    // blocking→blocking switch records the new `enter` (the prior wait is closed by `forge stats` on this same
+    // transition). `forge stats` (Task 2.0.3) pairs the markers to separate wall-clock spent waiting on the operator
+    // from Forge working-time (design-2.0 §0 #4), so a 35-minute "waiting for the merge" no longer reads as Forge
+    // being slow.
+    (humanWaitKind(to), humanWaitKind(from)) match
+      case (Some(enterKind), _) =>
+        payload("wait") = ujson.Obj("edge" -> ujson.Str("enter"), "kind" -> ujson.Str(enterKind))
+      case (None, Some(leaveKind)) =>
+        payload("wait") = ujson.Obj("edge" -> ujson.Str("leave"), "kind" -> ujson.Str(leaveKind))
+      case (None, None) => ()
     ActionDraft(feature.id, piece, actor, role, "fsm.transition", payload)
+
+  /** §19 / Slice 2.0 Task 2.0.4 — classify a state as a human-blocking wait, returning its wait-kind tag (or `None`
+    * when the loop is doing work, not parked on the operator). These are the states where the loop blocks on a human:
+    * answering a reviewer's blocking questions, merging the design/piece PR, or running `forge resume`. The set is
+    * design-2.0 §0 #4: the two design waits, the piece-merge wait, and the NHI family. The tag is the contract carried
+    * on the `fsm.transition` `wait` marker and consumed by `StatsReport` — keep it stable across revisions.
+    *
+    * Deliberately excluded: `PieceAwaitingCi` / `PieceAwaitingReview` (automated CI / reviewer, not a human block) and
+    * `PlanningUpdate` (a human approval, but outside the §0 #4 marker set — fold it in here if a later slice scopes
+    * it).
+    */
+  private def humanWaitKind(state: FsmState): Option[String] = state match
+    case _: FsmState.DesignNeedsHumanInput => Some("design-input")
+    case _: FsmState.DesignAwaitingMerge => Some("design-merge")
+    case _: FsmState.PieceAwaitingMerge => Some("piece-merge")
+    case _: FsmState.NeedsHumanIntervention => Some("intervention")
+    case _ => None
 
   private def auditPieceMergedDraft(
       feature: Feature,

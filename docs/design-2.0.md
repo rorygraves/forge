@@ -335,6 +335,40 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
   cost/wall-clock/turn-count answerable from the committed log alone).
   **Tier 2 next item: Task 2.0.4 (work-vs-wait markers + the stats wait
   column).**
+- 2026-05-31 — **Task 2.0.4 work-vs-wait markers landed; Tier 2 complete.**
+  Chose the **"flag on the existing transition payloads"** option (design-2.0
+  §1 Task 2.0.4's lighter of the two sanctioned representations) over a
+  dedicated `audit.*` action: `Fsm.fsmTransitionDraft` now stamps a `wait`
+  marker (`{ edge: "enter"|"leave", kind }`) on the `fsm.transition` payload
+  whenever a transition enters/leaves a human-blocking state, classified by a
+  single new `Fsm.humanWaitKind` (the §0 #4 set: `DesignNeedsHumanInput` →
+  `design-input`, `DesignAwaitingMerge` → `design-merge`, `PieceAwaitingMerge`
+  → `piece-merge`, `NeedsHumanIntervention` → `intervention`). **No
+  orchestrator or write-path change** — the markers ride the existing
+  `fsm.transition` drafts already persisted by `applyAndPersist`, and `Replay`
+  ignores the extra payload field (round-trip safe, verified by the full
+  forge-core suite). `StatsReport.foldWaits` pairs each `enter` marker with the
+  **next** transition (whatever it is) to recover the interval — robust to
+  self-poll transitions and a missing `leave` edge; a wait still open at
+  end-of-log (process stopped mid-wait) is reported as "end unknown" rather
+  than mis-attributed an unbounded duration. `render` adds a distinct **"waiting
+  (human)"** breakdown below the totals (per-kind), keeping the per-phase table
+  as pure Forge *working* time. **Render choice:** waits are a separate section,
+  not a per-phase column, because they fall *between* driver sessions, not
+  inside any one phase — so subtracting them from a SessionPhase row would
+  mis-attribute (the per-phase rows are already session-duration sums =
+  working-only, so there is nothing to subtract). This satisfies exit #4
+  ("working-time distinguishable from wait-time") more truthfully than a
+  column. New `FsmWaitMarkerSuite` (8 tests: enter+leave markers for all four
+  blocking states, plus a working→working transition carrying no marker) pins
+  the write side; `StatsReportSuite` +8 (fold bracketing, close-on-next-
+  transition without an explicit leave, distinct-kind sum, open-interval
+  degradation, pre-marker no-op; render breakdown + omit-when-no-wait +
+  open-wait note). `forge-core` 385, `forge-app` 353 (full suite green);
+  `forge-it` compiles. **Exit criterion #4 met; Tier 1 + Tier 2 complete —
+  the slice exit gate (Tier 1 + Tier 2) is satisfied.** Remaining Tier-3 items
+  (Tasks 2.0.5 / 2.0.6) are debuggability and may individually roll forward at
+  close-out (Task 2.0.7).
 
 ## 4. Carry-forward (inherited + new)
 
@@ -380,6 +414,18 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
   the spec in place.
 - **D3 — resume-from-NHI scope.** Task 2.0.6 may exceed a contained change;
   any split rolls forward with a recorded disposition.
+- **D4 — human-wait marker representation.** ✅ Resolved 2026-05-31:
+  **flag on the existing `fsm.transition` payload** (not a dedicated `audit.*`
+  action). Entering/leaving a human-blocking state stamps
+  `wait: { edge: "enter"|"leave", kind }` on the transition; `kind` ∈
+  `{ design-input, design-merge, piece-merge, intervention }` (the
+  `Fsm.humanWaitKind` set). §19 does not yet document this optional
+  `fsm.transition` field — file it in the next-revision spec
+  (`forge-design-1.4.md`) at Task 2.0.7 (do **not** edit the live spec
+  `forge-design-1.3.md` in place), alongside the `session.complete` kind from
+  D1. Note the deliberate exclusions (`PieceAwaitingCi` / `PieceAwaitingReview`
+  = automated, not a human block; `PlanningUpdate` = a human approval but
+  outside the §0 #4 set) so a later slice can decide whether to widen the set.
 
 ## 5. Cross-references
 

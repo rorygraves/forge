@@ -79,6 +79,14 @@ class StatsReportSuite extends munit.FunSuite:
   private def transition(): Action =
     Action(nextSeq(), Instant.parse("2026-05-31T10:00:00Z"), featureId, None, None, None, "fsm.transition", ujson.Obj())
 
+  /** An `fsm.transition` at `atTs`, optionally carrying a wait marker (`wait` enter/leave). Task 2.0.4. */
+  private def transitionAt(atTs: String, wait: Option[(String, String)] = None): Action =
+    val base = ujson.Obj("from" -> ujson.Str("X"), "to" -> ujson.Str("Y"))
+    wait.foreach { case (edge, kind) =>
+      base("wait") = ujson.Obj("edge" -> ujson.Str(edge), "kind" -> ujson.Str(kind))
+    }
+    Action(nextSeq(), Instant.parse(atTs), featureId, None, None, None, "fsm.transition", base)
+
   // --- fold ----------------------------------------------------------------
 
   test("fold aggregates turns / wall-clock / cost per phase and a feature total"):
@@ -140,6 +148,56 @@ class StatsReportSuite extends munit.FunSuite:
     val summary = StatsReport.fold(Vector(bogus))
     assert(summary.phases.isEmpty)
 
+  // --- wait fold (Task 2.0.4) ----------------------------------------------
+
+  test("foldWaits brackets a closed wait interval into its kind (enter → next transition)"):
+    val actions = Vector(
+      transitionAt("2026-05-31T10:00:00Z", wait = Some("enter" -> "design-merge")),
+      transitionAt("2026-05-31T10:30:00Z", wait = Some("leave" -> "design-merge"))
+    )
+    val summary = StatsReport.fold(actions)
+    assertEquals(summary.waitMsByKind.get("design-merge"), Some(1800000L))
+    assertEquals(summary.totalWaitMs, 1800000L)
+    assertEquals(summary.unclosedWaitKind, None)
+
+  test("foldWaits closes a wait on the next transition even without an explicit leave marker"):
+    // enter piece-merge, then a plain (unmarked) transition out — the wait still closes at that transition.
+    val actions = Vector(
+      transitionAt("2026-05-31T10:00:00Z", wait = Some("enter" -> "piece-merge")),
+      transitionAt("2026-05-31T10:05:00Z")
+    )
+    val summary = StatsReport.fold(actions)
+    assertEquals(summary.waitMsByKind.get("piece-merge"), Some(300000L))
+    assertEquals(summary.unclosedWaitKind, None)
+
+  test("foldWaits sums distinct wait kinds across a run"):
+    val actions = Vector(
+      transitionAt("2026-05-31T10:00:00Z", wait = Some("enter" -> "design-merge")),
+      transitionAt("2026-05-31T10:10:00Z", wait = Some("leave" -> "design-merge")),
+      transitionAt("2026-05-31T10:20:00Z", wait = Some("enter" -> "piece-merge")),
+      transitionAt("2026-05-31T10:25:00Z", wait = Some("leave" -> "piece-merge"))
+    )
+    val summary = StatsReport.fold(actions)
+    assertEquals(summary.waitMsByKind.get("design-merge"), Some(600000L))
+    assertEquals(summary.waitMsByKind.get("piece-merge"), Some(300000L))
+    assertEquals(summary.totalWaitMs, 900000L)
+
+  test("foldWaits flags an interval still open at end of log (crash mid-wait) rather than guessing"):
+    val actions = Vector(
+      transitionAt("2026-05-31T10:00:00Z", wait = Some("enter" -> "intervention"))
+    )
+    val waits = StatsReport.foldWaits(actions)
+    assertEquals(waits.open.map(_._2), Some("intervention"))
+    assertEquals(waits.byKind, Map.empty[String, Long])
+    assertEquals(StatsReport.fold(actions).unclosedWaitKind, Some("intervention"))
+
+  test("fold over a pre-marker log records no waits"):
+    val summary = StatsReport.fold(
+      Vector(sessionComplete(SessionPhase.Spec, None, Some(5000), BigDecimal("1.5")), transition())
+    )
+    assert(summary.waitMsByKind.isEmpty)
+    assertEquals(summary.unclosedWaitKind, None)
+
   // --- render --------------------------------------------------------------
 
   test("render shows a per-phase table with a total row"):
@@ -168,6 +226,35 @@ class StatsReportSuite extends munit.FunSuite:
     val text = StatsReport.render(featureId, summary)
     assert(text.contains("no recorded duration"), text)
     assert(text.contains("cost unavailable"), text)
+
+  test("render shows a waiting (human) breakdown distinct from the working total"):
+    val summary = StatsReport.fold(
+      Vector(
+        sessionComplete(SessionPhase.Spec, None, Some(5000), BigDecimal("1.50")),
+        transitionAt("2026-05-31T10:00:00Z", wait = Some("enter" -> "design-merge")),
+        transitionAt("2026-05-31T10:30:00Z", wait = Some("leave" -> "design-merge"))
+      )
+    )
+    val text = StatsReport.render(featureId, summary)
+    assert(text.contains("waiting (human)"), text)
+    assert(text.contains("design merge"), text)
+    assert(text.contains("30m 0s"), text)
+
+  test("render of a run that never waited omits the waiting block"):
+    val summary = StatsReport.fold(Vector(sessionComplete(SessionPhase.Spec, None, Some(5000), BigDecimal("1.50"))))
+    val text = StatsReport.render(featureId, summary)
+    assert(!text.contains("waiting (human)"), text)
+
+  test("render notes an open wait (process stopped mid-wait)"):
+    val summary = StatsReport.fold(
+      Vector(
+        sessionComplete(SessionPhase.Spec, None, Some(5000), BigDecimal("1.50")),
+        transitionAt("2026-05-31T10:00:00Z", wait = Some("enter" -> "intervention"))
+      )
+    )
+    val text = StatsReport.render(featureId, summary)
+    assert(text.contains("still open at the end of the log"), text)
+    assert(text.contains("intervention"), text)
 
   // --- handler path --------------------------------------------------------
 

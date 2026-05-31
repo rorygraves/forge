@@ -30,8 +30,16 @@ import upickle.default as upickle
   * kind: the report degrades to "no session data recorded" rather than crashing (design-2.0 §1 Task 2.0.3 "an empty /
   * partial log degrades gracefully").
   *
-  * The working-vs-waiting split (design-2.0 §0 #4) is Task 2.0.4's wait-markers; when those land, [[fold]] gains a wait
-  * column. This task ships the per-phase working-time table it builds on.
+  * **Working-vs-waiting split (design-2.0 §0 #4, Task 2.0.4).** The per-phase table above is Forge *working* time (the
+  * sum of driver-session durations). Time the loop spends parked on the operator — answering blocking questions,
+  * merging the design/piece PR, running `forge resume` — is bracketed separately: every `fsm.transition` into one of
+  * the human-blocking states (`DesignNeedsHumanInput` / `DesignAwaitingMerge` / `PieceAwaitingMerge` /
+  * `NeedsHumanIntervention`) carries a `wait` marker (`Fsm.humanWaitKind`), and [[foldWaits]] pairs each enter marker
+  * with the next transition to recover the wait interval. The result renders as a distinct "waiting (human)" breakdown
+  * below the totals, so a 35-minute "waiting for the operator to merge" reads as waiting, not Forge being slow. Waits
+  * are reported in their own section rather than subtracted from a phase row because they fall *between* driver
+  * sessions, not inside any single phase's work. A wait still open at the end of the log (the process crashed mid-wait)
+  * degrades to "end unknown" rather than mis-attributing an unbounded interval.
   */
 object StatsReport:
 
@@ -57,7 +65,29 @@ object StatsReport:
       /** True if any cost was captured at all (`cost.update` present, or a non-zero `turnCostUsd`). Drives the "cost:
         * unavailable" degradation for pre-observability logs.
         */
-      costAvailable: Boolean
+      costAvailable: Boolean,
+      /** Human-wait time, in milliseconds, attributed by wait kind (Task 2.0.4). Empty for a run that never blocked on
+        * the operator (or a pre-marker log). Keyed by the `Fsm.humanWaitKind` tag; ordered for render by [[WaitOrder]].
+        */
+      waitMsByKind: Map[String, Long],
+      /** The wait kind of an interval still open at the end of the log — the loop was parked on a human when the record
+        * ended (process crashed / killed mid-wait). `Some` ⇒ render an "end unknown" caveat rather than an interval.
+        */
+      unclosedWaitKind: Option[String]
+  ):
+    /** Total bracketed (closed) human-wait across all kinds. Excludes any [[unclosedWaitKind]] interval (no end ⇒ no
+      * measurable duration).
+      */
+    def totalWaitMs: Long = waitMsByKind.values.sum
+
+  /** Render order + human label for the human-wait kinds (the `Fsm.humanWaitKind` tags), lifecycle order. Any tag not
+    * listed here still renders (under its raw tag) so a newly-added wait kind degrades visibly rather than vanishing.
+    */
+  private val WaitOrder: Vector[(String, String)] = Vector(
+    "design-input" -> "design input",
+    "design-merge" -> "design merge",
+    "piece-merge" -> "piece merge",
+    "intervention" -> "intervention"
   )
 
   /** Canonical render order — the §11 lifecycle order, so the table reads top-to-bottom as the run progressed. */
@@ -132,14 +162,42 @@ object StatsReport:
     // The last cost.update's featureTotalUsd is the §13 single-writer running total — authoritative when present.
     val featureUsd = costUpdates.lastOption.flatMap(featureTotalUsdOf).getOrElse(summedUsd)
 
+    val waits = foldWaits(actions)
+
     Summary(
       phases = phaseStats,
       totalTurns = phaseStats.map(_.turns).sum,
       totalKnownDurationMs = phaseStats.map(_.knownDurationMs).sum,
       totalMissingDurations = phaseStats.map(_.missingDurations).sum,
       featureUsd = featureUsd,
-      costAvailable = costUpdates.nonEmpty || summedUsd > 0
+      costAvailable = costUpdates.nonEmpty || summedUsd > 0,
+      waitMsByKind = waits.byKind,
+      unclosedWaitKind = waits.open.map(_._2)
     )
+
+  /** Accumulator for the [[foldWaits]] walk: closed wait time per kind, plus the one currently-open interval (if any).
+    */
+  private[command] final case class WaitAccum(byKind: Map[String, Long], open: Option[(java.time.Instant, String)])
+
+  /** Pure fold of the `fsm.transition` markers into human-wait time per kind (Task 2.0.4). Walks the transitions in
+    * `seq` order maintaining at most one open interval: an `enter` marker opens it; the **next** transition (whatever
+    * it is — the matching `leave`, a self-poll re-`enter`, or a switch into another wait) closes it, accumulating
+    * `next.at - enter.at` to the opening kind. This closes-on-next-transition rule is robust to self-poll transitions
+    * and to a missing `leave` edge: a wait left open at the end of the log (process crashed mid-wait) is reported via
+    * [[WaitAccum.open]] rather than mis-attributed an unbounded duration. Clamps any negative delta (clock skew) to 0.
+    */
+  private[command] def foldWaits(actions: Vector[Action]): WaitAccum =
+    val transitions = actions.filter(_.kind == "fsm.transition").sortBy(_.seq)
+    transitions.foldLeft(WaitAccum(Map.empty, None)) { (acc, t) =>
+      val closed = acc.open match
+        case Some((start, kind)) =>
+          val ms = math.max(0L, java.time.Duration.between(start, t.at).toMillis)
+          acc.copy(byKind = acc.byKind.updatedWith(kind)(prev => Some(prev.getOrElse(0L) + ms)), open = None)
+        case None => acc
+      waitEnterKindOf(t) match
+        case Some(kind) => closed.copy(open = Some((t.at, kind)))
+        case None => closed
+    }
 
   /** Render a [[Summary]] as the operator-facing block — the unit-testable seam (no I/O). */
   private[command] def render(id: FeatureId, summary: Summary): String =
@@ -154,9 +212,32 @@ object StatsReport:
       val totalCost = if summary.costAvailable then f"$$${summary.featureUsd}%.2f" else "unavailable"
       val totalRow =
         f"  ${"total"}%-16s${summary.totalTurns}%7d${formatDuration(summary.totalKnownDurationMs, summary.totalMissingDurations)}%14s${totalCost}%12s"
+      val waitBlock = renderWaits(summary)
       val notes = renderNotes(summary)
-      (Vector(s"""feature ${id.value} — run stats""", "", header, rule) ++ rows ++ Vector(rule, totalRow) ++ notes)
-        .mkString("\n")
+      (Vector(s"""feature ${id.value} — run stats""", "", header, rule) ++ rows ++ Vector(rule, totalRow)
+        ++ waitBlock ++ notes).mkString("\n")
+
+  /** The "waiting (human)" block rendered below the totals when the run blocked on the operator — the
+    * working-vs-waiting split (Task 2.0.4). The total row above is Forge working time; this is wall-clock spent parked
+    * on a human. Empty when the run never waited; a wait still open at end-of-log carries no duration and is surfaced
+    * by [[renderNotes]].
+    */
+  private def renderWaits(summary: Summary): Vector[String] =
+    val total = summary.totalWaitMs
+    // Only render the block for measured (closed) wait time. An interval still open at end-of-log has no duration; it is
+    // surfaced by the [[renderNotes]] caveat instead of a misleading "0ms" row.
+    if total <= 0 then Vector.empty
+    else
+      val headerLine = f"  ${"waiting (human)"}%-16s${""}%7s${formatDuration(total, 0)}%14s"
+      // Ordered known kinds first, then any unrecognised kind under its raw tag (visible degradation).
+      val known = WaitOrder.map(_._1).toSet
+      val orderedKinds =
+        WaitOrder.collect { case (tag, lbl) if summary.waitMsByKind.contains(tag) => tag -> lbl } ++
+          summary.waitMsByKind.keys.filterNot(known).toVector.sorted.map(tag => tag -> tag)
+      val kindRows = orderedKinds.map { case (tag, lbl) =>
+        f"    ${lbl}%-14s${""}%7s${formatDuration(summary.waitMsByKind.getOrElse(tag, 0L), 0)}%14s"
+      }
+      Vector("") ++ Vector(headerLine) ++ kindRows
 
   private def renderRow(p: PhaseStats): String =
     val cost = if p.usd > 0 then f"$$${p.usd}%.2f" else "—"
@@ -177,7 +258,19 @@ object StatsReport:
       if !summary.costAvailable then
         Vector("  note: cost unavailable — this log predates per-session cost capture (Slice 2.0).")
       else Vector.empty
-    durationNote ++ costNote
+    val waitNote =
+      summary.unclosedWaitKind match
+        case Some(kind) =>
+          Vector(
+            s"  note: a '${waitLabel(kind)}' wait was still open at the end of the log " +
+              "(process stopped mid-wait); its duration is unknown and excluded from the waiting total."
+          )
+        case None => Vector.empty
+    durationNote ++ costNote ++ waitNote
+
+  /** Human label for a wait kind (the [[WaitOrder]] mapping); falls back to the raw tag for an unrecognised kind. */
+  private def waitLabel(kind: String): String =
+    WaitOrder.collectFirst { case (tag, lbl) if tag == kind => lbl }.getOrElse(kind)
 
   /** Human label for the table's phase column — the §11 lifecycle name, lower-kebab. */
   private def label(p: SessionPhase): String = p match
@@ -216,3 +309,16 @@ object StatsReport:
 
   private def featureTotalUsdOf(a: Action): Option[BigDecimal] =
     a.payload.objOpt.flatMap(_.get("featureTotalUsd")).flatMap(_.numOpt).map(BigDecimal(_))
+
+  /** The wait kind of an `enter` marker on an `fsm.transition` payload (`{ wait: { edge: "enter", kind } }`), or `None`
+    * for a `leave` marker or a transition that is not a human-wait boundary (Task 2.0.4).
+    */
+  private def waitEnterKindOf(a: Action): Option[String] =
+    for
+      obj <- a.payload.objOpt
+      waitVal <- obj.get("wait")
+      waitObj <- waitVal.objOpt
+      edge <- waitObj.get("edge").flatMap(_.strOpt)
+      if edge == "enter"
+      kind <- waitObj.get("kind").flatMap(_.strOpt)
+    yield kind
