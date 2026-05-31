@@ -146,6 +146,17 @@ class RealSideEffectsSuite extends munit.FunSuite:
     assert(!stage.contains("target") && !stage.contains("node_modules") && !stage.contains(".env"), stage)
     assert(!stage.contains(".forge/state"), stage)
 
+  tempFixture.test("launchFixup writes pieces/<p>.failures.md with the gh check report (gap #12)"): repo =>
+    // The fix-up driver must know which CI checks failed instead of running blind: launchFixup captures
+    // `gh pr checks` into pieces/<p>.failures.md before spawning.
+    val m = mkManifest(featureId, Vector(piecePending(p1, 1).copy(prNumber = Some(PrNumber(7)))))
+    val feat = featureAt(featureId, m, FsmState.PieceFixingUp(p1, PrNumber(7), 1))
+    val se = sut(repo) // FakeGhClient default checks report names a failing `backend` check
+    se.launchFixup(feat, p1, 1).unsafeRunSync()
+    val failures = os.read(repo / ".forge" / "specs" / "feat" / "pieces" / "p1.failures.md")
+    assert(failures.contains("backend") && failures.contains("PR #7"), failures)
+    assert(failures.contains("formatter") || failures.contains("failing check"), failures)
+
   // --- requiredChecksOverlay (§8 overlay delegation) ------------------------
 
   tempFixture.test("requiredChecksOverlay delegates to BranchManager with feature id / base / epoch"): repo =>
@@ -236,7 +247,7 @@ class RealSideEffectsSuite extends munit.FunSuite:
       IO.delay(resumeCalls += ((sessionId, systemPromptPath, message))) *> IO.pure(RealSideEffectsSuite.NoopStreaming)
     def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] =
       IO.raiseError(new NotImplementedError)
-    def runFixup(prompt: FixupPrompt): IO[AgentSession] = IO.raiseError(new NotImplementedError)
+    def runFixup(prompt: FixupPrompt): IO[AgentSession] = IO.pure(RealSideEffectsSuite.NoopStreaming)
     def questionMechanism: QuestionMechanism = QuestionMechanism.Native
     def reviewDesign(input: DesignReviewInput): IO[DesignReview] = IO.raiseError(new NotImplementedError)
     def reviewPr(input: PrReviewInput): IO[PrReview] = IO.raiseError(new NotImplementedError)
@@ -311,7 +322,8 @@ class RealSideEffectsSuite extends munit.FunSuite:
         Right(RequiredChecksOverlay(Set("build"), java.time.Instant.EPOCH, OverlaySource.Protected))
       }
 
-  private final class FakeGhClient(diff: String) extends GhClient:
+  private final class FakeGhClient(diff: String, checks: String = "backend\tfail\t1m\thttps://x/runs/1\n")
+      extends GhClient:
     def prView(pr: PrNumber, fields: Vector[String]): IO[Either[GhError, ujson.Value]] =
       IO.raiseError(new NotImplementedError)
     def prCreate(title: String, body: String, base: BranchName, head: BranchName): IO[Either[GhError, PrNumber]] =
@@ -319,6 +331,7 @@ class RealSideEffectsSuite extends munit.FunSuite:
     def prUpdateBranch(pr: PrNumber): IO[Either[GhError, Unit]] = IO.pure(Right(()))
     def prDiff(pr: PrNumber): IO[Either[GhError, String]] = IO.pure(Right(diff))
     def apiBranchProtection(base: BranchName): IO[Either[GhError, Option[ujson.Value]]] = IO.pure(Right(None))
+    def prChecks(pr: PrNumber): IO[Either[GhError, String]] = IO.pure(Right(checks))
 
   private final class FakeSpecStore(design: String, pieceSpecs: Map[PieceId, String]) extends SpecStore:
     def loadManifest(feature: FeatureId): IO[Either[SpecStoreError, Manifest]] =

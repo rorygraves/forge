@@ -82,9 +82,38 @@ final class RealSideEffects(
       .map(ActiveSession(SessionPhase.Implement, _))
 
   override def launchFixup(feature: Feature, piece: PieceId, attempt: Int): IO[ActiveSession] =
-    connector
-      .runFixup(FixupPrompt(feature.id, piece, attempt, promptPath("fixup"), fixupBody(feature, piece, attempt)))
-      .map(ActiveSession(SessionPhase.Fixup, _))
+    // §11.6 / gap #12: before spawning the fix-up driver, capture the piece PR's failing CI checks into
+    // `pieces/<p>.failures.md` so the driver knows WHAT to fix instead of running blind. Best-effort — a gh hiccup
+    // writes a note rather than aborting the fix-up.
+    writeFailures(feature, piece) >>
+      connector
+        .runFixup(FixupPrompt(feature.id, piece, attempt, promptPath("fixup"), fixupBody(feature, piece, attempt)))
+        .map(ActiveSession(SessionPhase.Fixup, _))
+
+  private def writeFailures(feature: Feature, piece: PieceId): IO[Unit] =
+    feature.manifest.pieces.find(_.id == piece).flatMap(_.prNumber) match
+      case None => IO.unit // no PR yet (CI-failed before PR open is not a real path); nothing to report
+      case Some(pr) =>
+        gh.prChecks(pr).flatMap { res =>
+          val report = res.fold(e => s"(could not fetch CI checks via gh: ${e.message})", _.trim)
+          IO.blocking(
+            os.write.over(failuresFile(feature.id, piece), failuresMd(piece, pr, report), createFolders = true)
+          )
+        }
+
+  private def failuresMd(piece: PieceId, pr: PrNumber, checksReport: String): String =
+    s"""# Piece ${piece.value} — failures to address (PR #${pr.value})
+       |
+       |These CI checks on the piece's PR did not pass (`gh pr checks`):
+       |
+       |```
+       |$checksReport
+       |```
+       |
+       |Make the smallest change that makes the failing check(s) pass. For a formatting
+       |check, run the project's formatter on the changed files (a targeted format is
+       |fine — do NOT run the full test suite). Then stop; Forge commits and re-runs CI.
+       |""".stripMargin
 
   private def resumeDesign(feature: Feature, message: String): IO[ActiveSession] =
     IO.fromOption(feature.designSessionId)(

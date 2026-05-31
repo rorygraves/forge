@@ -58,6 +58,16 @@ final class RealGhClient(repoRoot: os.Path, env: Map[String, String] = Map.empty
   override def prDiff(pr: PrNumber): IO[Either[GhError, String]] =
     invoke(Vector("gh", "pr", "diff", pr.value.toString))
 
+  override def prChecks(pr: PrNumber): IO[Either[GhError, String]] =
+    // `gh pr checks` exits non-zero when any check is failing/pending — which is precisely when the fix-up flow calls
+    // it — so we capture stdout regardless of exit code rather than routing through `invoke`'s exit-code classifier.
+    IO.blocking {
+      val res = os
+        .proc("gh", "pr", "checks", pr.value.toString)
+        .call(cwd = repoRoot, env = env, check = false, stderr = os.Pipe)
+      Right(res.out.text())
+    }
+
   override def apiBranchProtection(base: BranchName): IO[Either[GhError, Option[ujson.Value]]] =
     invoke(Vector("gh", "api", RealGhClient.branchProtectionApiPath(base))).map(RealGhClient.mapApiBranchProtection)
 
