@@ -428,21 +428,15 @@ object ClaudeConnector:
         val stdoutStr = stdoutLines.mkString("\n").trim
         dumpRawEnvelope(stdoutStr) *> parseReviewerStdout(exit, stdoutStr, stderrLines)
 
-  /** Opt-in raw capture: when `FORGE_REVIEWER_RAW_DUMP_DIR` is set, write each reviewer call's full raw stdout (the
-    * complete `--output-format json` envelope) to a uniquely-named file under that dir. Off by default and best-effort
-    * (a dump failure never fails the reviewer call), so it is safe to leave wired in. Used to characterise the length /
-    * `stop_reason` distribution across a regression batch offline, without re-running — see **C18**.
+  /** Opt-in raw capture: when [[RawDumpSink.ReviewerEnvVar]] (`FORGE_REVIEWER_RAW_DUMP_DIR`) is set, write each
+    * reviewer call's full raw stdout (the complete `--output-format json` envelope) to a uniquely-named
+    * `claude-reviewer-<uuid>.json` file under that dir. Off by default and best-effort (a dump failure never fails the
+    * reviewer call), so it is safe to leave wired in. Used to characterise the length / `stop_reason` distribution
+    * across a regression batch offline, without re-running — see **C18**. The one-shot analogue of
+    * [[RawDumpSink.driver]]; shares its dump scaffold.
     */
   private def dumpRawEnvelope(raw: String): IO[Unit] =
-    sys.env.get("FORGE_REVIEWER_RAW_DUMP_DIR") match
-      case None => IO.unit
-      case Some(dir) =>
-        IO.blocking {
-          val d = os.Path(dir, os.pwd)
-          os.makeDir.all(d)
-          os.write.over(d / s"claude-reviewer-${java.util.UUID.randomUUID()}.json", raw)
-        }.attempt
-          .void
+    RawDumpSink.oneShot(RawDumpSink.ReviewerEnvVar, "claude", "reviewer", "json", raw)
 
   private def parseReviewerStdout(exit: Int, stdoutStr: String, stderrLines: Vector[String]): IO[Value] =
     if exit != 0 then

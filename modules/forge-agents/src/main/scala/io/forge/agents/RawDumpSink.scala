@@ -23,9 +23,15 @@ import cats.effect.IO
 object RawDumpSink:
 
   /** Env var gating the driver-session dump. When set to a directory, every driver session writes its raw stdout NDJSON
-    * stream there. Parallel to (and independent of) the reviewer-only `FORGE_REVIEWER_RAW_DUMP_DIR`.
+    * stream there. Parallel to (and independent of) the reviewer-only [[ReviewerEnvVar]].
     */
   val DriverEnvVar = "FORGE_DRIVER_RAW_DUMP_DIR"
+
+  /** Env var gating the reviewer one-shot dump. When set, each reviewer call's full `--output-format json` envelope is
+    * written to a fresh file under that dir. Independent of [[DriverEnvVar]]; see [[oneShot]] and
+    * [[ClaudeConnector.dumpRawEnvelope]].
+    */
+  val ReviewerEnvVar = "FORGE_REVIEWER_RAW_DUMP_DIR"
 
   /** Env-gated per-session sink. Returns `None` (no overhead, no file) unless [[DriverEnvVar]] is set; otherwise
     * delegates to [[sinkTo]] with the configured directory. The `IO` exists because reading the env, creating the
@@ -52,3 +58,22 @@ object RawDumpSink:
         if line.trim.isEmpty then IO.unit
         else IO.blocking(os.write.append(target, line + "\n")).attempt.void
     }
+
+  /** Env-gated one-shot dump — the single-envelope analogue of [[driver]]. When `envVar` is set, writes `raw` to a
+    * fresh `<connectorName>-<label>-<uuid>.<ext>` file under the configured dir; returns `IO.unit` (no file, no
+    * overhead) when unset. Best-effort: a write failure is swallowed (`.attempt.void`) so a dump never fails the call.
+    *
+    * Shares the env-read / `os.Path(_, os.pwd)` / `os.makeDir.all` / UUID-name / best-effort-write scaffold with
+    * [[driver]] + [[sinkTo]]; the reviewer dump differs only in writing one envelope (`os.write.over`) rather than
+    * appending streamed NDJSON lines.
+    */
+  def oneShot(envVar: String, connectorName: String, label: String, ext: String, raw: String): IO[Unit] =
+    sys.env.get(envVar) match
+      case None => IO.unit
+      case Some(dir) =>
+        IO.blocking {
+          val d = os.Path(dir, os.pwd)
+          os.makeDir.all(d)
+          os.write.over(d / s"$connectorName-$label-${java.util.UUID.randomUUID()}.$ext", raw)
+        }.attempt
+          .void
