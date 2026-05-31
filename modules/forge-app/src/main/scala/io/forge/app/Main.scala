@@ -15,8 +15,8 @@ import java.time.Instant
 import scala.util.control.NonFatal
 
 /** Task 1.4.9 I2 — the `forge` entry point. Routes the §17 command set (`new | spec | run | status | resume | reconcile
-  * \| refresh-cache | abandon | rebuild-state | unlock --force | tail`) through a **two-phase boot** so each command
-  * only pays for the resources it needs:
+  * \| refresh-cache | abandon | rebuild-state | unlock --force | tail | stats`) through a **two-phase boot** so each
+  * command only pays for the resources it needs:
   *
   *   1. **Phase-1 argv parse** ([[CliParser.phase1]]) — global `--repo-root` + command *class*, no per-feature args. 2.
   *      **Resolve `repoRoot`** (parsed flag or `os.pwd`) and build [[ForgePaths]]; existence-check only. 3. **`unlock

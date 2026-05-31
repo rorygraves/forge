@@ -32,3 +32,4 @@ object CommandRouter:
     case ReadOnlyKind.Status => status.run(ctx)
     case ReadOnlyKind.Tail => tail.run(ctx)
     case ReadOnlyKind.RebuildState => rebuildState.run(ctx)
+    case ReadOnlyKind.Stats => stats.run(ctx)

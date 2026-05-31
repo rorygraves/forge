@@ -291,6 +291,10 @@ object rebuildState:
   def run(ctx: ReadOnlyContext): IO[ExitCode] =
     RebuildStateCommand.run(ctx.paths, ctx.args)
 
+object stats:
+  def run(ctx: ReadOnlyContext): IO[ExitCode] =
+    StatsReport.run(ctx.paths, ctx.args)
+
 // --- unlock --force (§13 — fully implemented) -------------------------------------
 
 object unlock:

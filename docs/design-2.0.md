@@ -310,6 +310,31 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
   one-line `.map(_.outcome)` (assertions unchanged). `forge-app` 333 tests
   green; `forge-it` compiles. Exit criteria #1 + #2 met. **Tier 1 (Tasks
   2.0.1 + 2.0.2) complete**; next is Tier 2 (`forge stats`, work-vs-wait).
+- 2026-05-31 — **Task 2.0.3 `forge stats <feature>` landed.** A new
+  `ReadOnlyKind.Stats` (wired through `Cli.phase1`/`phase2`,
+  `CommandRouter.readOnly`, and the `stats` handler — the §15 read-only class,
+  no lock) backed by `StatsReport`. The command folds the committed log into a
+  per-phase **turns / wall-clock / cost** table plus a feature total: the
+  per-phase rows come off `session.complete` (Task 2.0.2 — phase tag, CLI
+  `durationMs`, `turnCostUsd`), and the feature-total USD prefers the last
+  `cost.update`'s running `featureTotalUsd` (the §13 single-writer
+  authoritative total), falling back to the summed per-turn cost when no
+  `cost.update` is present. `fold` / `render` are pure seams; the handler
+  reads the log in place (skipping a malformed tail line) and never rewrites
+  it. Graceful degradation per the §1 Task 2.0.3 bar: no
+  session/cost entries → "no session data recorded"; null `durationMs`
+  (timeout/kill) → counted and footnoted, never crashes; pre-observability
+  logs → "cost: unavailable". New `StatsReportSuite` (12 tests: fold
+  aggregation, cost.update-vs-summed feature total, missing-duration handling,
+  empty-log + unrecognised-phase degradation, render table + footnotes, and
+  the handler missing-log / usage / malformed-tail / synthetic-log paths);
+  `CliParserSuite` extended to cover the new kind. The **working-vs-waiting
+  split (exit #4) is intentionally deferred to Task 2.0.4** — `fold` gains a
+  wait column once Task 2.0.4 emits the enter-/leave-wait markers. `forge-app`
+  345 tests green; `forge-it` compiles. Exit criterion #3 met (per-phase
+  cost/wall-clock/turn-count answerable from the committed log alone).
+  **Tier 2 next item: Task 2.0.4 (work-vs-wait markers + the stats wait
+  column).**
 
 ## 4. Carry-forward (inherited + new)
 

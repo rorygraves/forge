@@ -24,7 +24,7 @@ class CliParserSuite extends munit.FunSuite:
   }
 
   test("phase1 classifies read-only commands without a connector") {
-    List("status", "tail", "rebuild-state").foreach { name =>
+    List("status", "tail", "rebuild-state", "stats").foreach { name =>
       val Right(inv) = CliParser.phase1(List(name)): @unchecked
       assertEquals(inv.commandClass, CommandClass.ReadOnly, name)
       assert(!inv.needsConnector, name)
@@ -81,6 +81,7 @@ class CliParserSuite extends munit.FunSuite:
       CliParser.phase2("rebuild-state", Vector("f")),
       Right(ForgeCommand.ReadOnly(ReadOnlyKind.RebuildState))
     )
+    assertEquals(CliParser.phase2("stats", Vector("f")), Right(ForgeCommand.ReadOnly(ReadOnlyKind.Stats)))
   }
 
   test("phase2 requires --force on unlock") {

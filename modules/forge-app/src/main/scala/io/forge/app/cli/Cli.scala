@@ -47,7 +47,7 @@ object CliError:
   case object NoCommand extends CliError:
     def message: String =
       "no command given; expected one of: " +
-        "new, spec, run, status, resume, reconcile, refresh-cache, abandon, rebuild-state, unlock, tail"
+        "new, spec, run, status, resume, reconcile, refresh-cache, abandon, rebuild-state, unlock, tail, stats"
 
   final case class UnknownCommand(name: String) extends CliError:
     def message: String = s"unknown command '$name'"
@@ -98,7 +98,7 @@ object CliParser:
     name match
       case "new" | "spec" | "run" | "resume" | "reconcile" => Right((CommandClass.StateChanging, true))
       case "refresh-cache" | "abandon" => Right((CommandClass.StateChanging, false))
-      case "status" | "tail" | "rebuild-state" => Right((CommandClass.ReadOnly, false))
+      case "status" | "tail" | "rebuild-state" | "stats" => Right((CommandClass.ReadOnly, false))
       case "unlock" => Right((CommandClass.UnlockForce, false))
       case other => Left(CliError.UnknownCommand(other))
 
@@ -116,6 +116,7 @@ object CliParser:
       case "status" => Right(ForgeCommand.ReadOnly(ReadOnlyKind.Status))
       case "tail" => Right(ForgeCommand.ReadOnly(ReadOnlyKind.Tail))
       case "rebuild-state" => Right(ForgeCommand.ReadOnly(ReadOnlyKind.RebuildState))
+      case "stats" => Right(ForgeCommand.ReadOnly(ReadOnlyKind.Stats))
       case "unlock" =>
         if rest.contains("--force") then Right(ForgeCommand.UnlockForce) else Left(CliError.UnlockRequiresForce)
       case other => Left(CliError.UnknownCommand(other))
