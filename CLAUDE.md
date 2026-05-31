@@ -7,9 +7,9 @@ that first; everything below is Claude-Code-specific.
 
 - **Implementation contract:** [`docs/forge-design-1.2.md`](docs/forge-design-1.2.md). The 1.1 revision is kept in-tree as an evolution record but is superseded.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
-- **Active implementation plan:** *(none currently open — Phase 1 is
-  complete; Phase 2 opens its own `design-<section>.md` when work
-  starts).* The most recent closed audit trail is
+- **Active implementation plan:** [`docs/design-2.0.md`](docs/design-2.0.md)
+  (Slice 2.0 — Phase-2 run observability, 🟡 open 2026-05-31). The most
+  recent closed audit trail is
   [`docs/design-1.4.md`](docs/design-1.4.md) (Slice 1.4 — Phase-1 MVP
   gate, ✅ closed 2026-05-31); older trails are
   [`docs/design-2.3.md`](docs/design-2.3.md) (Slice 1.3),
