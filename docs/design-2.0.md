@@ -434,6 +434,32 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
   for the respawn-avoidance). `audit.resume_from_nhi` is filed for the Task 2.0.7
   §19 spec reconciliation alongside `session.complete` and the `fsm.transition`
   `wait` field. **Tier 3 complete; only Task 2.0.7 (close-out) remains.**
+- 2026-05-31 — **Task 2.0.7 close-out — spec reconciliation + carry-forward walk
+  landed (review + roadmap tick + live re-validation pending).** (1) **Spec
+  reconciled into a new standalone revision.** Created
+  [`forge-design-1.4.md`](forge-design-1.4.md) (full copy-forward of 1.3 per the
+  §23 standalone-revision rule) folding the Slice-2.0 §19 additions into the
+  action-log schema: the new `session.complete` kind (D1 option (b)), the
+  optional `wait` field on `fsm.transition` (D4), the new `audit.resume_from_nhi`
+  kind (D3 contained half), and the operational `FORGE_DRIVER_RAW_DUMP_DIR`
+  debug-sink note (Task 2.0.5). 1.3 became a SUPERSEDED redirect stub; the
+  active "live contract" pointers (CLAUDE.md, AGENTS.md, roadmap, design-rationale,
+  the 1.1/1.2 stubs, and the closed-trail headers) were repointed to 1.4, while
+  historical-fact references ("resolved/filed in 1.3") were left to resolve via
+  the stub redirect + the preserved-numbering convention. (2) **Carry-forward
+  walked into durable homes** (new roadmap **§3.5** "Deferred to a later Phase-2
+  slice" + design-rationale close-out notes on **S4-3**/**S4-5**): the reviewer/
+  driver model+cap+retry §18 tuning (S4-3/S4-5, now measurable against Slice-2.0
+  data), the **D3 large half** (driver-respawn-avoidance), and **gap #7**
+  (`designSessionId` durability) all now have forward-looking homes outside this
+  (about-to-freeze) audit trail. (3) **D2 confirmed needs no spec edit:** §12
+  (`forge-design-1.4.md:641` / `:1187` / `:1393`) already specifies the per-turn
+  cap as a true per-turn check ("checked after every `cost.update`", "enforced
+  mid-turn"); the D2 fix brought the code into conformance with the spec, so no
+  design-rationale deviation is filed. **Remaining close-out steps:** local
+  `/code-review` of the Slice 2.0 diff → fix findings → flip the roadmap §3.1
+  checkboxes (the tick is gated on that review per the roadmap convention) → the
+  exit-criterion live MVP re-validation via `forge stats`.
 
 ## 4. Carry-forward (inherited + new)
 
@@ -517,7 +543,9 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
 - Source findings: [`slice-4/mvp-friction.md`](slice-4/mvp-friction.md);
   run evidence under
   [`slice-4/mvp-run/image-creds-dedup/`](slice-4/mvp-run/image-creds-dedup/).
-- Spec: [`forge-design-1.3.md`](forge-design-1.3.md) (the live contract) §12
+- Spec: [`forge-design-1.4.md`](forge-design-1.4.md) (the live contract; this
+  slice's §19 additions — `session.complete`, the `fsm.transition` `wait` field,
+  `audit.resume_from_nhi` — were reconciled into it at Task 2.0.7 close-out) §12
   (budget caps), §19 (action-log kinds incl. `cost.update`), §6 (`Feature`
   projections); §1 carries the Slice 1–3 spec reconciliations.
 - Code anchors: `Replay.applyCostUpdate`

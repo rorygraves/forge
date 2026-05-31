@@ -1,6 +1,6 @@
 # design-2.1 — Slice 1.1 implementation plan (✅ CLOSED 2026-05-26)
 
-> **Status:** ✅ closed 2026-05-26. Condensed audit trail — the full per-sub-PR breakdown (§1) and round-by-round status log (§3) were summarised on 2026-05-31 in the Phase-1 docs consolidation; the complete original is recoverable from git history. The live spec is [`forge-design-1.3.md`](forge-design-1.3.md); deferred decisions / carry-forwards live in [`design-rationale.md`](design-rationale.md) and roadmap §7.2.
+> **Status:** ✅ closed 2026-05-26. Condensed audit trail — the full per-sub-PR breakdown (§1) and round-by-round status log (§3) were summarised on 2026-05-31 in the Phase-1 docs consolidation; the complete original is recoverable from git history. The live spec is [`forge-design-1.4.md`](forge-design-1.4.md); deferred decisions / carry-forwards live in [`design-rationale.md`](design-rationale.md) and roadmap §7.2.
 
 ## Summary
 

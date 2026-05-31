@@ -4,8 +4,9 @@
 > corrections (Claude has native schema enforcement; both CLIs preserve the
 > session id on resume; three Codex-adapter notes) into the v1.0 release
 > candidate. It was superseded by [v1.2](forge-design-1.2.md) (Slice-1
-> connector-trait corrections) and then by the current live contract,
-> **[forge-design-1.3.md](forge-design-1.3.md)** — the single standalone
+> connector-trait corrections), then [v1.3](forge-design-1.3.md) (Slice-1.4
+> `resumeStreamingSpec` correction), and now by the current live contract,
+> **[forge-design-1.4.md](forge-design-1.4.md)** — the single standalone
 > implementation spec ("implementers read only this document", §23
 > standalone-revision rule).
 >

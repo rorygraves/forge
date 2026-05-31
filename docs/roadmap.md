@@ -1,6 +1,6 @@
 # Forge — product roadmap
 
-> Companion to [`forge-design-1.3.md`](forge-design-1.3.md). The design doc is
+> Companion to [`forge-design-1.4.md`](forge-design-1.4.md). The design doc is
 > the implementation contract for v1; this document is the multi-horizon plan
 > the design lives inside. Early phases are concrete (and trace directly into
 > §17 of the design); later phases capture direction and have not yet been
@@ -36,7 +36,7 @@
 | Phase | Outcome | Source of detail |
 |---|---|---|
 | 0 — Slice 0 | CLI capabilities validated | [`slice-0/slice-0-report.md`](slice-0/slice-0-report.md) |
-| 1 — Testability MVP | Forge ships its own next slice | `forge-design-1.3.md` §17 slices 1–4 |
+| 1 — Testability MVP | Forge ships its own next slice | `forge-design-1.4.md` §17 slices 1–4 |
 | 2 — MLP | Pleasant single-repo daily-driver | §17 slice 5 + polish |
 | 3 — v1.0 | Single-repo, OSS-ready, role-pluggable | §20 v2 candidates + role-trait refactor |
 | 4 — v2.0 | Forge-instance pivot (multi-repo, daemon, parallel, containerised) | Needs its own design doc (`forge-design-2.0.md`) before work starts |
@@ -402,13 +402,17 @@ and TUI (§3.2) below both *consume* this data — so observability lands first.
 Findings: [`slice-4/mvp-friction.md`](slice-4/mvp-friction.md); evidence:
 [`slice-4/mvp-run/image-creds-dedup/`](slice-4/mvp-run/image-creds-dedup/).
 
-> **Progress (2026-05-31):** Tier 1 ✅ (Tasks 2.0.1 `cost.update` writer +
-> 2.0.2 `session.complete`, D2 turn/piece-reset bug fixed en route) and Tier 2
-> Task 2.0.3 `forge stats <feature>` ✅ landed. Remaining: Task 2.0.4
-> (work-vs-wait markers + the `forge stats` wait column) and Tier 3
-> (Tasks 2.0.5–2.0.6). The checkboxes below stay `[ ]` until the Slice 2.0
-> section code review (Task 2.0.7 close-out); per-Task detail and dated status
-> log live in [`design-2.0.md`](design-2.0.md).
+> **Progress (2026-05-31):** Tiers 1–3 all ✅ landed — Tier 1 (Tasks 2.0.1
+> `cost.update` writer + 2.0.2 `session.complete`, D2 turn/piece-reset bug fixed
+> en route), Tier 2 (Task 2.0.3 `forge stats <feature>` + Task 2.0.4 work-vs-wait
+> markers / wait column), Tier 3 (Task 2.0.5 driver raw-dump + Task 2.0.6 clean
+> resume-from-NHI). Task 2.0.7 close-out is in progress: the spec was reconciled
+> into the new standalone [`forge-design-1.4.md`](forge-design-1.4.md) (§19
+> `session.complete` / `fsm.transition` `wait` / `audit.resume_from_nhi`), the
+> §4 carry-forward walked into durable homes (§3.5 below + design-rationale
+> S4-3/S4-5). The checkboxes below stay `[ ]` until the Slice 2.0 section code
+> review (Task 2.0.7) completes and the live `forge stats` re-validation passes;
+> per-Task detail and dated status log live in [`design-2.0.md`](design-2.0.md).
 
 **Tier 1 — close the capture gap (the machinery already exists):**
 
@@ -467,6 +471,40 @@ prompt diffs in git; they're load-bearing for behaviour.
 - `prices.example.json` kept current with OpenAI model list.
 - Pointer to design doc + rationale from README.
 - LICENSE already in place.
+
+### 3.5 Deferred to a later Phase-2 slice (from Slice 2.0 close-out)
+
+Slice 2.0 ("instrument before optimise") deliberately built the *measurement*
+and left the *tuning* and a couple of larger durability fixes for a later
+Phase-2 slice now that there is per-run cost/latency data to act against. These
+are the forward-looking homes for the design-2.0 §4 carry-forwards that
+out-scoped the observability slice (full dispositions in
+[`design-2.0.md`](design-2.0.md) §4 and [`design-rationale.md`](design-rationale.md)):
+
+- [ ] **Reviewer + driver model / wall-clock-cap / retry §18 tuning**
+  (design-rationale **S4-5**, and **S4-3** reviewer-cost widening). The §18
+  config knobs (`reviewer.model` / `reviewer.wallClockCapSec` /
+  `reviewer.processRetries`, and the driver settle caps) stay hard-pinned at the
+  C15-validated defaults until tuned against real attributed data. The szork run
+  already flagged the live target: the implement settle cap was too tight
+  (`maxTurnCostUsd = $2.0` vs an actual $9.56 turn). A §18 schema extension, so
+  it lands via a `forge-design-1.x.md` revision.
+- [ ] **Driver-respawn-avoidance on resume-from-NHI** (design-2.0 §4 **D3**
+  large half). Slice 2.0 made resume append-only and self-describing
+  (`audit.resume_from_nhi`) but a resume still **re-spawns the implement/fix-up
+  driver from scratch**, re-paying the full exploration (~$10 in the szork run).
+  A resume that detects already-committed driver work on the piece branch and
+  skips the respawn closes gap #10's compounding cost. Deferred because it
+  touches git branch inspection + driver `--resume` semantics and must revisit
+  `RestartRecovery`'s deliberate "no transparent resume" stance. **Watch item:**
+  until it lands, each resume from an implement/fix-up NHI re-pays the driver's
+  full exploration; the per-turn cost cap bounds the blast radius.
+- [ ] **`designSessionId` durability** (Task 1.4.16 **gap #7**). `forge spec`
+  `/done` persists the design session id only to the Feature/state-cache, not
+  the action log, so `RebuildState.run` rebuilds it as `None` and the §11.3
+  design-PR-feedback resume fails after a state-cache rebuild. A standalone
+  §11.3 log-completeness fix (write the design session id to the action log at
+  `/done`); not pulled into Slice 2.0 (it did not touch that surface).
 
 ---
 
@@ -666,7 +704,7 @@ project guidelines + project state; post inline comments.
 ## 7. Divergences from the v1 spec
 
 Tracked here so they don't surprise anyone mid-implementation. None
-require changes to the v1 contract (now `forge-design-1.3.md`); all are deliberately
+require changes to the v1 contract (now `forge-design-1.4.md`); all are deliberately
 deferred to Phase 3+.
 
 | Long-term direction | v1 spec stance | Phase that resolves it |
