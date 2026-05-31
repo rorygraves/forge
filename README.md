@@ -1,46 +1,160 @@
 # Forge
 
-A Scala meta-orchestrator that sits above the Claude Code and Codex
-CLIs, breaks features into reviewable pieces, and shepherds each one
-through design → implement → PR → merge with cross-model review and
-human-in-the-loop.
+Forge is a Scala meta-orchestrator that sits above the Claude Code and
+Codex CLIs. You bring a feature request; Forge shepherds it through
+design → piece-by-piece implementation → PR → merge, with cross-model
+review and a human in the loop.
 
-**Author:** Rory  •  **License:** MIT  •  **Status:** Slice 0 (CLI
-capability validation) and Slice 1 (agent connectors) complete.
-`forge-agents` ships both Claude and Codex connectors against the
-v1.2 §7.1 trait, with real-CLI integration coverage in `forge-it`.
-Next: Slice 2 (`forge-core` — FSM, Feature, ActionLog, StateCache).
+Forge is not itself an LLM. It drives the coding-agent CLIs you already
+use, coordinating them with a finite-state machine and Git so one person
+can supervise many features instead of pair-driving each one.
 
-## What Forge is for
+## Status
 
-You bring raw intent. The harness shapes it into a design, breaks it
-into pieces, hammers each piece through review and CI until it's
-mergeable, and remembers everything it did so the process itself can
-be tuned.
+Forge is in active development.
 
-Concretely, v1:
+- **Phase 1 (MVP) — complete.** The orchestration engine takes a single
+  feature from intake to a merged pull request against a real
+  repository, and has done so end to end on a live repo. The CLI
+  (`forge run` / `forge spec` / `forge status`, plus the rest of the
+  §15 command set), the headless orchestrator loop, cross-model review,
+  and crash/restart durability are all implemented and tested.
+- **Phase 2 (MLP) — in progress.** This is the work that turns the
+  working engine into something a developer other than the author can
+  comfortably pick up: run observability, packaging/distribution of a
+  standalone launcher, and onboarding polish.
 
-- One feature at a time, one fresh agent context per piece.
-- Interactive spec phase with the configured *driver* (Claude or
-  Codex), then headless implementation piece-by-piece.
-- Cross-model review: the other CLI reviews every design and every PR.
+> **Trying it today:** everything runs from source with `sbt`. There is
+> no packaged `forge` binary yet — a standalone launcher is part of the
+> Phase 2 OSS-readiness work — so the commands below are invoked through
+> sbt. The engine itself is complete; the rough edge is distribution.
+
+See [`docs/roadmap.md`](docs/roadmap.md) for the phase plan and
+[`docs/forge-design-1.4.md`](docs/forge-design-1.4.md) for the
+authoritative implementation contract.
+
+## What it does
+
+Concretely, in v1:
+
+- One feature at a time, with a fresh agent context per piece.
+- An interactive **spec phase** with the configured *driver* (Claude or
+  Codex), then headless implementation, piece by piece.
+- **Cross-model review:** the *other* CLI reviews every design and every
+  PR.
 - One branch per piece off `main`, one PR, one CI run, human-merged.
-- Per-feature action log; resumable on every failure.
+- A per-feature action log, so any run is resumable after a failure or
+  restart.
 
-`docs/forge-design-1.3.md` is the implementation contract.
+## Getting started
 
-## Documentation map
+### Prerequisites
 
-| File | What it is |
-|---|---|
-| [`docs/forge-design-1.3.md`](docs/forge-design-1.3.md) | v1 implementation contract (the live spec; §-numbers preserved from 1.1/1.2) |
-| [`docs/forge-design-1.2.md`](docs/forge-design-1.2.md) · [`1.1`](docs/forge-design-1.1.md) | Prior revisions; superseded stubs pointing at 1.3 (full text in git history) |
-| [`docs/design-rationale.md`](docs/design-rationale.md) | Non-obvious tradeoffs preserved from the 0.1 → 1.3 design evolution |
-| [`docs/roadmap.md`](docs/roadmap.md) | Multi-horizon roadmap: MVP → MLP → 1.0 → 2.0 (Forge-instance pivot) → 3.0+ |
-| [`docs/slice-0/slice-0-report.md`](docs/slice-0/slice-0-report.md) | CLI capability-validation results that grounded v1.1 |
-| [`docs/slice-1/slice-1-findings.md`](docs/slice-1/slice-1-findings.md) | Slice-1 runtime findings that grounded v1.2 (superseded by 1.2, kept as evolution record) |
-| [`AGENTS.md`](AGENTS.md) | Project guide for agentic tools working in this repo |
-| [`CLAUDE.md`](CLAUDE.md) | Pointer to `AGENTS.md` for Claude Code |
+Forge shells out to other tools, so they must be installed, on your
+`PATH`, and authenticated the way you normally use them (Forge invokes
+them as you — it does not manage their credentials):
+
+| Tool | Floor | Notes |
+| --- | --- | --- |
+| **Claude Code CLI** | `2.1.150` | Validated flag set is pinned to this floor (see `docs/slice-0/`). |
+| **OpenAI Codex CLI** | `0.130.0` | Integration suite runs against `0.133.0`. |
+| **GitHub CLI (`gh`)** | `2.83.1` | All PR/branch operations go through it; run `gh auth login` first. |
+| **JDK + sbt** | — | Scala `3.5.2` (set by `build.sbt`); a recent JDK. |
+
+### Build and check
+
+```bash
+git clone <this-repo>
+cd forge
+
+sbt compile          # build all modules
+sbt test             # unit tests — fast, hermetic, no external CLIs
+sbt scalafmtCheckAll
+```
+
+The default test run uses fake CLIs and never touches Claude, Codex, or
+GitHub, so it runs anywhere.
+
+### Run Forge
+
+The CLI entry point is `io.forge.app.Main` in the `forge-app` module.
+There is no `forge` binary on your `PATH` yet (packaging is Phase 2
+work), so today it is launched through sbt:
+
+```bash
+sbt "forge-app/run <command> <args>"
+```
+
+The typical flow for a single feature is **new → spec → run**, then
+watch it with **status / tail**:
+
+```bash
+sbt "forge-app/run new my-feature"     # create the feature + its design branch
+sbt "forge-app/run spec my-feature"    # flesh out the spec in the interactive REPL (/done to finish)
+sbt "forge-app/run run my-feature"     # drive it: review → implement pieces → PRs → merge
+sbt "forge-app/run status"             # one line per feature (omit the name for the overview)
+sbt "forge-app/run tail my-feature"    # stream the feature's action log
+```
+
+The full command set (`new`, `spec`, `run`, `resume`, `reconcile`,
+`refresh-cache`, `status`, `tail`, `rebuild-state`, `stats`,
+`unlock --force`) is specified in `docs/forge-design-1.4.md` §15.
+
+> **Keep the first feature small.** Forge is built around small,
+> self-contained, reviewable pieces — and it spends real money on the
+> agent CLIs. The default budget caps are **$8 per piece** and **$25
+> per feature** (see configuration below).
+
+### Configuration & where Forge keeps things
+
+Per-project state lives under a `.forge/` directory **inside the target
+repository** (everything is routed through the `ForgePaths` helper):
+
+- `.forge/config.json` — your configuration (optional; sensible
+  defaults apply if absent).
+- `.forge/specs/<feature>/` — the committed spec assets (`design.md`,
+  `manifest.json`, `decomposition.md`, `pieces/…`).
+- `.forge/state/`, `.forge/log/` — rebuilt state cache and the canonical
+  per-feature action log (gitignored).
+
+Reviewer assets (schemas, prompts, templates) are installed once per
+user under `~/.forge/{schemas,prompts,templates}/` on first use.
+
+`config.json` is JSON; the keys most worth knowing:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `mode` | `ClaudeDriver` | Which CLI drives implementation (the other one reviews). |
+| `baseBranch` | `main` | Branch features are cut from and merged into. |
+| `branchPrefix` | `forge` | Prefix for the branches Forge creates. |
+| `maxPieceCostUsd` | `8.00` | Spend cap per piece. |
+| `maxFeatureCostUsd` | `25.00` | Spend cap per feature. |
+
+The reviewer models in v1 are the built-in **Claude `haiku`** /
+**Codex `gpt-5.3-codex`** pair with a per-review wall-clock cap. See
+`docs/forge-design-1.4.md` §18 for the complete config reference.
+
+> **Heads-up for external users:** running the workflow against your own
+> repo from an sbt checkout is awkward today (the packaged `forge`
+> launcher that you'd run from inside any repo is exactly the Phase 2
+> OSS-readiness gap). If you mainly want to *see Forge work* against the
+> real agent CLIs right now, the integration suites below are the
+> lowest-friction path.
+
+### See it drive the real CLIs (tests)
+
+The `forge-it` module exercises the *real* `claude`, `codex`, and `gh`
+binaries. These are opt-in (they need those tools on `PATH`) and some
+are slow, so they are excluded from the default test run:
+
+```bash
+sbt "project forge-it" compile
+sbt "project forge-it" test
+
+# Watch the reviewer actually review a change (opt-in, ~3-min cap):
+FORGE_IT_RUN_REGRESSION_SMOKE=1 \
+  sbt "project forge-it" "testOnly *ReviewerRegressionSuite"
+```
 
 ## Module layout
 
@@ -49,54 +163,26 @@ modules/
   forge-core/    ← FSM, Feature, ActionLog, StateCache, domain model
   forge-agents/  ← Connector, AgentSession, Claude/Codex adapters
   forge-git/     ← BranchManager, PRWatcher (gh CLI)
-  forge-specs/   ← SpecStore, DocSync, Manifest, ChangeCollector
-  forge-tui/     ← termflow TUI (Slice 5)
-  forge-app/     ← main entry, wiring, ProcessLock, SessionMonitor
-  forge-it/      ← integration tests against real claude/codex CLIs
+  forge-specs/   ← SpecStore, DocSync, manifest, ChangeCollector
+  forge-app/     ← orchestrator, the forge CLI, config, process lock
+  forge-tui/     ← termflow TUI (later slice)
+  forge-it/      ← integration tests against the real claude/codex/gh CLIs
 ```
 
-Module ownership maps onto the build order in
-[`docs/forge-design-1.3.md` §17](docs/forge-design-1.3.md#17-build-order-de-risked).
+## Documentation
 
-## Building and testing
-
-Requires sbt and Scala 3.5.x (set by `build.sbt`).
-
-```bash
-sbt compile          # compile all modules
-sbt test             # run unit tests
-sbt "project forge-core" test     # tests for one module
-sbt scalafmtAll      # format
-```
-
-Integration tests in `forge-it` exercise the real `claude` and `codex`
-CLIs and the GitHub `gh` CLI; they require those binaries on `PATH` and
-network access. They are gated behind the `forge-it` project so unit
-runs stay hermetic.
-
-## Pinned tool floors
-
-Slice 0 validated capabilities against these versions; Forge will not
-silently support older ones:
-
-- Claude Code CLI ≥ `2.1.150`
-- Codex CLI ≥ `codex-cli 0.130.0` (Slice 1 integration suite runs
-  against `codex-cli 0.133.0`)
-- GitHub CLI ≥ `2.83.1`
-
-## Status
-
-| Phase | Outcome | State |
-|---|---|---|
-| Slice 0 — CLI validation | Three v1.1 corrections folded in | ✅ complete |
-| Slice 1 — Agent connectors | `forge-agents` standalone with real-CLI integration tests | ✅ closed 2026-05-26 (PR-D ≥19/20 native schema regression suite deferred to Slice 4 / reviewer-asset PR per design-rationale C15) |
-| Slice 2 — `forge-core` | FSM, Feature, ActionLog, StateCache | 🚧 next |
-| Slices 3–4 | git → headless loop | scoped |
-| Slice 5 — TUI | termflow + Elm | scoped |
-| Phase 4 — Forge-instance pivot | Multi-repo, daemon, parallel, containerised | post-1.0, needs own design doc |
-
-See [`docs/roadmap.md`](docs/roadmap.md) for exit criteria and the
-post-v1 direction.
+- [`AGENTS.md`](AGENTS.md) — contributor guide and module map (start
+  here if you want to work *on* Forge).
+- [`docs/roadmap.md`](docs/roadmap.md) — phased delivery plan and
+  current status.
+- [`docs/forge-design-1.4.md`](docs/forge-design-1.4.md) — the design
+  and implementation contract, including the full §15 command set. This
+  is the authoritative description of how Forge behaves (the 1.1–1.3
+  revisions are superseded stubs that point here).
+- [`docs/design-rationale.md`](docs/design-rationale.md) — non-obvious
+  tradeoffs preserved through the design's evolution.
+- [`docs/slice-0/`](docs/slice-0/) — the captured CLI flag/transcript
+  evidence the connectors are built against.
 
 ## License
 
