@@ -2060,25 +2060,29 @@ Filed as design-rationale **CI8**.
   (designed-for; re-uses this task's `ResumeAfterHumanPush` plumbing). Recorded
   in **CI8**.
 
-### Task 1.4.16 — MVP-gate run  🟢 in flight (2026-05-30)
+### Task 1.4.16 — MVP-gate run  ✅ COMPLETE (2026-05-31)
 
 The Phase-1 exit gate. Drive one small, contained,
 low-variance feature through Forge from `forge new` to
 merged-`FeatureDone`.
 
-> **In flight — findings in [`docs/slice-4/mvp-friction.md`](slice-4/mvp-friction.md).**
-> Per the user's call, the run is driven against an **external test repo**
+> **✅ COMPLETE — reached `FeatureDone` 2026-05-31. Findings in
+> [`docs/slice-4/mvp-friction.md`](slice-4/mvp-friction.md); evidence in
+> [`docs/slice-4/mvp-run/image-creds-dedup/`](slice-4/mvp-run/image-creds-dedup/).**
+> Per the user's call, the run was driven against an **external test repo**
 > (`llm4s/szork`) rather than self-hosting on this repo — cleaner first run,
-> and it exercises the §8 CI gate against real GitHub Actions. Target feature:
-> **`image-creds-dedup`** (de-duplicate szork's image-credential check). As the
-> first real end-to-end run of `forge-app`, it surfaced **8 integration gaps**
-> (the gate's purpose). Six are fixed in-flight (on branch
+> and it exercised the §8 CI gate against real GitHub Actions + branch
+> protection. Target feature: **`image-creds-dedup`** (de-duplicate szork's
+> image-credential check). As the first real end-to-end run of `forge-app`, it
+> surfaced **13 integration gaps** (the gate's purpose) — every one a genuine
+> bug or tuning issue fakes could not catch. Twelve are fixed (on branch
 > `run-enablement-asset-bootstrap`; gap #1 = Task 1.4.10b on `main`); gap #7
-> (designSessionId durability) is deferred; gap #8 (NHI resume wiring) +
-> implement-prompt/settle-cap tuning (S4-5) are being addressed to let the run
-> complete. Full table + commits in the friction doc. The run reached
-> spec → design review → design PR (merged) → `DesignReady` → implement
-> (correct code produced) before the gap-#8/cap block.
+> (designSessionId durability) is deferred to Phase 2. The **full §11 lifecycle
+> ran end-to-end**: spec → design review → design PR #9 (merged) → `DesignReady`
+> → implement → piece PR #10 → §8 CI gate (fail → fix-up ×2 → green) → code
+> review (approve) → `PieceAwaitingMerge` → (merge) → `Refining` →
+> **`FeatureDone`**. Both the §8 gate's CI-fail→fix-up path and its green→review
+> path are validated live. Full table + commits in the friction doc.
 
 - [x] **P1.** MVP target **filed: `image-creds-dedup` in `llm4s/szork`**
   (de-duplicate the image-credential feature-flag check into one
@@ -2088,29 +2092,28 @@ merged-`FeatureDone`.
   this repo's history and gives the §8 CI gate a real GitHub-Actions surface
   (szork has a `backend` + `frontend` CI workflow). Single-piece, low-variance,
   exercises every reviewer + driver phase.
-- [ ] **P2.** Drive end-to-end:
+- [x] **P2.** Drove end-to-end (2026-05-31, `image-creds-dedup` in `llm4s/szork`):
   - `forge new "<title>"`.
   - `forge spec <feature>` — interactive REPL until
-    `/done`.
+    `/done` (human-driven).
   - `forge run <feature>` — headless from
-    `DesignReady` through to `FeatureDone` (manually
-    merging design PR + each piece PR via `gh pr
+    `DesignReady` through to `FeatureDone` (operator
+    merged design PR #9 + piece PR #10 via `gh pr
     merge` between phases per v1 rule "piece PRs
-    merged by the human").
-- [ ] **P3.** Capture the run as evidence. Per AGENTS.md's
-  "commit completed work before review" memory, the
-  `.forge/log/<feature>.jsonl` for this run is committed
-  under `docs/slice-4/mvp-run/<feature>/` (sanitised —
-  no API keys, no `pwd` leakage). Include a short
-  prose summary of what worked, what didn't, what
-  surfaced as friction.
-- [ ] **P4.** **Friction items surface as Phase 2 input,
-  not Slice 1.4 follow-ups.** Phase 2 is where prompt
-  iteration + TUI live; Slice 1.4 is "Forge ships its own
-  next slice", not "Forge ships its own slice
-  beautifully". Document friction in
-  `docs/slice-4/mvp-friction.md` for Phase 2 to
-  triage.
+    merged by the human"). The §8 CI gate ran live against
+    szork's `backend` + `frontend` required checks (fail →
+    fix-up ×2 → green).
+- [x] **P3.** Run captured as evidence under
+  [`docs/slice-4/mvp-run/image-creds-dedup/`](slice-4/mvp-run/image-creds-dedup/):
+  the `action-log.jsonl` (25 entries, `Drafting` → `FeatureDone`), the merged
+  `design.md`, the `manifest.json`, and a `README.md` walking the validated
+  lifecycle. No API keys / pwd leakage.
+- [x] **P4.** Friction documented in
+  [`docs/slice-4/mvp-friction.md`](slice-4/mvp-friction.md) — 13 gaps (12
+  fixed, 1 deferred), tuning findings (S4-5 settle/cost caps, third-party-bot
+  feedback), operational notes, and Phase-2 / v1.3 carry-forwards. Per §17
+  slice-4, friction items are **Phase 2 input**, not Slice 1.4 follow-ups —
+  except the gaps that fully blocked the run, fixed in-flight to reach the gate.
 
 ### Task 1.4.17 — Slice 1.4 close-out + Phase 1 exit
 
@@ -3223,6 +3226,24 @@ ticks off only after Task 1.4.17 lands.
   `ResolveLocalImplementationChanges` / `ApplyPlanningUpdate` have no
   working `forge run` resume) + the implement-prompt build-self-verify
   settle-cap breach (S4-5) being addressed to let the run complete.
+- 2026-05-31 — **Task 1.4.16 MVP-gate run ✅ COMPLETE — reached
+  `FeatureDone`.** The full §11 lifecycle ran end-to-end against
+  `llm4s/szork`: spec → design review → design PR #9 (merged) →
+  `DesignReady` → implement → piece PR #10 → **§8 CI gate** (CI-fail →
+  fix-up ×2 → green, validated live on both paths) → code review (approve) →
+  `PieceAwaitingMerge` → (operator merge) → `Refining` → **`FeatureDone`**.
+  Both szork PRs merged to `main`; the driven implementation is correct
+  (`imageCredsAvailable` helper + `ImageProviderCredsSpec`). The run
+  surfaced **13 integration gaps** total (up from 8 at run-start); gaps
+  10–13 fixed in-flight on `run-enablement-asset-bootstrap` — sub-agent
+  cost blow-up (disallow `Task` + lean prompts, `323c0a4`), host pre-commit
+  hook (`--no-verify`, `0f1c57e`), blind fix-up (write `failures.md` from
+  `gh pr checks`, `48e6ded`), reviewer-starved-by-watcher race (watcher
+  emits only on human override, `ed62bb7`). Gap 7 (designSessionId
+  durability) deferred to Phase 2. P2/P3/P4 ticked; evidence under
+  [`docs/slice-4/mvp-run/image-creds-dedup/`](slice-4/mvp-run/image-creds-dedup/),
+  full findings in [`docs/slice-4/mvp-friction.md`](slice-4/mvp-friction.md).
+  **Slice 1.4 is now feature-complete; Task 1.4.17 (close-out) remains.**
 
 ## 4. Carry-forward (inherited + new)
 
