@@ -64,7 +64,8 @@ final class ClaudeConnector(
     spawnStreaming(
       ClaudeConnector
         .streamingSpecArgv(binary, systemPromptPath, driverPermissionMode, driverAllowedTools, driverDisallowedTools),
-      initialUserMessage
+      initialUserMessage,
+      label = "spec"
     ).widen
 
   /** v1.2 §7.1 — resume a closed spec session by id. `--resume` argv carries the session id; the `message` is the user
@@ -81,7 +82,8 @@ final class ClaudeConnector(
     spawnStreaming(
       ClaudeConnector
         .resumeStreamingSpecArgv(binary, sessionId, driverPermissionMode, driverAllowedTools, driverDisallowedTools),
-      message
+      message,
+      label = "spec-resume"
     ).widen
 
   def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] =
@@ -93,7 +95,8 @@ final class ClaudeConnector(
         driverPermissionMode,
         driverAllowedTools,
         driverDisallowedTools
-      )
+      ),
+      label = "implement"
     ).widen
 
   def runFixup(prompt: FixupPrompt): IO[AgentSession] =
@@ -105,7 +108,8 @@ final class ClaudeConnector(
         driverPermissionMode,
         driverAllowedTools,
         driverDisallowedTools
-      )
+      ),
+      label = "fixup"
     ).widen
 
   // --- reviewer methods ----
@@ -143,28 +147,36 @@ final class ClaudeConnector(
     * error (writes a stray byte to an unused stdin) but we don't actively guard against it here — the orchestrator's
     * headless paths don't call `send` on what they treat as one-shot.
     */
-  private def spawnHeadless(argv: List[String]): IO[StreamingSession] =
-    StreamingDriver.fromSubprocess(
-      Subprocess.spawn(argv, cwd = cwd, env = extraEnv),
-      ClaudeEventParser.parse,
-      initTimeout
-    )
+  private def spawnHeadless(argv: List[String], label: String): IO[StreamingSession] =
+    RawDumpSink
+      .driver(name, label)
+      .flatMap: rawLineSink =>
+        StreamingDriver.fromSubprocess(
+          Subprocess.spawn(argv, cwd = cwd, env = extraEnv),
+          ClaudeEventParser.parse,
+          initTimeout,
+          rawLineSink = rawLineSink
+        )
 
   /** Streaming-spec / resume spawn helper. Wires the connector-specific encoders into
     * [[StreamingDriver.fromSubprocess]] so the same driver shape carries the initial-user-message and `answerQuestion`
-    * paths transparently.
+    * paths transparently. `label` (`spec` / `spec-resume`) keys the opt-in [[RawDumpSink]] dump file.
     */
-  private def spawnStreaming(argv: List[String], initialUserMessage: String): IO[StreamingSession] =
-    StreamingDriver
-      .fromSubprocess(
-        Subprocess.spawn(argv, cwd = cwd, env = extraEnv),
-        ClaudeEventParser.parse,
-        initTimeout,
-        encodeUserInput = ClaudeConnector.encodeUserMessageJson,
-        initialUserInput = Some(initialUserMessage),
-        encodeAnswer = Some(ClaudeConnector.encodeAnswer)
-      )
-      .widen
+  private def spawnStreaming(argv: List[String], initialUserMessage: String, label: String): IO[StreamingSession] =
+    RawDumpSink
+      .driver(name, label)
+      .flatMap: rawLineSink =>
+        StreamingDriver
+          .fromSubprocess(
+            Subprocess.spawn(argv, cwd = cwd, env = extraEnv),
+            ClaudeEventParser.parse,
+            initTimeout,
+            encodeUserInput = ClaudeConnector.encodeUserMessageJson,
+            initialUserInput = Some(initialUserMessage),
+            encodeAnswer = Some(ClaudeConnector.encodeAnswer),
+            rawLineSink = rawLineSink
+          )
+          .widen
 
   /** Shared reviewer-one-shot path. Reads the schema content from disk (Claude wants it inline as a flag argument),
     * spawns the CLI with `--output-format json` so stdout is a single envelope, collects exit + stdout, extracts the

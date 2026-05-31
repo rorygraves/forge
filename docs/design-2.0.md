@@ -369,6 +369,34 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
   the slice exit gate (Tier 1 + Tier 2) is satisfied.** Remaining Tier-3 items
   (Tasks 2.0.5 / 2.0.6) are debuggability and may individually roll forward at
   close-out (Task 2.0.7).
+- 2026-05-31 — **Task 2.0.5 driver raw-dump landed.** New `RawDumpSink`
+  (`forge-agents`) generalises the reviewer-only `FORGE_REVIEWER_RAW_DUMP_DIR`
+  one-shot dump to streaming **driver** sessions via a new, independent
+  `FORGE_DRIVER_RAW_DUMP_DIR`: when set, every driver session appends its raw
+  stdout NDJSON stream to one `<connector>-<label>-<uuid>.jsonl` file
+  (`label` ∈ `spec` / `spec-resume` / `implement` / `fixup`), so "what did the
+  implement driver do for \$9.56" (mvp-friction gap #10) is answerable offline.
+  Same discipline as the reviewer dump: **default off** (`driver(..)` returns
+  `None` when the env var is unset — no overhead, no file, so it is safe to
+  leave wired in per the "default-on runtime <60s" rule) and **best-effort**
+  (a write failure is swallowed, never failing the session). The tap sits at
+  the single raw-line seam in `StreamingDriver.parseStreamPipeline` (covers
+  Claude spec/resume/headless + Codex headless) **and** in
+  `CodexStreamingSession.runOneTurn`'s per-turn drain (covers Codex
+  streaming-spec/resume — all turns of one session share the same once-resolved
+  sink, so they append to the same file). The tap runs **before** parsing, so
+  even unparseable lines are captured (the offline-triage point). Session id is
+  deliberately not in the filename (not known until Init arrives); it is
+  recoverable from the file's first line. `RawDumpSink.sinkTo` is split out so
+  the file mechanics are unit-testable without mutating the (immutable) process
+  env. New `RawDumpSinkSuite` (3: env-unset→None, append-skips-blanks-one-file,
+  distinct-file-per-session) + `StreamingDriverSuite` +2 (tap captures every raw
+  line incl. parse-error garbage; end-to-end through `sinkTo` writes the
+  NDJSON file) + `CodexConnectorSuite` +1 (the Codex facade taps both turns'
+  raw lines into one sink). `forge-agents` 203 (full unit suite green across all
+  modules); `forge-it` compiles. **Exit criterion #5 met.** Tier-3 remaining:
+  Task 2.0.6 (clean resume-from-NHI). `FORGE_DRIVER_RAW_DUMP_DIR` is filed for
+  the Task 2.0.7 spec reconciliation alongside the other §19 additions.
 
 ## 4. Carry-forward (inherited + new)
 

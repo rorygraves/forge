@@ -137,6 +137,38 @@ class CodexConnectorSuite extends munit.FunSuite:
     // Stream ends with Result(success).
     assert(events.last.isInstanceOf[AgentEvent.Result], clue = events)
 
+  test("rawLineSink (Task 2.0.5): CodexStreamingSession taps every raw line across turns into one per-session sink"):
+    val tid = "thr-stream-tap"
+    val fake = fakeCodex(tid)
+    val captured = scala.collection.mutable.ArrayBuffer.empty[String]
+    val sink: String => IO[Unit] = line => IO.delay { captured.synchronized(captured += line); () }
+    val events = CodexStreamingSession
+      .start(
+        firstTurnArgv = List(fake.toString, "exec", "--json", "first-prompt"),
+        initialUserMessage = "first",
+        systemPromptPath = None,
+        binary = fake.toString,
+        cwd = None,
+        extraEnv = Map.empty,
+        parser = new CodexEventParser(emptyPrices, model),
+        initTimeout = 30.seconds,
+        sessionIdHint = None,
+        rawLineSink = Some(sink)
+      )
+      .flatMap: session =>
+        for
+          _ <- session.send("second") // a second turn re-spawns codex exec resume; its raw lines hit the same sink
+          _ <- session.close()
+          drained <- session.events.compile.toVector
+        yield drained
+      .unsafeRunSync()
+    assertEquals(events.count(_.isInstanceOf[AgentEvent.Init]), 1, clue = events)
+    val lines = captured.synchronized(captured.toVector)
+    // Both turns' raw `thread.started` envelopes were tapped (the resume turn's is dropped from the event stream but
+    // still captured raw — exactly the offline-triage value of the dump).
+    assertEquals(lines.count(_.contains(""""type":"thread.started"""")), 2, clue = lines)
+    assert(lines.exists(_.contains(""""type":"turn.completed"""")), clue = lines)
+
   test("send() on a streaming session re-spawns with `codex exec resume`; resume turn's Init is dropped"):
     val tid = "thr-stream-2"
     val fake = fakeCodex(tid)

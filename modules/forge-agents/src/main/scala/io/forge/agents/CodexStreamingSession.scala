@@ -45,7 +45,8 @@ final class CodexStreamingSession private (
     cwd: Option[os.Path],
     extraEnv: Map[String, String],
     parser: CodexEventParser,
-    initTimeout: FiniteDuration
+    initTimeout: FiniteDuration,
+    rawLineSink: Option[String => IO[Unit]]
 ) extends StreamingSession:
 
   def events: Stream[IO, AgentEvent] = sessionChan.stream
@@ -168,7 +169,10 @@ final class CodexStreamingSession private (
         drainStdout =
           sp.stdout
             .evalMap: line =>
-              parser.parse(line) match
+              // Raw-capture tap (Task 2.0.5): dump every raw line of every turn into the per-session sink before
+              // parsing, so even malformed lines are captured. All turns of one session share the same sink (resolved
+              // once in CodexConnector), so they append to the same file.
+              val handleParsed = parser.parse(line) match
                 case Right(events) =>
                   events.traverse_ {
                     case AgentEvent.Init(id) =>
@@ -205,6 +209,7 @@ final class CodexStreamingSession private (
                   }
                 case Left(err) =>
                   stderrBuf.update(_ :+ s"parse error: $err  line=$line")
+              rawLineSink.traverse_(_(line)) *> handleParsed
             .compile
             .drain
         drainStderr = sp.stderr.evalMap(line => stderrBuf.update(_ :+ line)).compile.drain
@@ -324,7 +329,8 @@ object CodexStreamingSession:
       extraEnv: Map[String, String],
       parser: CodexEventParser,
       initTimeout: FiniteDuration,
-      sessionIdHint: Option[String]
+      sessionIdHint: Option[String],
+      rawLineSink: Option[String => IO[Unit]] = None
   ): IO[CodexStreamingSession] =
     for
       sessionChan <- Channel.unbounded[IO, AgentEvent]
@@ -350,7 +356,8 @@ object CodexStreamingSession:
         cwd = cwd,
         extraEnv = extraEnv,
         parser = parser,
-        initTimeout = initTimeout
+        initTimeout = initTimeout,
+        rawLineSink = rawLineSink
       )
       _ <- turnMutex.lock
         .surround(
@@ -424,7 +431,8 @@ object CodexStreamingSession:
               cwd = cwd,
               extraEnv = extraEnv,
               parser = parser,
-              initTimeout = initTimeout
+              initTimeout = initTimeout,
+              rawLineSink = rawLineSink
             )
           )
     yield finalSession

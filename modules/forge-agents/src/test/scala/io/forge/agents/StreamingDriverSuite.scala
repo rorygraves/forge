@@ -254,6 +254,57 @@ class StreamingDriverSuite extends munit.FunSuite:
     val result = program.unsafeRunSync()
     assert(result.left.exists(_.getMessage.contains("encoder rejected")), clue = result)
 
+  test("rawLineSink (Task 2.0.5): every raw stdout line is tapped before parsing, including parse-error garbage"):
+    assume(os.exists(os.Path("/bin/sh")))
+    val script =
+      """echo 'not json at all'
+        |echo '{"type":"system","subtype":"init","session_id":"sid-tap"}'
+        |echo '{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}],"usage":{"output_tokens":1}}}'
+        |echo '{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"session_id":"sid-tap"}'""".stripMargin
+    val sp = Subprocess.spawn(List("/bin/sh", "-c", script))
+    val program = IO
+      .ref(Vector.empty[String])
+      .flatMap: captured =>
+        StreamingDriver
+          .fromSubprocess(sp, ClaudeEventParser.parse, rawLineSink = Some(line => captured.update(_ :+ line)))
+          .flatMap: session =>
+            for
+              _ <- session.events.compile.toVector
+              _ <- session.close()
+              lines <- captured.get
+            yield lines
+    val lines = program.unsafeRunSync()
+    // The tap runs before parse, so the unparseable first line is captured too (the whole point — offline triage).
+    assert(lines.contains("not json at all"), clue = lines)
+    assert(lines.exists(_.contains(""""session_id":"sid-tap"""")), clue = lines)
+    assert(lines.exists(_.contains("\"result\"")), clue = lines)
+
+  test("rawLineSink (Task 2.0.5): end-to-end through RawDumpSink.sinkTo writes the session's raw NDJSON to a file"):
+    assume(os.exists(os.Path("/bin/sh")))
+    val dir = os.temp.dir(prefix = "driver-dump-")
+    try
+      val script =
+        """echo '{"type":"system","subtype":"init","session_id":"sid-file"}'
+          |echo '{"type":"assistant","message":{"content":[{"type":"text","text":"work"}],"usage":{"output_tokens":1}}}'
+          |echo '{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"session_id":"sid-file"}'""".stripMargin
+      val sp = Subprocess.spawn(List("/bin/sh", "-c", script))
+      val program = RawDumpSink
+        .sinkTo(dir, "claude", "implement")
+        .flatMap: sink =>
+          StreamingDriver
+            .fromSubprocess(sp, ClaudeEventParser.parse, rawLineSink = Some(sink))
+            .flatMap: session =>
+              session.events.compile.toVector *> session.close()
+      program.unsafeRunSync()
+      val files = os.list(dir).filter(_.last.endsWith(".jsonl"))
+      assertEquals(files.size, 1, clue = files)
+      val written = os.read.lines(files.head)
+      // The session id is recoverable from the file's first line (not the filename).
+      assertEquals(written.size, 3, clue = written)
+      assert(written.head.contains(""""session_id":"sid-file""""), clue = written.head)
+      assert(written.last.contains("\"result\""), clue = written.last)
+    finally os.remove.all(dir)
+
   test("answerQuestion: with encodeAnswer=None (default) raises NotImplementedError"):
     assume(os.exists(os.Path("/bin/sh")))
     val script = """echo '{"type":"system","subtype":"init","session_id":"sid-x"}' && sleep 1"""

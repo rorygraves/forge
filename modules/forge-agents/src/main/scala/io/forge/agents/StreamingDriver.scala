@@ -75,6 +75,11 @@ object StreamingDriver:
     *   then writes it on stdin. The encoder returns `IO[String]` so it can `IO.raiseError(adapterError)` for invalid
     *   inputs (e.g. Claude requires `Some(toolUseId)`; `None` is a parser regression). `None` means the driver was not
     *   built for streaming Q&A — calling `answerQuestion` on the returned session raises `NotImplementedError`.
+    * @param rawLineSink
+    *   Opt-in raw-capture tap (Task 2.0.5 — [[RawDumpSink]]). `Some(sink)` runs `sink(line)` on every raw stdout line
+    *   **before** parsing — so even unparseable lines are captured for offline triage. Default `None` (no tap). Best
+    *   effort is the sink's responsibility (a failing sink would propagate into the parse pipeline otherwise); the
+    *   [[RawDumpSink]] closures swallow their own write errors.
     */
   def fromSubprocess(
       subprocess: Resource[IO, Subprocess],
@@ -82,10 +87,11 @@ object StreamingDriver:
       initTimeout: FiniteDuration = 30.seconds,
       encodeUserInput: String => String = identity,
       initialUserInput: Option[String] = None,
-      encodeAnswer: Option[(Option[String], String) => IO[String]] = None
+      encodeAnswer: Option[(Option[String], String) => IO[String]] = None,
+      rawLineSink: Option[String => IO[Unit]] = None
   ): IO[StreamingSessionWithDiagnostics] =
     subprocess.allocated.flatMap: (sp, release) =>
-      buildSession(sp, release, parseLine, initTimeout, encodeUserInput, initialUserInput, encodeAnswer)
+      buildSession(sp, release, parseLine, initTimeout, encodeUserInput, initialUserInput, encodeAnswer, rawLineSink)
 
   private def buildSession(
       sp: Subprocess,
@@ -94,14 +100,15 @@ object StreamingDriver:
       initTimeout: FiniteDuration,
       encodeUserInput: String => String,
       initialUserInput: Option[String],
-      encodeAnswer: Option[(Option[String], String) => IO[String]]
+      encodeAnswer: Option[(Option[String], String) => IO[String]],
+      rawLineSink: Option[String => IO[Unit]]
   ): IO[StreamingSessionWithDiagnostics] =
     for
       initDef <- Deferred[IO, Either[Error, String]]
       eventChan <- Channel.unbounded[IO, AgentEvent]
       stderrBuf <- IO.ref(Vector.empty[String])
       stderrSink = (line: String) => stderrBuf.update(_ :+ line)
-      parsePipeline = parseStreamPipeline(sp, parseLine, initDef, eventChan, stderrSink, stderrBuf)
+      parsePipeline = parseStreamPipeline(sp, parseLine, initDef, eventChan, stderrSink, stderrBuf, rawLineSink)
       stderrPipeline = sp.stderr.evalMap(stderrSink).compile.drain
       parseFiber <- parsePipeline.compile.drain.start
       stderrFiber <- stderrPipeline.start
@@ -176,11 +183,12 @@ object StreamingDriver:
       initDef: Deferred[IO, Either[Error, String]],
       eventChan: Channel[IO, AgentEvent],
       stderrSink: String => IO[Unit],
-      stderrBuf: cats.effect.kernel.Ref[IO, Vector[String]]
+      stderrBuf: cats.effect.kernel.Ref[IO, Vector[String]],
+      rawLineSink: Option[String => IO[Unit]]
   ): Stream[IO, Unit] =
     sp.stdout
       .evalMap: line =>
-        parseLine(line) match
+        val handleParsed = parseLine(line) match
           case Right(events) =>
             events.traverse_ {
               case e @ AgentEvent.Init(id) =>
@@ -189,6 +197,8 @@ object StreamingDriver:
             }
           case Left(err) =>
             stderrSink(s"parse error: $err  line=$line")
+        // Raw-capture tap (Task 2.0.5): dump every line before parsing, so even malformed lines land in the dump.
+        rawLineSink.traverse_(_(line)) *> handleParsed
       .onFinalize(
         stderrBuf.get.flatMap: buf =>
           initDef.complete(Left(Error.NoInitBeforeExit(buf.mkString("\n")))).attempt.void

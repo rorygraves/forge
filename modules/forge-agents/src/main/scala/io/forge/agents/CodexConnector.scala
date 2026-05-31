@@ -61,8 +61,8 @@ final class CodexConnector(
     * under a mutex.
     */
   def runStreamingSpec(systemPromptPath: os.Path, initialUserMessage: String): IO[StreamingSession] =
-    IO.delay(CodexPrompt.withSystemBlock(systemPromptPath, initialUserMessage))
-      .flatMap: combined =>
+    (IO.delay(CodexPrompt.withSystemBlock(systemPromptPath, initialUserMessage)), RawDumpSink.driver(name, "spec"))
+      .flatMapN: (combined, rawLineSink) =>
         val argv = CodexConnector.execArgv(binary, model, sessionSettings, combined)
         CodexStreamingSession
           .start(
@@ -74,7 +74,8 @@ final class CodexConnector(
             extraEnv = extraEnv,
             parser = new CodexEventParser(priceTable, model),
             initTimeout = initTimeout,
-            sessionIdHint = None
+            sessionIdHint = None,
+            rawLineSink = rawLineSink
           )
           .widen
 
@@ -93,8 +94,8 @@ final class CodexConnector(
     * via `CodexStreamingSession.runOneTurn` — see review comment #4.
     */
   def resumeStreamingSpec(sessionId: String, systemPromptPath: os.Path, message: String): IO[StreamingSession] =
-    IO.delay(CodexPrompt.withSystemBlock(systemPromptPath, message))
-      .flatMap: combined =>
+    (IO.delay(CodexPrompt.withSystemBlock(systemPromptPath, message)), RawDumpSink.driver(name, "spec-resume"))
+      .flatMapN: (combined, rawLineSink) =>
         val argv = CodexConnector.execResumeArgv(binary, sessionId, combined)
         CodexStreamingSession
           .start(
@@ -106,15 +107,16 @@ final class CodexConnector(
             extraEnv = extraEnv,
             parser = new CodexEventParser(priceTable, model),
             initTimeout = initTimeout,
-            sessionIdHint = Some(sessionId)
+            sessionIdHint = Some(sessionId),
+            rawLineSink = rawLineSink
           )
           .widen
 
   def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] =
-    spawnHeadless(prompt.systemPromptPath, prompt.body).widen
+    spawnHeadless(prompt.systemPromptPath, prompt.body, label = "implement").widen
 
   def runFixup(prompt: FixupPrompt): IO[AgentSession] =
-    spawnHeadless(prompt.systemPromptPath, prompt.body).widen
+    spawnHeadless(prompt.systemPromptPath, prompt.body, label = "fixup").widen
 
   // --- reviewer methods ----
 
@@ -147,9 +149,9 @@ final class CodexConnector(
 
   // --- private helpers ----
 
-  private def spawnHeadless(systemPromptPath: os.Path, userBody: String): IO[StreamingSession] =
-    IO.delay(CodexPrompt.withSystemBlock(systemPromptPath, userBody))
-      .flatMap: combined =>
+  private def spawnHeadless(systemPromptPath: os.Path, userBody: String, label: String): IO[StreamingSession] =
+    (IO.delay(CodexPrompt.withSystemBlock(systemPromptPath, userBody)), RawDumpSink.driver(name, label))
+      .flatMapN: (combined, rawLineSink) =>
         val argv = CodexConnector.execArgv(binary, model, sessionSettings, combined)
         val parser = new CodexEventParser(priceTable, model)
         // Codex reads stdin even when the prompt is on argv (it logs "Reading additional input from stdin..." to
@@ -158,7 +160,8 @@ final class CodexConnector(
         StreamingDriver.fromSubprocess(
           Subprocess.spawn(argv, cwd = cwd, env = extraEnv).evalTap(_.closeStdin),
           parser.parse,
-          initTimeout
+          initTimeout,
+          rawLineSink = rawLineSink
         )
 
   /** Shared reviewer-one-shot path. Builds a per-call [[CodexSessionSettings]] with the right `--output-schema` (§7.10
