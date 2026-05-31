@@ -66,7 +66,11 @@ class Fsm_11_3_DesignPrGateSuite extends munit.FunSuite:
     )
     assertEquals(out.state, FsmState.DesignPrFeedback(DesignPr, round = 1))
     assertEquals(out.designSessionId, Some("new"))
-    assertEquals(drafts, Vector.empty)
+    // roadmap §3.5: a design-PR-feedback resume now emits the §19 `<actor>.resume` durability entry.
+    assertEquals(drafts.size, 1)
+    assertEquals(drafts.head.kind, "codex.resume")
+    assertEquals(drafts.head.payload("oldSessionId").str, "old")
+    assertEquals(drafts.head.payload("newSessionId").str, "new")
 
   test("DesignPrFeedback + SettleTimeout(DesignRevision) → NHI(ReopenDesign(Some(prNumber)))"):
     val f = featureIn(

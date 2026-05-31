@@ -507,6 +507,17 @@ out-scoped the observability slice (full dispositions in
   `RestartRecovery`'s deliberate "no transparent resume" stance. **Watch item:**
   until it lands, each resume from an implement/fix-up NHI re-pays the driver's
   full exploration; the per-turn cost cap bounds the blast radius.
+  **Includes the `monitor.outcome` writer** (surfaced by the §3.5 piece-spawn
+  durability review, 2026-05-31): `RebuildState.MonitorOutcomeKind` /
+  `inFlightSessions`'s `settledAfter` branch is dormant infrastructure — *no code
+  writes `monitor.outcome`*, so with piece spawns now logged, a cold rebuild in the
+  narrow post-settle window (driver settled clean, crashed before the next
+  transition persists) routes to NHI like any other in-flight spawn. That is the
+  correct conservative behaviour for now (a post-settle restart cannot synthesise
+  the not-yet-persisted `PrOpened` from state alone; the only "recovery" would be a
+  silent driver re-spawn — exactly this item's cost). Wiring the writer so the
+  post-settle window recovers belongs with this respawn-avoidance work; the
+  projection is already pinned by `RebuildStateInFlightSuite` (synthetic marker).
 - [x] **`designSessionId` durability** (Task 1.4.16 **gap #7**). ✅ **Fixed
   2026-05-31** during the Slice 2.0 live re-validation, which reproduced it: a
   `forge run` started after `forge spec` dead-ended at
@@ -516,18 +527,38 @@ out-scoped the observability slice (full dispositions in
   fix wires the §19 `<actor>.spawn` entry at the spec `SessionSpawned` seam
   (`Fsm.scala`) so the id projects from the log; covered by `Fsm_11_1_SpecPhaseSuite`
   + a `FeatureFoldEventsSuite` producer→consumer rebuild regression.
-- [ ] **Session-id log durability for piece spawns + resumes** (broader finding
-  from the gap #7 fix). The §19 `<actor>.spawn` / `<actor>.resume` kinds are
-  *consumed* by `Replay`/`RebuildState` but were **never produced anywhere** —
-  the gap #7 fix wired only the design spawn. Piece spawns (`PieceImplementing` /
-  `PieceFixingUp` `SessionSpawned`) and every resume still emit no durability
-  entry, so `currentPieceSessionId` does not survive a cold rebuild. It bites
-  less than gap #7 (pieces re-spawn a fresh driver each turn, and the happy-path
-  end-state clears all session ids — which is also why the F1/F5/F6 property
-  suites never caught it: they assert on `Fsm.transition` reconstruction or the
-  cleared final state, not mid-trajectory log projection). Wire spawn/resume
-  drafts at every `SessionSpawned`/resume seam and extend a property suite to
-  fold the **log** (not re-apply the FSM) so the projection is actually exercised.
+- [x] **Session-id log durability for piece spawns + resumes** (broader finding
+  from the gap #7 fix). ✅ **Done 2026-05-31.** The §19 `<actor>.spawn` /
+  `<actor>.resume` kinds were *consumed* by `Replay`/`RebuildState` but
+  **never produced anywhere** — the gap #7 fix wired only the design spawn. Piece
+  spawns (`PieceImplementing` / `PieceFixingUp` `SessionSpawned`) and every resume
+  emitted no durability entry, so `currentPieceSessionId` did not survive a cold
+  rebuild. (It bit less than gap #7 — pieces re-spawn a fresh driver each turn, and
+  the happy-path end-state clears all session ids — which is also why the F1/F5/F6
+  property suites never caught it: they assert on `Fsm.transition` reconstruction or
+  the cleared final state, not mid-trajectory log projection.) **Fix:** wired
+  `sessionSpawnDraft(piece = Some(p))` at all four piece-spawn seams
+  (`PieceImplementing` + the defensive `PieceFixingUp` late spawn, and the
+  `PieceCiFailed` / `PieceReviewFailed → PieceFixingUp` spawns) and a new
+  `sessionResumeDraft` at the two design-resume seams (`DesignReviewing` /
+  `DesignPrFeedback` `SessionResumed`), guarded on a non-empty `oldSessionId` so an
+  orchestrator `oldSessionId = ""` (which `RealSideEffects.resumeDesign` refuses in
+  practice) can never poison a cold rebuild via `ResumeWithoutSpawn`. Regression
+  coverage folds the **committed log** (not re-applied FSM): a new
+  `F5CurrentPieceSessionIdLifecycleSuite` property folds log prefixes and asserts
+  `currentPieceSessionId` at each piece spawn; `FeatureFoldEventsSuite` +3 and
+  `RebuildStateInFlightSuite` +1 are producer→consumer rebuild regressions; the six
+  affected `Fsm_*`/`FsmReviewFixesSuite` draft assertions updated. **Beneficial side
+  effect:** this activates an intended-but-dormant restart path — a process crash
+  mid-implement/fix-up now routes to `NeedsHumanIntervention` with a recovery hint
+  (via `RebuildState.inFlightSessions` → `RestartRecovery`, whose `(Implement,
+  PieceImplementing)` / `(Fixup, PieceFixingUp)` reason rows + `OrchestratorRestartSuite`
+  were already built and tested for exactly this) instead of silently re-spawning
+  the driver, matching the design-phase behaviour and the "no transparent resume"
+  guarantee. `forge-core` 398, full unit suite (1290) green; `forge-it` compiles.
+  Spec text unchanged (the §19 kinds were already documented as producible). The
+  remaining respawn-*avoidance* (skip re-exploration on resume) is the separate D3
+  large half, still deferred above.
 - [ ] **`NeedsHumanIntervention(ReopenDesign)` recovery hint is unactionable**
   (found during the Slice 2.0 live re-validation). The operator message says
   "re-open the spec/design loop with `forge spec <feature>`", but
@@ -537,6 +568,22 @@ out-scoped the observability slice (full dispositions in
   restart. Either make `forge spec` accept the `ReopenDesign` re-entry (the
   design-revision loop §11.3 intends) or change the hint to the actionable
   command. Small, standalone.
+- [ ] **Model `FsmEvent.SessionResumed.oldSessionId` as `Option[String]`**
+  (§3.5 piece-spawn durability review #2, 2026-05-31). Today it is a `String`, so
+  `Orchestrator.resumed` passes a `""` sentinel for a missing id
+  (`oldSessionId.getOrElse("")`), and `Fsm.applyDesignResume` special-cases that
+  sentinel (`if oldSid.isEmpty`) to avoid a poison `<actor>.resume` that would fail
+  `Replay.ResumeWithoutSpawn` on a cold rebuild. The deeper fix is an `Option` in
+  the event signature so `None` is the missing case structurally and the FSM guard
+  + sentinel disappear. Small; touches `FsmEvent`, `Orchestrator.resumed`, and the
+  `applyDesignResume` guard.
+- [ ] **Centralize FSM test action-builders + base timestamp in `FsmFixtures`**
+  (§3.5 review #6, 2026-05-31). `<actor>.spawn` / `<actor>.resume` `Action`
+  builders are re-declared per suite (`spawnAction`/`resumeAction` in
+  `FeatureFoldEventsSuite` vs `spawn`/`resume` in `RebuildStateInFlightSuite`), as
+  is the base test `Instant` (`ts0` / `Epoch`). If the §19 spawn/resume payload
+  schema changes, each copy must be updated independently. Pull them into
+  `FsmFixtures` (which already holds `MergedAt` / `ObservedAt`). Test-only cleanup.
 
 ---
 

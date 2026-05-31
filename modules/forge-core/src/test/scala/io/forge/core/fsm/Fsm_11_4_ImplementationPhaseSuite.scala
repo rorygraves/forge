@@ -26,7 +26,12 @@ class Fsm_11_4_ImplementationPhaseSuite extends munit.FunSuite:
     )
     assertEquals(out.state, FsmState.PieceImplementing(P1))
     assertEquals(out.currentPieceSessionId, Some("impl-1"))
-    assertEquals(drafts, Vector.empty)
+    // roadmap §3.5: the piece spawn now emits the §19 `<actor>.spawn` durability entry so currentPieceSessionId
+    // survives a cold rebuild. No state change, so the spawn draft is the only draft.
+    assertEquals(drafts.size, 1)
+    assertEquals(drafts.head.kind, "claude.spawn")
+    assertEquals(drafts.head.piece, Some(P1))
+    assertEquals(drafts.head.payload("sessionId").str, "impl-1")
 
   test("PieceImplementing(p) + PrOpened(p, prNumber) → PieceAwaitingCi, manifest[p].prNumber set"):
     val f = featureIn(

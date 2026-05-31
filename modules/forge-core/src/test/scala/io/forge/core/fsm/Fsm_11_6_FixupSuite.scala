@@ -16,8 +16,12 @@ class Fsm_11_6_FixupSuite extends munit.FunSuite:
     )
     assertEquals(out.state, FsmState.PieceFixingUp(P1, P1Pr, attempt = 1))
     assertEquals(out.currentPieceSessionId, Some("fixup-1"))
-    assertEquals(drafts.size, 1)
+    // roadmap §3.5: the fix-up spawn now emits the §19 `<actor>.spawn` durability entry alongside the transition.
+    assertEquals(drafts.size, 2)
     assertEquals(drafts.head.kind, "fsm.transition")
+    assertEquals(drafts(1).kind, "claude.spawn")
+    assertEquals(drafts(1).piece, Some(P1))
+    assertEquals(drafts(1).payload("sessionId").str, "fixup-1")
 
   test("PieceReviewFailed + SessionSpawned(piece=Some(p)) → PieceFixingUp, currentPieceSessionId set"):
     val f = featureIn(

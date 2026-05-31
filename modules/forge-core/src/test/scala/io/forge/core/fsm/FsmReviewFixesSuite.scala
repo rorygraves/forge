@@ -58,7 +58,11 @@ class FsmReviewFixesSuite extends munit.FunSuite:
     )
     assertEquals(out.state, FsmState.PieceFixingUp(P1, P1Pr, attempt = 2))
     assertEquals(out.currentPieceSessionId, Some("fixup-2"))
-    assertEquals(drafts, Vector.empty)
+    // roadmap §3.5: the defensive late spawn still refreshes currentPieceSessionId and now also emits the §19
+    // `<actor>.spawn` durability entry (no state change, so it is the only draft).
+    assertEquals(drafts.size, 1)
+    assertEquals(drafts.head.kind, "claude.spawn")
+    assertEquals(drafts.head.payload("sessionId").str, "fixup-2")
 
   // ---------------------------------------------------------------------------
   // Medium: design PR feedback round is monotonic across cycles

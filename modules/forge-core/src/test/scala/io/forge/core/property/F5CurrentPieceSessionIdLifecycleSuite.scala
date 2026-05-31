@@ -4,6 +4,7 @@ import io.forge.core.*
 import io.forge.core.fsm.*
 import io.forge.core.gen.{FsmTrajectory, Generators}
 
+import java.time.Instant
 import munit.ScalaCheckSuite
 import org.scalacheck.Prop.*
 
@@ -99,6 +100,42 @@ class F5CurrentPieceSessionIdLifecycleSuite extends ScalaCheckSuite:
                 Some(s"Refining → PieceImplementing transition left currentPieceSessionId set")
               else None
             case _ => None
+      violations.isEmpty :| s"violations: $violations"
+    }
+  }
+
+  // roadmap §3.5 — the regression that the re-apply-the-FSM properties above structurally cannot catch. Those use
+  // `reconstructFeatureAt`, which re-runs `Fsm.transition` and so always sees the in-memory projection. The bug was
+  // that the *log* carried no piece-spawn entry, so a cold `RebuildState.run` (which folds the log) rebuilt
+  // `currentPieceSessionId = None` mid-trajectory. This property folds the committed log itself.
+  private val Epoch: Instant = Instant.parse("2026-05-26T12:00:00Z")
+
+  property(
+    "F5 — folding the committed log (not re-applying the FSM) projects currentPieceSessionId at each piece spawn"
+  ) {
+    forAll(Generators.genInitialFeature) { (seed: Feature) =>
+      val run = FsmTrajectory.happyPath(seed)
+      val foldSeed = Feature.initial(seed.id, run.finalFeature.manifest)
+      val actions = run.allDrafts.zipWithIndex.map { case (d, i) =>
+        d.stamp(seq = i.toLong, at = Epoch.plusSeconds(i.toLong))
+      }
+      // Single forward pass (review #5): thread the running feature through the log one action at a time, rather than
+      // re-folding the whole prefix at every spawn. The happy path has no resume actions, so per-action folding is safe
+      // (`knownSessionIds` only gates `<actor>.resume`). Right after each piece `<actor>.spawn`, the projected
+      // currentPieceSessionId must equal the spawned id.
+      val (_, violations) = actions.foldLeft((foldSeed, Vector.empty[String])) { case ((running, viol), action) =>
+        Feature.foldEvents(running, Vector(action)) match
+          case Left(err) => (running, viol :+ s"fold failed at seq ${action.seq}: $err")
+          case Right(res) =>
+            val isPieceSpawn = action.kind.endsWith(".spawn") && action.piece.isDefined
+            val expected = action.payload.objOpt.flatMap(_.get("sessionId")).flatMap(_.strOpt)
+            val v =
+              if isPieceSpawn && res.feature.currentPieceSessionId != expected then
+                viol :+
+                  s"after piece spawn seq ${action.seq}: currentPieceSessionId=${res.feature.currentPieceSessionId}, expected $expected"
+              else viol
+            (res.feature, v)
+      }
       violations.isEmpty :| s"violations: $violations"
     }
   }

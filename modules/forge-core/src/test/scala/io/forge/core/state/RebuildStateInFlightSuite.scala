@@ -1,7 +1,7 @@
 package io.forge.core.state
 
 import io.forge.core.*
-import io.forge.core.fsm.{Feature, FsmFixtures, FsmState, SessionPhase}
+import io.forge.core.fsm.{Feature, Fsm, FsmEvent, FsmFixtures, FsmState, SessionPhase}
 import io.forge.core.fsm.FsmFixtures.*
 import io.forge.core.log.Action
 
@@ -14,7 +14,13 @@ import java.time.Instant
   * still in flight at the log tail?" A `<actor>.spawn` / `<actor>.resume` for the current state's driver phase that is
   * NOT followed by a [[RebuildState.MonitorOutcomeKind]] marker (same piece key) is in flight; a spawn whose monitor
   * outcome IS logged (the post-settle crash window — e.g. `Settled(Implement, Clean)` is an FSM no-op until `PrOpened`)
-  * is not, and is recovered by the orchestrator's post-settle synthesis instead.
+  * is not.
+  *
+  * NB (roadmap §3.5 / D3): '''no production code currently writes `monitor.outcome`''', so in a real run every logged
+  * driver spawn in a live-driver state is treated as in-flight → `NeedsHumanIntervention` (the conservative "no
+  * transparent resume" behaviour). The `monitor.outcome`-present cases below exercise the dormant `settledAfter` branch
+  * with a '''synthetic''' marker so the D3 post-settle / respawn-avoidance work can wire the writer against a pinned
+  * projection — they do not assert a behaviour the orchestrator exhibits today.
   */
 class RebuildStateInFlightSuite extends munit.FunSuite:
 
@@ -110,7 +116,9 @@ class RebuildStateInFlightSuite extends munit.FunSuite:
 
   // --- settle marker present → not in flight (post-settle crash window) ---
 
-  test("PieceImplementing + spawn + monitor outcome → empty (driver settled; post-settle synthesis recovers it)"):
+  test(
+    "PieceImplementing + spawn + monitor outcome → empty (dormant settledAfter branch; synthetic marker — see docstring)"
+  ):
     val log = Vector(spawn(5, Some(P1), "impl-sess"), monitorOutcome(6, Some(P1)))
     assertEquals(RebuildState.inFlightSessions(log, feature(FsmState.PieceImplementing(P1))), Vector.empty)
 
@@ -134,3 +142,17 @@ class RebuildStateInFlightSuite extends munit.FunSuite:
 
   test("driver state but no spawn ever logged → empty (state-entry spawn not yet reached)"):
     assertEquals(RebuildState.inFlightSessions(Vector.empty, feature(FsmState.PieceImplementing(P1))), Vector.empty)
+
+  // roadmap §3.5 — producer→consumer link. The FSM now emits the piece `<actor>.spawn` draft (previously absent, so
+  // mid-implement crashes silently re-spawned the driver instead of routing to NHI). Feed the *actual* FSM-emitted
+  // draft — with the orchestrator's "driver" actor name → kind "driver.spawn" — so a future change to the spawn draft's
+  // kind/piece shape that broke restart recovery is caught here, not only by the synthetic-action tests above.
+  test("§3.5: an FSM-emitted PieceImplementing spawn draft is detected as an Implement in-flight session"):
+    val seed = feature(FsmState.PieceImplementing(P1))
+    val (_, drafts) =
+      Fsm.transition(seed, FsmEvent.SessionSpawned("driver", "implement", "impl-sess", piece = Some(P1)))
+    val log = drafts.zipWithIndex.map { case (d, i) => d.stamp(seq = i.toLong, at = at(i)) }
+    assertEquals(
+      RebuildState.inFlightSessions(log, seed),
+      Vector(RebuildState.InFlightSession(SessionPhase.Implement, "impl-sess", Some(P1)))
+    )

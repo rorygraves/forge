@@ -266,9 +266,10 @@ object Fsm:
         val updated = feature.copy(state = to, manifest = updatedManifest)
         (updated, Vector(fsmTransitionDraft(feature, state, to)))
 
-      // SessionResumed during DesignReviewing(round): projects newSessionId, no state change.
-      case FsmEvent.SessionResumed(_, _, _, newSessionId, None) =>
-        (feature.copy(designSessionId = Some(newSessionId)), Vector.empty)
+      // SessionResumed during DesignReviewing(round): projects newSessionId, no state change. See `applyDesignResume`
+      // (roadmap §3.5) for the durability draft + the non-empty-oldSid guard.
+      case FsmEvent.SessionResumed(actor, role, oldSid, newSessionId, None) =>
+        applyDesignResume(feature, actor, role, oldSid, newSessionId)
 
       case FsmEvent.SettleTimeout(SessionPhase.DesignRevision, _) =>
         toNeedsHumanIntervention(
@@ -377,12 +378,13 @@ object Fsm:
         val updated = feature.copy(state = to, designPrFeedbackRound = state.round)
         (updated, Vector(fsmTransitionDraft(feature, state, to)))
 
-      // §11.3 step 2: SessionResumed projects newSessionId (idempotent under pinned CLIs).
+      // §11.3 step 2: SessionResumed projects newSessionId (idempotent under pinned CLIs) via `applyDesignResume`
+      // (roadmap §3.5).
       // C14 awareness: orchestrator-side, the Codex resume call cannot re-apply --system-prompt-file
       // (design-rationale C14). Slice 4 must re-issue role framing in the feedbackMessage for Codex. The FSM does not
       // branch on Mode.
-      case FsmEvent.SessionResumed(_, _, _, newSessionId, None) =>
-        (feature.copy(designSessionId = Some(newSessionId)), Vector.empty)
+      case FsmEvent.SessionResumed(actor, role, oldSid, newSessionId, None) =>
+        applyDesignResume(feature, actor, role, oldSid, newSessionId)
 
       case FsmEvent.SettleTimeout(SessionPhase.DesignRevision, _) =>
         toNeedsHumanIntervention(
@@ -417,9 +419,14 @@ object Fsm:
       event: FsmEvent
   ): (Feature, Vector[ActionDraft]) =
     event match
-      // §11.4 step 2: SessionSpawned projects currentPieceSessionId.
-      case FsmEvent.SessionSpawned(_, _, sid, Some(p)) if p == state.p =>
-        (feature.copy(currentPieceSessionId = Some(sid)), Vector.empty)
+      // §11.4 step 2: SessionSpawned projects currentPieceSessionId, and emits the §19 `<actor>.spawn` durability entry
+      // so the id survives a cold `RebuildState.run` (the piece-spawn companion to the gap #7 design-spawn fix —
+      // roadmap §3.5). No state change, so the spawn draft is the only draft.
+      case FsmEvent.SessionSpawned(actor, role, sid, Some(p)) if p == state.p =>
+        (
+          feature.copy(currentPieceSessionId = Some(sid)),
+          Vector(sessionSpawnDraft(feature, actor, role, sid, piece = Some(p)))
+        )
 
       // §11.4 step 1 (idempotent — re-entering PieceImplementing via Refining → PieceImplementing(next), then
       // BranchCreated for the new piece arrives here): persist baseSha + status, no state change.
@@ -614,11 +621,9 @@ object Fsm:
       event: FsmEvent
   ): (Feature, Vector[ActionDraft]) =
     event match
-      // §11.6: fresh fix-up driver session → PieceFixingUp. Updates currentPieceSessionId.
-      case FsmEvent.SessionSpawned(_, _, sid, Some(p)) if p == state.p =>
-        val to = FsmState.PieceFixingUp(state.p, state.prNumber, state.attempt)
-        val updated = feature.copy(state = to, currentPieceSessionId = Some(sid))
-        (updated, Vector(fsmTransitionDraft(feature, state, to, piece = Some(state.p))))
+      // §11.6: fresh fix-up driver session → PieceFixingUp (see `spawnFixup`, roadmap §3.5).
+      case FsmEvent.SessionSpawned(actor, role, sid, Some(p)) if p == state.p =>
+        spawnFixup(feature, state, state.p, state.prNumber, state.attempt, actor, role, sid)
       case _ => noop(feature)
 
   private def pieceReviewFailedTransitions(
@@ -627,11 +632,9 @@ object Fsm:
       event: FsmEvent
   ): (Feature, Vector[ActionDraft]) =
     event match
-      // §11.6: fresh fix-up driver session → PieceFixingUp.
-      case FsmEvent.SessionSpawned(_, _, sid, Some(p)) if p == state.p =>
-        val to = FsmState.PieceFixingUp(state.p, state.prNumber, state.attempt)
-        val updated = feature.copy(state = to, currentPieceSessionId = Some(sid))
-        (updated, Vector(fsmTransitionDraft(feature, state, to, piece = Some(state.p))))
+      // §11.6: fresh fix-up driver session → PieceFixingUp (see `spawnFixup`, roadmap §3.5).
+      case FsmEvent.SessionSpawned(actor, role, sid, Some(p)) if p == state.p =>
+        spawnFixup(feature, state, state.p, state.prNumber, state.attempt, actor, role, sid)
       case _ => noop(feature)
 
   private def pieceFixingUpTransitions(
@@ -645,9 +648,13 @@ object Fsm:
       // late SessionSpawned for the same piece while already in PieceFixingUp (e.g., a recovered-from-crash respawn
       // or, post-review-fix, a fresh runFixup after Resume(RunAnotherFixup) routed via PieceCiFailed → PieceFixingUp
       // and the next runFixup), we still want currentPieceSessionId to track the latest session id rather than
-      // silently dropping the event. §6.1 projection invariant.
-      case FsmEvent.SessionSpawned(_, _, sid, Some(p)) if p == state.p =>
-        (feature.copy(currentPieceSessionId = Some(sid)), Vector.empty)
+      // silently dropping the event. §6.1 projection invariant. Emits the §19 `<actor>.spawn` durability entry too so
+      // the refreshed id survives a cold rebuild (roadmap §3.5); no state change, so it is the only draft.
+      case FsmEvent.SessionSpawned(actor, role, sid, Some(p)) if p == state.p =>
+        (
+          feature.copy(currentPieceSessionId = Some(sid)),
+          Vector(sessionSpawnDraft(feature, actor, role, sid, piece = Some(p)))
+        )
 
       // §11.6: fix-up settle clean → PieceAwaitingCi. currentPieceSessionId retained per §6.1.
       case FsmEvent.Settled(SessionPhase.Fixup, SettleOutcome.Clean) =>
@@ -1122,6 +1129,82 @@ object Fsm:
       kind = s"$actor.spawn",
       payload = ujson.Obj("sessionId" -> ujson.Str(sessionId), "role" -> ujson.Str(role))
     )
+
+  /** §19 `<actor>.resume` — records a resumed driver session id (`{ oldSessionId, newSessionId, role }`) so
+    * `RebuildState` / `Replay.applySessionResume` can re-project `feature.designSessionId` (`piece = None`) or
+    * `currentPieceSessionId` (`piece = Some`) on a cold rebuild. Under the pinned CLIs `old == new`, but the two-field
+    * shape stays forward-compatible with a future CLI that mints a fresh id on resume — only this draft makes that new
+    * id durable. Companion to the gap #7 spawn wiring: closes the broader session-id-durability carry-forward (roadmap
+    * §3.5) so the `<actor>.resume` kind is *produced*, not only consumed. Replay rejects a resume whose `oldSessionId`
+    * was never introduced by a prior `<actor>.spawn`/`.resume` for the same actor (`ReplayError.ResumeWithoutSpawn`);
+    * callers therefore only emit this when `oldSessionId` is a real, previously logged id (see the empty-`oldSid` guard
+    * at the design-resume seams).
+    */
+  private def sessionResumeDraft(
+      feature: Feature,
+      actor: String,
+      role: String,
+      oldSessionId: String,
+      newSessionId: String,
+      piece: Option[PieceId]
+  ): ActionDraft =
+    ActionDraft(
+      feature.id,
+      piece,
+      actor = Some(actor),
+      role = Some(role),
+      kind = s"$actor.resume",
+      payload = ujson.Obj(
+        "oldSessionId" -> ujson.Str(oldSessionId),
+        "newSessionId" -> ujson.Str(newSessionId),
+        "role" -> ujson.Str(role)
+      )
+    )
+
+  /** §11.6 — both `PieceCiFailed` and `PieceReviewFailed` spawn a fresh fix-up driver: transition to `PieceFixingUp`,
+    * project `currentPieceSessionId`, and emit the §19 `<actor>.spawn` durability entry alongside the transition so the
+    * id survives a cold `RebuildState.run` (roadmap §3.5). Shared so the two seams cannot drift (review #3).
+    */
+  private def spawnFixup(
+      feature: Feature,
+      from: FsmState,
+      p: PieceId,
+      prNumber: PrNumber,
+      attempt: Int,
+      actor: String,
+      role: String,
+      sid: String
+  ): (Feature, Vector[ActionDraft]) =
+    val to = FsmState.PieceFixingUp(p, prNumber, attempt)
+    val updated = feature.copy(state = to, currentPieceSessionId = Some(sid))
+    (
+      updated,
+      Vector(
+        fsmTransitionDraft(feature, from, to, piece = Some(p)),
+        sessionSpawnDraft(feature, actor, role, sid, piece = Some(p))
+      )
+    )
+
+  /** §11.2 / §11.3 — a design-driver resume projects the new session id (no state change) and emits the §19
+    * `<actor>.resume` durability entry so the (possibly new) id survives a cold rebuild (roadmap §3.5). Shared by the
+    * `DesignReviewing` and `DesignPrFeedback` resume seams so the guard cannot drift (review #4). Guarded on a
+    * non-empty `oldSid`: `Replay.applySessionResume` rejects a resume whose `oldSessionId` no prior `<actor>.spawn`
+    * introduced (`ResumeWithoutSpawn`), and the orchestrator passes `oldSessionId = ""` when it would resume without a
+    * known session — which cannot happen in practice (`RealSideEffects.resumeDesign` refuses an empty
+    * `designSessionId`) but would otherwise poison a cold rebuild. On an empty `oldSid` we fall back to the pre-§3.5
+    * behaviour (project in memory, no draft): `designSessionId` is already durable from the gap #7 spec spawn and is
+    * unchanged under the pinned same-id resume, so nothing is lost.
+    */
+  private def applyDesignResume(
+      feature: Feature,
+      actor: String,
+      role: String,
+      oldSid: String,
+      newSessionId: String
+  ): (Feature, Vector[ActionDraft]) =
+    val updated = feature.copy(designSessionId = Some(newSessionId))
+    if oldSid.isEmpty then (updated, Vector.empty)
+    else (updated, Vector(sessionResumeDraft(feature, actor, role, oldSid, newSessionId, piece = None)))
 
   /** Slice 2.0 Task 2.0.6 — the `audit.resume_from_nhi` marker written when a feature resumes from
     * `NeedsHumanIntervention`. It records the resume boundary explicitly (`{ hint, from, to, reason }`) so the

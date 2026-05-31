@@ -84,4 +84,22 @@ class Fsm_11_2_DesignReviewSuite extends munit.FunSuite:
     )
     assertEquals(out.state, FsmState.DesignReviewing(round = 2))
     assertEquals(out.designSessionId, Some("new"))
+    // roadmap §3.5: a design resume now emits the §19 `<actor>.resume` durability entry (oldSid non-empty here).
+    assertEquals(drafts.size, 1)
+    assertEquals(drafts.head.kind, "claude.resume")
+    assertEquals(drafts.head.piece, None)
+    assertEquals(drafts.head.payload("oldSessionId").str, "old")
+    assertEquals(drafts.head.payload("newSessionId").str, "new")
+
+  test("DesignReviewing + SessionResumed with empty oldSessionId → projects but emits no durability draft"):
+    // roadmap §3.5 guard: the orchestrator passes oldSessionId = "" only when it would resume without a known session
+    // (cannot happen in practice — RealSideEffects.resumeDesign refuses an empty designSessionId). The FSM must NOT
+    // emit a `<actor>.resume` then, since replay would reject the unspawned "" id (ResumeWithoutSpawn) and poison a
+    // cold rebuild. The in-memory projection still happens.
+    val f = featureIn(FsmState.DesignReviewing(round = 2), designSessionId = Some("old"))
+    val (out, drafts) = Fsm.transition(
+      f,
+      FsmEvent.SessionResumed("claude", "driver", "", "new", piece = None)
+    )
+    assertEquals(out.designSessionId, Some("new"))
     assertEquals(drafts, Vector.empty)

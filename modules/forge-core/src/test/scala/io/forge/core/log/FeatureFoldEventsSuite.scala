@@ -69,6 +69,49 @@ class FeatureFoldEventsSuite extends munit.FunSuite:
       "designSessionId must project from the logged <actor>.spawn so it survives a cold rebuild"
     )
 
+  // roadmap §3.5 — producer→consumer regressions for the piece-spawn / resume durability. The FSM now emits the §19
+  // `<actor>.spawn` / `<actor>.resume` entries at the piece + resume seams (previously only the design spawn did — gap
+  // #7). These fold the *actual FSM-emitted drafts* back from the log — exactly what a cold `RebuildState.run` does —
+  // so a future regression that drops a durability draft is caught here, not just by the hand-built synthetic actions
+  // further down. Before the fix `currentPieceSessionId` did not survive a cold rebuild (the F5/F6 property suites
+  // missed it because they re-apply `Fsm.transition` rather than folding the log).
+
+  test("foldEvents — §3.5: a piece-implement spawn's <actor>.spawn projects currentPieceSessionId on a cold rebuild"):
+    val seed = featureIn(FsmState.PieceImplementing(P1), pieces = Vector(pieceInProgress(P1, 1), piecePending(P2, 2)))
+    val (_, drafts) = Fsm.transition(seed, FsmEvent.SessionSpawned("claude", "driver", "impl-1", piece = Some(P1)))
+    val log = drafts.zipWithIndex.map { case (d, i) => d.stamp(seq = i.toLong, at = at(i)) }
+    val Right(result) = Feature.foldEvents(seed, log): @unchecked
+    assertEquals(result.feature.state, FsmState.PieceImplementing(P1): FsmState)
+    assertEquals(
+      result.feature.currentPieceSessionId,
+      Some("impl-1"),
+      "currentPieceSessionId must project from the logged <actor>.spawn so it survives a cold rebuild"
+    )
+
+  test("foldEvents — §3.5: a fix-up spawn's <actor>.spawn projects currentPieceSessionId across the transition"):
+    val seed = featureIn(
+      FsmState.PieceCiFailed(P1, P1Pr, attempt = 1),
+      pieces = Vector(pieceInProgress(P1, 1, prNumber = Some(P1Pr), attempts = 1), piecePending(P2, 2))
+    )
+    val (_, drafts) = Fsm.transition(seed, FsmEvent.SessionSpawned("claude", "driver", "fixup-1", piece = Some(P1)))
+    val log = drafts.zipWithIndex.map { case (d, i) => d.stamp(seq = i.toLong, at = at(i)) }
+    val Right(result) = Feature.foldEvents(seed, log): @unchecked
+    assertEquals(result.feature.state, FsmState.PieceFixingUp(P1, P1Pr, attempt = 1): FsmState)
+    assertEquals(result.feature.currentPieceSessionId, Some("fixup-1"))
+
+  test("foldEvents — §3.5: a design resume's FSM-emitted <actor>.resume folds back (preceded by its spawn)"):
+    // The resume references the prior design session id; a cold rebuild sees the spec spawn first (which logs that id),
+    // so the FSM-emitted resume draft replays cleanly to the new id rather than failing ResumeWithoutSpawn.
+    val resumeSeed = featureIn(FsmState.DesignReviewing(round = 2), designSessionId = Some("sess-1"))
+    val (_, resumeDrafts) =
+      Fsm.transition(resumeSeed, FsmEvent.SessionResumed("claude", "driver", "sess-1", "sess-2", piece = None))
+    assertEquals(resumeDrafts.size, 1)
+    val foldSeed = Feature.initial(FeatureA, FsmFixtures.manifest(Vector(piecePending(P1, 1))))
+    val log = spawnAction(0, "claude", "sess-1", None) +:
+      resumeDrafts.zipWithIndex.map { case (d, i) => d.stamp(seq = (i + 1).toLong, at = at(i + 1)) }
+    val Right(result) = Feature.foldEvents(foldSeed, log): @unchecked
+    assertEquals(result.feature.designSessionId, Some("sess-2"))
+
   test("foldEvents — TransitionFromMismatch when payload.from disagrees with running state"):
     val seed = Feature.initial(FeatureA, FsmFixtures.manifest(Vector(piecePending(P1, 1))))
     val log = Vector(

@@ -89,13 +89,21 @@ object RebuildState:
     */
   final case class RebuildResult(feature: Feature, inFlightSessions: Vector[InFlightSession])
 
-  /** Log kind the orchestrator (Task 1.4.10) appends for every `SessionMonitor` `MonitorOutcome` (settled / settle
-    * timeout / turn-budget / budget breach), tagged with the same `piece` as the spawn it closes. It is a no-op
-    * projection at the [[Replay]] layer (an unknown kind), and exists purely so [[inFlightSessions]] can distinguish
+  /** Log kind that would mark a settled `SessionMonitor` `MonitorOutcome` (settled / settle timeout / turn-budget /
+    * budget breach), tagged with the same `piece` as the spawn it closes, so [[inFlightSessions]] could distinguish
     * "driver still running" (spawn with no following marker → in-flight) from "driver settled, crashed in the
     * post-settle window" (spawn + marker, FSM state unchanged because e.g. `Settled(Implement, Clean)` is an FSM no-op
-    * until `PrOpened`) — the latter is replayed by the orchestrator's post-settle synthesis, not surfaced as an
-    * interrupted session.
+    * until `PrOpened`).
+    *
+    * '''Currently no code writes this kind''' (roadmap §3.5 / D3). With the spawn drafts now produced (§3.5 piece /
+    * resume durability), the deliberate consequence is that '''every''' logged driver spawn in a live-driver state on a
+    * cold rebuild is treated as in-flight → `NeedsHumanIntervention`, including the narrow post-settle window. That is
+    * the conservative "no transparent resume" behaviour (a post-settle restart cannot synthesise the not-yet-persisted
+    * `PrOpened` from state alone; re-entering the loop would silently re-spawn the driver — the re-exploration cost D3
+    * is chartered to avoid). The [[MonitorOutcomeKind]] / `settledAfter` branch below is therefore dormant
+    * infrastructure: it is exercised by `RebuildStateInFlightSuite` with a synthetic marker and stays here so the D3
+    * post-settle / respawn-avoidance work can wire the writer without re-deriving the projection. It remains a no-op at
+    * the [[Replay]] layer (an unknown kind).
     */
   val MonitorOutcomeKind: String = "monitor.outcome"
 
