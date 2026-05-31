@@ -144,9 +144,14 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
     run(argv).map(_.map(RealGitClient.parseStatusZ))
 
   override def commit(message: String): IO[Either[GitError, CommitResult]] =
+    // `--no-verify`: Forge's commit is a mechanical orchestration step — verification is the remote CI gate (§8) plus
+    // the reviewer, NOT the target repo's local dev hooks. Some repos install a pre-commit hook that runs the full
+    // formatter/build (e.g. szork runs `sbt scalafmtCheck`), which is slow and would block (or fail) the orchestrator's
+    // commit on unformatted-but-about-to-be-CI-checked code. Bypass local hooks; let CI catch formatting → fix-up.
     // Deliberately no `-q`: git prints "nothing to commit" to stdout, which the classifier keys off.
     IO.blocking {
-      val res = os.proc("git", "commit", "-m", message).call(cwd = repoRoot, check = false, stderr = os.Pipe)
+      val res =
+        os.proc("git", "commit", "--no-verify", "-m", message).call(cwd = repoRoot, check = false, stderr = os.Pipe)
       RealGitClient.classifyCommit(res.exitCode, res.out.text(), res.err.text())
     }
 
