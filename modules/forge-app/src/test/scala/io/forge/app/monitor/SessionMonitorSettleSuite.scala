@@ -28,7 +28,7 @@ class SessionMonitorSettleSuite extends CatsEffectSuite:
       session <- FakeStreamingSession.make
       totals <- Ref.of[IO, CostTotals](CostTotals.zero)
       events = Stream.emit[IO, AgentEvent](AgentEvent.Result(success = true, durationMs = 0))
-      outcome <- monitor.monitor(SessionPhase.Spec, None, session, events, limits, totals)
+      outcome <- monitor.monitor(SessionPhase.Spec, None, session, events, limits, totals).map(_.outcome)
       kills <- session.killCount.get
     yield
       assertEquals(outcome, MonitorOutcome.Settled(SessionPhase.Spec, SettleOutcome.Clean))
@@ -40,7 +40,7 @@ class SessionMonitorSettleSuite extends CatsEffectSuite:
       session <- FakeStreamingSession.make
       totals <- Ref.of[IO, CostTotals](CostTotals.zero)
       events = Stream.emit[IO, AgentEvent](AgentEvent.Result(success = false, durationMs = 0))
-      outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals)
+      outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals).map(_.outcome)
       kills <- session.killCount.get
     yield
       assertEquals(
@@ -63,7 +63,7 @@ class SessionMonitorSettleSuite extends CatsEffectSuite:
           AgentEvent.Result(success = true, durationMs = 42)
         )
       )
-      outcome <- monitor.monitor(SessionPhase.DesignRevision, None, session, events, limits, totals)
+      outcome <- monitor.monitor(SessionPhase.DesignRevision, None, session, events, limits, totals).map(_.outcome)
     yield assertEquals(outcome, MonitorOutcome.Settled(SessionPhase.DesignRevision, SettleOutcome.Clean))
 
   test("the first Result wins; subsequent events on the stream do not override the outcome"):
@@ -78,5 +78,5 @@ class SessionMonitorSettleSuite extends CatsEffectSuite:
           AgentEvent.Result(success = false, durationMs = 2)
         )
       )
-      outcome <- monitor.monitor(SessionPhase.Fixup, None, session, events, limits, totals)
+      outcome <- monitor.monitor(SessionPhase.Fixup, None, session, events, limits, totals).map(_.outcome)
     yield assertEquals(outcome, MonitorOutcome.Settled(SessionPhase.Fixup, SettleOutcome.Clean))

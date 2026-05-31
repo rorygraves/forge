@@ -16,7 +16,7 @@ import io.forge.agents.{
   ReviewVerdict
 }
 import io.forge.app.config.ForgeConfig
-import io.forge.app.monitor.{MonitorOutcome, SessionMonitor}
+import io.forge.app.monitor.{MonitorOutcome, MonitorReport, SessionMonitor}
 import io.forge.app.reviewer.{ReviewerCall, ReviewerLimits, ReviewerOutcome}
 import io.forge.core.*
 import io.forge.core.cost.CostTotals
@@ -134,9 +134,9 @@ object OrchestratorTestKit:
         events: Stream[IO, AgentEvent],
         limits: io.forge.app.monitor.SessionLimits,
         runningTotals: Ref[IO, CostTotals]
-    ): IO[MonitorOutcome] =
+    ): IO[MonitorReport] =
       outcomes.modify {
-        case h :: t => (t, IO.pure(h))
+        case h :: t => (t, IO.pure(MonitorReport(phase, h, turnCost = None, durationMs = None)))
         case Nil =>
           (Nil, IO.raiseError(new IllegalStateException(s"FakeSessionMonitor: no scripted outcome for $phase")))
       }.flatten

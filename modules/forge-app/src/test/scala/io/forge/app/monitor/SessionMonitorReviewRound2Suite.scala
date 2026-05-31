@@ -54,7 +54,7 @@ class SessionMonitorReviewRound2Suite extends CatsEffectSuite:
         session <- IO.pure(new FailingKillSession(killException))
         totals <- Ref.of[IO, CostTotals](CostTotals.zero)
         monitor = new RealSessionMonitor
-        outcome <- monitor.monitor(SessionPhase.Spec, None, session, Stream.never[IO], limits, totals)
+        outcome <- monitor.monitor(SessionPhase.Spec, None, session, Stream.never[IO], limits, totals).map(_.outcome)
       yield outcome
     TestControl.executeEmbed(program).map { outcome =>
       outcome match
@@ -72,7 +72,7 @@ class SessionMonitorReviewRound2Suite extends CatsEffectSuite:
         session <- IO.pure(new FailingKillSession(killException))
         totals <- Ref.of[IO, CostTotals](CostTotals.zero)
         monitor = new RealSessionMonitor
-        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals)
+        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals).map(_.outcome)
       yield outcome
     TestControl.executeEmbed(program).map { outcome =>
       outcome match
@@ -97,7 +97,7 @@ class SessionMonitorReviewRound2Suite extends CatsEffectSuite:
         session <- IO.pure(new FailingKillSession(nullMsgError))
         totals <- Ref.of[IO, CostTotals](CostTotals.zero)
         monitor = new RealSessionMonitor
-        outcome <- monitor.monitor(SessionPhase.Spec, None, session, Stream.never[IO], limits, totals)
+        outcome <- monitor.monitor(SessionPhase.Spec, None, session, Stream.never[IO], limits, totals).map(_.outcome)
       yield outcome
     TestControl.executeEmbed(program).map { outcome =>
       outcome match

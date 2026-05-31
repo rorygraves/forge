@@ -5,7 +5,7 @@ import cats.syntax.all.*
 import fs2.Stream
 import io.forge.agents.{AgentEvent, AgentSession}
 import io.forge.core.PieceId
-import io.forge.core.cost.CostTotals
+import io.forge.core.cost.{Cost, CostTotals}
 import io.forge.core.fsm.{BudgetScope, SessionPhase, SettleOutcome}
 
 /** §7.9 + §12 implementation. Races a settle-timeout sleeper against an events-processing consumer; the first to claim
@@ -47,7 +47,7 @@ final class RealSessionMonitor extends SessionMonitor:
       events: Stream[IO, AgentEvent],
       limits: SessionLimits,
       runningTotals: Ref[IO, CostTotals]
-  ): IO[MonitorOutcome] =
+  ): IO[MonitorReport] =
     if !SessionMonitor.DriverPhases.contains(phase) then
       IO.raiseError(
         new IllegalArgumentException(
@@ -60,6 +60,10 @@ final class RealSessionMonitor extends SessionMonitor:
         result <- Deferred[IO, MonitorOutcome]
         winnerClaimed <- Ref.of[IO, Boolean](false)
         pendingBreach <- Ref.of[IO, Option[MonitorOutcome.BudgetBreached]](None)
+        // Slice 2.0 per-turn observability: accumulate this turn's CostUpdate deltas + capture the Result duration,
+        // both local to this one `monitor` call (one call == one turn) so there is no cross-turn reset to forget (D2).
+        turnCost <- Ref.of[IO, Option[Cost]](None)
+        durationMs <- Ref.of[IO, Option[Long]](None)
 
         // Claim the right to publish, run the kill under `attempt` (a kill failure must NOT orphan the monitor —
         // see round 2 P2 in the class docstring), then publish the outcome. The outcome is built from the captured
@@ -89,7 +93,18 @@ final class RealSessionMonitor extends SessionMonitor:
 
         processor = events
           .evalMap(
-            handleEvent(phase, piece, session, limits, runningTotals, pendingBreach, finish, finishWithKill)
+            handleEvent(
+              phase,
+              piece,
+              session,
+              limits,
+              runningTotals,
+              pendingBreach,
+              turnCost,
+              durationMs,
+              finish,
+              finishWithKill
+            )
           )
           .compile
           .drain
@@ -107,7 +122,11 @@ final class RealSessionMonitor extends SessionMonitor:
           }
 
         outcome <- (timer.background, processor.background).tupled.use(_ => result.get)
-      yield outcome
+        // Read the per-turn accumulators *after* the outcome settles: on the publishing path the winning fiber's
+        // `turnCost`/`durationMs` writes are sequenced before `result.complete`, so they are visible here.
+        tc <- turnCost.get
+        dur <- durationMs.get
+      yield MonitorReport(phase, outcome, tc, dur)
 
   private def handleEvent(
       phase: SessionPhase,
@@ -116,25 +135,30 @@ final class RealSessionMonitor extends SessionMonitor:
       limits: SessionLimits,
       runningTotals: Ref[IO, CostTotals],
       pendingBreach: Ref[IO, Option[MonitorOutcome.BudgetBreached]],
+      turnCost: Ref[IO, Option[Cost]],
+      durationMs: Ref[IO, Option[Long]],
       finish: MonitorOutcome => IO[Unit],
       finishWithKill: (Option[String] => MonitorOutcome, IO[Unit]) => IO[Unit]
   )(event: AgentEvent): IO[Unit] =
     event match
       case AgentEvent.CostUpdate(cost) =>
-        runningTotals
-          .updateAndGet { old =>
-            old.copy(
-              feature = old.feature + cost.usd,
-              piece = old.piece + cost.usd,
-              turn = old.turn + cost.usd
-            )
-          }
-          .flatMap(applyCaps(phase, piece, session, limits, pendingBreach, finish, finishWithKill))
+        // Record the per-turn aggregate (Slice 2.0) alongside the shared running totals + cap check.
+        turnCost.update(acc => Some(RealSessionMonitor.addTurnCost(acc, cost))) >>
+          runningTotals
+            .updateAndGet { old =>
+              old.copy(
+                feature = old.feature + cost.usd,
+                piece = old.piece + cost.usd,
+                turn = old.turn + cost.usd
+              )
+            }
+            .flatMap(applyCaps(phase, piece, session, limits, pendingBreach, finish, finishWithKill))
 
-      case AgentEvent.Result(success, _) =>
+      case AgentEvent.Result(success, dur) =>
         // End-of-turn boundary: a pending feature/piece breach beats Settled (§12 check 2 — current turn was
-        // allowed to complete, now we surface the breach so the orchestrator refuses the next spawn).
-        pendingBreach.get.flatMap {
+        // allowed to complete, now we surface the breach so the orchestrator refuses the next spawn). Capture the
+        // CLI's own turn duration (Slice 2.0 Task 2.0.2) before finishing either way.
+        durationMs.set(Some(dur)) >> pendingBreach.get.flatMap {
           case Some(b) => finish(b)
           case None =>
             val outcome = MonitorOutcome.Settled(
@@ -181,3 +205,21 @@ final class RealSessionMonitor extends SessionMonitor:
       breach match
         case Some(b) => pendingBreach.update(_.orElse(Some(b)))
         case None => IO.unit
+
+object RealSessionMonitor:
+  /** Fold one `AgentEvent.CostUpdate` delta into the running per-turn aggregate (Slice 2.0). Tokens and USD sum; the
+    * `provider` / `model` take the delta's values (a single turn is one model, so latest-wins is also first-wins). The
+    * seed (`None`) is "no cost seen yet", which the orchestrator reads as "nothing to attribute — write no
+    * `cost.update`".
+    */
+  private[monitor] def addTurnCost(acc: Option[Cost], delta: Cost): Cost =
+    acc match
+      case None => delta
+      case Some(c) =>
+        Cost(
+          provider = delta.provider,
+          model = delta.model,
+          inputTokens = c.inputTokens + delta.inputTokens,
+          outputTokens = c.outputTokens + delta.outputTokens,
+          usd = c.usd + delta.usd
+        )

@@ -29,7 +29,7 @@ class SessionMonitorPhaseCoverageSuite extends CatsEffectSuite:
       totals <- Ref.of[IO, CostTotals](CostTotals.zero)
       monitor = new RealSessionMonitor
       events = Stream.emit[IO, AgentEvent](AgentEvent.Result(success = true, durationMs = 0))
-      outcome <- monitor.monitor(phase, None, session, events, limits, totals)
+      outcome <- monitor.monitor(phase, None, session, events, limits, totals).map(_.outcome)
     yield outcome
 
   Vector(

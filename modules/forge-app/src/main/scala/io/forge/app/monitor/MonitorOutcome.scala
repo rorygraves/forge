@@ -1,6 +1,6 @@
 package io.forge.app.monitor
 
-import io.forge.core.cost.CostTotals
+import io.forge.core.cost.{Cost, CostTotals}
 import io.forge.core.fsm.{BudgetScope, SessionPhase, SettleOutcome}
 
 /** §12 / §7.9 — output ADT produced by [[SessionMonitor]] for the four driver phases (`Spec`, `DesignRevision`,
@@ -60,3 +60,27 @@ object MonitorOutcome:
     * string.
     */
   final case class BudgetBreached(scope: BudgetScope, totals: CostTotals, capUsd: BigDecimal) extends MonitorOutcome
+
+/** Slice 2.0 (`design-2.0.md` Tasks 2.0.1 / 2.0.2) — the full result of monitoring one driver turn: the settle
+  * [[MonitorOutcome]] plus the per-turn cost/timing the orchestrator records as a §19 `cost.update` +
+  * `session.complete` action. Carrying these *alongside* the outcome (rather than stuffing them onto every
+  * `MonitorOutcome` variant) keeps the kill/FSM-mapping discipline of [[MonitorOutcome]] untouched.
+  *
+  *   - `turnCost` aggregates this turn's `AgentEvent.CostUpdate` deltas — summed `inputTokens` / `outputTokens` /
+  *     `usd`, with the latest-seen `provider` / `model` (a turn is a single model). `None` when the turn emitted no
+  *     cost event at all (e.g. a settle-timeout before any output) — there is nothing to attribute, so no `cost.update`
+  *     is written.
+  *   - `durationMs` is the CLI's own `AgentEvent.Result` duration (a more faithful number than orchestrator wall-clock,
+  *     since it excludes scheduling). `None` on a settle-timeout / budget kill / stream error where no `Result`
+  *     arrived.
+  *
+  * The per-turn aggregate is accumulated **locally** inside a single [[SessionMonitor.monitor]] call, so — unlike the
+  * orchestrator-owned `CostTotals` ref the monitor only ever *adds* to (whose missing per-turn reset was the D2 bug) —
+  * it needs no cross-turn reset: each `monitor` invocation is exactly one turn and starts with a fresh accumulator.
+  */
+final case class MonitorReport(
+    phase: SessionPhase,
+    outcome: MonitorOutcome,
+    turnCost: Option[Cost],
+    durationMs: Option[Long]
+)

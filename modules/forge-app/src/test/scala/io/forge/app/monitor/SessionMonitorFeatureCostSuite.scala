@@ -40,7 +40,7 @@ class SessionMonitorFeatureCostSuite extends CatsEffectSuite:
         session <- FakeStreamingSession.make
         totals <- Ref.of[IO, CostTotals](CostTotals.zero)
         monitor = new RealSessionMonitor
-        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals)
+        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals).map(_.outcome)
         kills <- session.killCount.get
       yield (outcome, kills)
     TestControl.executeEmbed(program).map { case (outcome, kills) =>
@@ -67,7 +67,7 @@ class SessionMonitorFeatureCostSuite extends CatsEffectSuite:
         session <- FakeStreamingSession.make
         totals <- Ref.of[IO, CostTotals](CostTotals.zero)
         monitor = new RealSessionMonitor
-        outcome <- monitor.monitor(SessionPhase.DesignRevision, None, session, events, limits, totals)
+        outcome <- monitor.monitor(SessionPhase.DesignRevision, None, session, events, limits, totals).map(_.outcome)
         kills <- session.killCount.get
         finalTotals <- totals.get
       yield (outcome, kills, finalTotals)
@@ -95,7 +95,7 @@ class SessionMonitorFeatureCostSuite extends CatsEffectSuite:
         session <- FakeStreamingSession.make
         totals <- Ref.of[IO, CostTotals](CostTotals.zero)
         monitor = new RealSessionMonitor
-        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, capless, totals)
+        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, capless, totals).map(_.outcome)
       yield outcome
     TestControl.executeEmbed(program).map { outcome =>
       outcome match

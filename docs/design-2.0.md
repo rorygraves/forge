@@ -284,6 +284,32 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
   implement→CI-fail→fix-up run proves the same-piece fix-up carries `piece`
   while resetting `turn`. `forge-app` 331 tests green. The `cost.update`
   writer half of Task 2.0.1 (D1) is still pending.
+- 2026-05-31 — **Task 2.0.1 `cost.update` writer + Task 2.0.2
+  `session.complete` landed together** (D1 resolved **option (b)** — full §19
+  payload now). `SessionMonitor.monitor` now returns a `MonitorReport`
+  (settle `MonitorOutcome` + this turn's aggregate `Cost` + the CLI
+  `durationMs`), accumulated **locally** per `monitor` call so it carries no
+  cross-turn-reset hazard (contrast the shared `CostTotals` ref whose missing
+  reset *was* D2). `Orchestrator.handleWinner`'s `FromMonitor` arm drafts the
+  §19 `cost.update` (full `{ provider, model, inputTokens, outputTokens, usd,
+  featureTotalUsd, pieceTotalUsd, turnTotalUsd }`, totals off the running
+  `CostTotals`) and a new `session.complete` audit action (`{ phase, piece,
+  durationMs, model, turnCostUsd, success }`); both are appended in the **same
+  atomic batch** as the settle transition (`applyAndPersist` `extraDrafts`), so
+  a crash after the transition still has the cost on record.
+  `cost.update` is emitted only when the turn actually spent (`turnCost` is
+  `Some`); `session.complete` is emitted for every settle. New
+  `OrchestratorCostUpdateWriterSuite` (2 tests, full lifecycle from `Drafting`):
+  the Implement `cost.update` carries the full §19 payload, a `session.complete`
+  lands per settled driver session, a fresh `RebuildState.run` projects the
+  running totals onto `Feature.cost` (proving the formerly-dead
+  `Replay.applyCostUpdate` is now fed and that replay tolerates the new
+  `session.complete` kind as a no-op projection), and the two-piece run shows
+  `feature` carrying across pieces while `turn`/`piece` restart in the
+  *written* record. The 8 direct-call `SessionMonitor*Suite`s adapt with a
+  one-line `.map(_.outcome)` (assertions unchanged). `forge-app` 333 tests
+  green; `forge-it` compiles. Exit criteria #1 + #2 met. **Tier 1 (Tasks
+  2.0.1 + 2.0.2) complete**; next is Tier 2 (`forge stats`, work-vs-wait).
 
 ## 4. Carry-forward (inherited + new)
 
@@ -310,10 +336,16 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
 
 ### New decisions opened in Slice 2.0 (reconcile at Task 2.0.7)
 
-- **D1 — `cost.update` payload shape.** Totals-only vs the full §19
-  `{ provider, model, inputTokens, outputTokens, usd, ... }`. Settle while
-  implementing Task 2.0.1; if it changes the §19 contract, document in the
-  next-revision spec.
+- **D1 — `cost.update` payload shape.** ✅ Resolved **option (b)** 2026-05-31
+  (full §19 payload now). The monitor accumulates the turn's aggregate `Cost`
+  and returns it on `MonitorReport`, so the writer emits the complete
+  `{ provider, model, inputTokens, outputTokens, usd, featureTotalUsd,
+  pieceTotalUsd, turnTotalUsd }` in one pass and Task 2.0.2's `session.complete`
+  reuses the same payload. `cost.update`'s §19 field set is unchanged (the spec
+  already documents it); the **new** kind is `session.complete`
+  (`{ phase, piece, durationMs, model, turnCostUsd, success }`), which §19 does
+  not yet list — file it in the next-revision spec at Task 2.0.7 (do not edit
+  `forge-design-1.2.md` / `-1.3.md` in place).
 - **D2 — turn/piece cost-total reset ownership.** ✅ Fixed standalone
   2026-05-31 (`Orchestrator.store` resets `turn`; `PieceImplementing` entry
   resets `piece` on a new piece), with `OrchestratorCostScopeResetSuite`.

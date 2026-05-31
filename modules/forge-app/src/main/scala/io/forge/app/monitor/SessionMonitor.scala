@@ -32,6 +32,11 @@ import scala.concurrent.duration.FiniteDuration
   * `AgentEvent.UserMessage` / `AgentEvent.Result` — that reset is the orchestrator's per-turn-boundary responsibility,
   * so the FSM state machine sees a coherent `turnTotalUsd` at every transition. The monitor treats `CostTotals.turn` as
   * authoritative when checking the per-turn cap.
+  *
+  * **Per-turn observability (Slice 2.0).** `monitor` returns a [[MonitorReport]] — the settle outcome plus this turn's
+  * aggregated [[io.forge.core.cost.Cost Cost]] and CLI-reported `durationMs`. The orchestrator records those as the §19
+  * `cost.update` / `session.complete` actions (Tasks 2.0.1 / 2.0.2). The aggregate is accumulated locally per call, so
+  * it carries no cross-turn-reset hazard (contrast the shared `runningTotals` above).
   */
 trait SessionMonitor:
   def monitor(
@@ -41,7 +46,7 @@ trait SessionMonitor:
       events: Stream[IO, AgentEvent],
       limits: SessionLimits,
       runningTotals: Ref[IO, CostTotals]
-  ): IO[MonitorOutcome]
+  ): IO[MonitorReport]
 
 /** §7.9 + §12 per-session caps. All USD amounts are `BigDecimal` to match the `Cost.usd` / `CostTotals.*` shape in
   * [[io.forge.core.cost.Cost]] (Slice 2 PR-B). The orchestrator parses the JSON `maxTurnCostUsd: 2.00` form via

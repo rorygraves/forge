@@ -70,7 +70,7 @@ class SessionMonitorReviewRound1Suite extends CatsEffectSuite:
         session = new SlowKillSession(killDuration, killStart, killEnd)
         totals <- Ref.of[IO, CostTotals](CostTotals.zero)
         monitor = new RealSessionMonitor
-        _ <- monitor.monitor(SessionPhase.Spec, None, session, Stream.never[IO], limits, totals)
+        _ <- monitor.monitor(SessionPhase.Spec, None, session, Stream.never[IO], limits, totals).map(_.outcome)
         unblockedAt <- IO.monotonic
         end <- killEnd.get
       yield (unblockedAt, end)
@@ -93,7 +93,7 @@ class SessionMonitorReviewRound1Suite extends CatsEffectSuite:
         totals <- Ref.of[IO, CostTotals](CostTotals.zero)
         monitor = new RealSessionMonitor
         events = Stream.emit[IO, AgentEvent](AgentEvent.CostUpdate(cost("11.00")))
-        _ <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals)
+        _ <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals).map(_.outcome)
         unblockedAt <- IO.monotonic
         end <- killEnd.get
       yield (unblockedAt, end)
@@ -128,7 +128,7 @@ class SessionMonitorReviewRound1Suite extends CatsEffectSuite:
         session <- FakeStreamingSession.make
         totals <- Ref.of[IO, CostTotals](CostTotals.zero)
         monitor = new RealSessionMonitor
-        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals)
+        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals).map(_.outcome)
         kills <- session.killCount.get
         nConsumed <- consumed.get
       yield (outcome, kills, nConsumed)
@@ -154,7 +154,7 @@ class SessionMonitorReviewRound1Suite extends CatsEffectSuite:
         session <- FakeStreamingSession.make
         totals <- Ref.of[IO, CostTotals](CostTotals.zero)
         monitor = new RealSessionMonitor
-        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals)
+        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals).map(_.outcome)
         kills <- session.killCount.get
       yield (outcome, kills)
     TestControl.executeEmbed(program).map { case (outcome, kills) =>
@@ -174,7 +174,7 @@ class SessionMonitorReviewRound1Suite extends CatsEffectSuite:
         session <- FakeStreamingSession.make
         totals <- Ref.of[IO, CostTotals](CostTotals.zero)
         monitor = new RealSessionMonitor
-        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals)
+        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals).map(_.outcome)
         kills <- session.killCount.get
       yield (outcome, kills)
     TestControl.executeEmbed(program).map { case (outcome, kills) =>
@@ -194,7 +194,7 @@ class SessionMonitorReviewRound1Suite extends CatsEffectSuite:
         session <- FakeStreamingSession.make
         totals <- Ref.of[IO, CostTotals](CostTotals.zero)
         monitor = new RealSessionMonitor
-        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals)
+        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals).map(_.outcome)
         kills <- session.killCount.get
       yield (outcome, kills)
     TestControl.executeEmbed(program).map { case (outcome, kills) =>
@@ -221,7 +221,7 @@ class SessionMonitorReviewRound1Suite extends CatsEffectSuite:
         session <- FakeStreamingSession.make
         totals <- Ref.of[IO, CostTotals](CostTotals.zero)
         monitor = new RealSessionMonitor
-        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limitsPF, totals)
+        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limitsPF, totals).map(_.outcome)
       yield outcome
     TestControl.executeEmbed(program).map { outcome =>
       outcome match

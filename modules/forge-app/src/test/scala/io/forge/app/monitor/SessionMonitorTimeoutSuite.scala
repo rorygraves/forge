@@ -34,7 +34,7 @@ class SessionMonitorTimeoutSuite extends CatsEffectSuite:
         session <- FakeStreamingSession.make
         totals <- Ref.of[IO, CostTotals](CostTotals.zero)
         monitor = new RealSessionMonitor
-        outcome <- monitor.monitor(phase, None, session, events, limits, totals)
+        outcome <- monitor.monitor(phase, None, session, events, limits, totals).map(_.outcome)
         kills <- session.killCount.get
       yield (outcome, kills)
     TestControl.executeEmbed(program)

@@ -4,7 +4,7 @@ import cats.effect.{IO, Ref}
 import cats.effect.unsafe.implicits.global
 import fs2.Stream
 import io.forge.agents.{AgentEvent, AgentSession}
-import io.forge.app.monitor.{MonitorOutcome, SessionLimits, SessionMonitor}
+import io.forge.app.monitor.{MonitorOutcome, MonitorReport, SessionLimits, SessionMonitor}
 import io.forge.core.*
 import io.forge.core.cost.CostTotals
 import io.forge.core.fsm.{FsmState, SessionPhase, SettleOutcome}
@@ -62,17 +62,18 @@ class OrchestratorCostScopeResetSuite extends munit.FunSuite:
         events: Stream[IO, AgentEvent],
         limits: SessionLimits,
         runningTotals: Ref[IO, CostTotals]
-    ): IO[MonitorOutcome] =
+    ): IO[MonitorReport] =
       for
         entry <- runningTotals.get
         _ <- observedAtEntry.update(_ :+ (phase, entry))
         updated <- runningTotals.updateAndGet(t =>
           t.copy(feature = t.feature + spendPerTurn, piece = t.piece + spendPerTurn, turn = t.turn + spendPerTurn)
         )
-      yield
-        if updated.turn > limits.maxTurnCostUsd then
-          MonitorOutcome.TurnBudgetBreached(phase, updated.turn, limits.maxTurnCostUsd, None)
-        else MonitorOutcome.Settled(phase, SettleOutcome.Clean)
+        outcome =
+          if updated.turn > limits.maxTurnCostUsd then
+            MonitorOutcome.TurnBudgetBreached(phase, updated.turn, limits.maxTurnCostUsd, None)
+          else MonitorOutcome.Settled(phase, SettleOutcome.Clean)
+      yield MonitorReport(phase, outcome, turnCost = None, durationMs = None)
 
   /** An open PR whose single observed check has completed with a failing conclusion. The §8 gate promotes the observed
     * check into `required` and forwards immediately on a bad conclusion (`CiReadiness` rule), routing the piece to a

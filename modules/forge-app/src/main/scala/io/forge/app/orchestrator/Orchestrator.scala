@@ -3,11 +3,21 @@ package io.forge.app.orchestrator
 import cats.effect.{IO, Ref}
 import io.forge.agents.{DesignReview, PrReview, RefineOutcome as AgentRefineOutcome, RefineResult, ReviewVerdict}
 import io.forge.app.config.ForgeConfig
-import io.forge.app.monitor.{MonitorOutcome, SessionLimits, SessionMonitor}
+import io.forge.app.monitor.{MonitorOutcome, MonitorReport, SessionLimits, SessionMonitor}
 import io.forge.app.reviewer.{ReviewerCall, ReviewerLimits, ReviewerOutcome}
 import io.forge.core.{CiPolicy, PieceId, PrNumber}
-import io.forge.core.cost.CostTotals
-import io.forge.core.fsm.{Feature, Fsm, FsmConfig, FsmEvent, FsmState, ResumeHint, SessionPhase, UserCommand}
+import io.forge.core.cost.{Cost, CostTotals}
+import io.forge.core.fsm.{
+  Feature,
+  Fsm,
+  FsmConfig,
+  FsmEvent,
+  FsmState,
+  ResumeHint,
+  SessionPhase,
+  SettleOutcome,
+  UserCommand
+}
 import io.forge.core.log.ActionDraft
 import io.forge.core.manifest.{ManifestPatch, ManifestStore}
 import io.forge.core.pr.{PrState, ReviewDecision}
@@ -197,15 +207,22 @@ final class Orchestrator(
               IO.raiseError(new IllegalStateException(s"orchestrator: no event sources for state ${feature.state}"))
             else
               raceAll(sources.map(sourceIO(feature, active, _, totalsRef)))
-                .flatMap(winner => handleWinner(feature, winner, driverRef))
+                .flatMap(winner => handleWinner(feature, winner, driverRef, totalsRef))
                 .flatMap(f1 => loop(f1, driverRef, totalsRef, justEntered = f1.state != feature.state))
           }
       }
 
-  /** Apply one event through the pure FSM and persist atomically; returns the resulting feature. */
-  private def applyAndPersist(feature: Feature, event: FsmEvent): IO[Feature] =
+  /** Apply one event through the pure FSM and persist atomically; returns the resulting feature. `extraDrafts` are
+    * prepended to the transition's own drafts so they land in the **same** atomic append as the transition (a crash
+    * after the transition still has them on record — Slice 2.0 cost/session audit drafts rely on this ordering).
+    */
+  private def applyAndPersist(
+      feature: Feature,
+      event: FsmEvent,
+      extraDrafts: Vector[io.forge.core.log.ActionDraft] = Vector.empty
+  ): IO[Feature] =
     val (f1, drafts) = Fsm.transition(feature, event, fsmConfig)
-    persistTransition(f1, drafts).as(f1)
+    persistTransition(f1, extraDrafts ++ drafts).as(f1)
 
   /** J4: manifest first (S2-5 writer invariant), then action log, then state cache. */
   private def persistTransition(feature: Feature, drafts: Vector[io.forge.core.log.ActionDraft]): IO[Unit] =
@@ -453,6 +470,74 @@ final class Orchestrator(
       payload = ujson.Obj("prNumber" -> ujson.Num(pr.value.toDouble), "policy" -> ujson.Str("none"))
     )
 
+  /** Slice 2.0 (Tasks 2.0.1 / 2.0.2): the audit drafts written when a driver session settles. The §19 `cost.update`
+    * (Task 2.0.1) is emitted only when the turn actually spent (`report.turnCost` is `Some`) — a turn with no cost
+    * event has nothing to attribute and the totals are unchanged. The `session.complete` (Task 2.0.2) is emitted for
+    * every settle so per-phase timing/attribution is recorded even for a zero-cost or failed turn.
+    */
+  private def settleAuditDrafts(feature: Feature, report: MonitorReport, totals: CostTotals): Vector[ActionDraft] =
+    val piece = pieceOf(feature.state)
+    val role = roleOf(report.phase)
+    report.turnCost.toVector.map(costUpdateDraft(feature, piece, role, totals, _)) :+
+      sessionCompleteDraft(feature, report, piece, role)
+
+  /** §19 `cost.update` — `{ provider, model, inputTokens, outputTokens, usd, featureTotalUsd, pieceTotalUsd,
+    * turnTotalUsd }`. The three totals are the running scopes off [[CostTotals]] (`Replay.applyCostUpdate` projects
+    * them back onto `Feature.cost`); the per-turn `provider/model/tokens/usd` describe this turn's delta. USD amounts
+    * are written `.toDouble` to match the `BigDecimal(numOpt)` read path in `Replay.applyCostUpdate`.
+    */
+  private def costUpdateDraft(
+      feature: Feature,
+      piece: Option[PieceId],
+      role: String,
+      totals: CostTotals,
+      turn: Cost
+  ): ActionDraft =
+    ActionDraft(
+      feature.id,
+      piece,
+      actor = Some("driver"),
+      role = Some(role),
+      kind = "cost.update",
+      payload = ujson.Obj(
+        "provider" -> ujson.Str(turn.provider),
+        "model" -> ujson.Str(turn.model),
+        "inputTokens" -> ujson.Num(turn.inputTokens.toDouble),
+        "outputTokens" -> ujson.Num(turn.outputTokens.toDouble),
+        "usd" -> ujson.Num(turn.usd.toDouble),
+        "featureTotalUsd" -> ujson.Num(totals.feature.toDouble),
+        "pieceTotalUsd" -> ujson.Num(totals.piece.toDouble),
+        "turnTotalUsd" -> ujson.Num(totals.turn.toDouble)
+      )
+    )
+
+  /** §19 `session.complete` (new in Slice 2.0 Task 2.0.2) — `{ phase, piece, durationMs, model, turnCostUsd, success
+    * }`. An audit-only record (a no-op projection in `Replay`); folded by `forge stats` (Task 2.0.3) into per-phase
+    * timing and attribution. `durationMs` is the CLI's own turn duration (`None` → `null` on a timeout/kill with no
+    * `Result`).
+    */
+  private def sessionCompleteDraft(
+      feature: Feature,
+      report: MonitorReport,
+      piece: Option[PieceId],
+      role: String
+  ): ActionDraft =
+    ActionDraft(
+      feature.id,
+      piece,
+      actor = Some("driver"),
+      role = Some(role),
+      kind = "session.complete",
+      payload = ujson.Obj(
+        "phase" -> ujson.Str(report.phase.toString),
+        "piece" -> piece.map(p => ujson.Str(p.value)).getOrElse(ujson.Null),
+        "durationMs" -> report.durationMs.map(d => ujson.Num(d.toDouble)).getOrElse(ujson.Null),
+        "model" -> ujson.Str(report.turnCost.map(_.model).getOrElse("")),
+        "turnCostUsd" -> ujson.Num(report.turnCost.map(_.usd).getOrElse(BigDecimal(0)).toDouble),
+        "success" -> ujson.Bool(Orchestrator.outcomeSuccess(report.outcome))
+      )
+    )
+
   private def protectionUnauthorizedDraft(feature: Feature, piece: PieceId, pr: PrNumber): ActionDraft =
     ActionDraft(
       feature.id,
@@ -533,28 +618,34 @@ final class Orchestrator(
   private def handleWinner(
       feature: Feature,
       winner: RaceResult,
-      driverRef: Ref[IO, Option[ActiveSession]]
+      driverRef: Ref[IO, Option[ActiveSession]],
+      totalsRef: Ref[IO, CostTotals]
   ): IO[Feature] =
     winner match
-      case RaceResult.FromMonitor(outcome) =>
-        // Source-driven session clear: the subprocess is gone whatever the outcome.
-        driverRef.set(None) >> {
-          val plan = PostSettleSynthesis.plan(feature.state, outcome)
+      case RaceResult.FromMonitor(report) =>
+        // Source-driven session clear: the subprocess is gone whatever the outcome. Slice 2.0: snapshot the running
+        // cost totals (the monitor just folded this turn's spend into the shared ref) and draft the §19 `cost.update`
+        // + `session.complete` audit records; they are persisted in the SAME atomic append as the settle transition
+        // (`applyAndPersist`'s `extraDrafts` / the prepend below), so a crash after the transition still has them.
+        driverRef.set(None) >> totalsRef.get.flatMap { totals =>
+          val auditDrafts = settleAuditDrafts(feature, report, totals)
+          val plan = PostSettleSynthesis.plan(feature.state, report.outcome)
           plan.effect match
             case SettleEffect.None =>
               // Pass-through outcome. Apply the converted event directly; if it no-ops (an unhandled driver settle
               // such as HitQuestionLimit), route to NHI rather than spin on a now-session-less state.
-              val raw = passThroughEvent(plan.synthesis, outcome)
+              val raw = passThroughEvent(plan.synthesis, report.outcome)
               val (cand, drafts) = Fsm.transition(feature, raw, fsmConfig)
               if cand.state == feature.state then
                 applyAndPersist(
                   feature,
-                  FsmEvent.HarnessError(s"unhandled driver settle in ${feature.state}: $outcome")
+                  FsmEvent.HarnessError(s"unhandled driver settle in ${feature.state}: ${report.outcome}"),
+                  auditDrafts
                 )
-              else persistTransition(cand, drafts).as(cand)
+              else persistTransition(cand, auditDrafts ++ drafts).as(cand)
             case eff =>
               // Driver settled clean: run the §11 side effect FIRST, then apply the synthesized event.
-              runSettleEffect(feature, eff).flatMap(applyAndPersist(feature, _))
+              runSettleEffect(feature, eff).flatMap(applyAndPersist(feature, _, auditDrafts))
         }
 
       case RaceResult.FromWatcher(event) => applyAndPersist(feature, event)
@@ -699,6 +790,13 @@ object Orchestrator:
     case _: ResumeHint.ApplyPlanningUpdate => true
     case _ => false
 
+  /** Slice 2.0 Task 2.0.2: the `success` field of a `session.complete` audit record. Only a clean settle counts as a
+    * successful session; a non-zero adapter result, a settle-timeout, or a budget breach is `false`.
+    */
+  def outcomeSuccess(outcome: MonitorOutcome): Boolean = outcome match
+    case MonitorOutcome.Settled(_, SettleOutcome.Clean) => true
+    case _ => false
+
   /** §11.5 — a human override on a piece PR: a `CHANGES_REQUESTED` review decision or any unseen (non-bot) comment.
     * Forge's own reviewer verdict does not flow through the watcher; it arrives via the reviewer source.
     */
@@ -724,7 +822,7 @@ object Orchestrator:
 
 /** Loop-local tag for which source produced the racing event — drives the source-driven session-clear rule. */
 private enum RaceResult:
-  case FromMonitor(outcome: MonitorOutcome)
+  case FromMonitor(report: MonitorReport)
   case FromWatcher(event: FsmEvent)
   case FromReviewer(event: FsmEvent)
   case FromUser(cmd: UserCommand)
