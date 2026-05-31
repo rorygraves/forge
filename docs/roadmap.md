@@ -499,12 +499,27 @@ out-scoped the observability slice (full dispositions in
   `RestartRecovery`'s deliberate "no transparent resume" stance. **Watch item:**
   until it lands, each resume from an implement/fix-up NHI re-pays the driver's
   full exploration; the per-turn cost cap bounds the blast radius.
-- [ ] **`designSessionId` durability** (Task 1.4.16 **gap #7**). `forge spec`
-  `/done` persists the design session id only to the Feature/state-cache, not
-  the action log, so `RebuildState.run` rebuilds it as `None` and the §11.3
-  design-PR-feedback resume fails after a state-cache rebuild. A standalone
-  §11.3 log-completeness fix (write the design session id to the action log at
-  `/done`); not pulled into Slice 2.0 (it did not touch that surface).
+- [x] **`designSessionId` durability** (Task 1.4.16 **gap #7**). ✅ **Fixed
+  2026-05-31** during the Slice 2.0 live re-validation, which reproduced it: a
+  `forge run` started after `forge spec` dead-ended at
+  `NeedsHumanIntervention("missing design session id")` before implementation,
+  because `forge spec /done` wrote the design session id only to the state cache,
+  never to the action log, so a cold `RebuildState.run` rebuilt it as `None`. The
+  fix wires the §19 `<actor>.spawn` entry at the spec `SessionSpawned` seam
+  (`Fsm.scala`) so the id projects from the log; covered by `Fsm_11_1_SpecPhaseSuite`
+  + a `FeatureFoldEventsSuite` producer→consumer rebuild regression.
+- [ ] **Session-id log durability for piece spawns + resumes** (broader finding
+  from the gap #7 fix). The §19 `<actor>.spawn` / `<actor>.resume` kinds are
+  *consumed* by `Replay`/`RebuildState` but were **never produced anywhere** —
+  the gap #7 fix wired only the design spawn. Piece spawns (`PieceImplementing` /
+  `PieceFixingUp` `SessionSpawned`) and every resume still emit no durability
+  entry, so `currentPieceSessionId` does not survive a cold rebuild. It bites
+  less than gap #7 (pieces re-spawn a fresh driver each turn, and the happy-path
+  end-state clears all session ids — which is also why the F1/F5/F6 property
+  suites never caught it: they assert on `Fsm.transition` reconstruction or the
+  cleared final state, not mid-trajectory log projection). Wire spawn/resume
+  drafts at every `SessionSpawned`/resume seam and extend a property suite to
+  fold the **log** (not re-apply the FSM) so the projection is actually exercised.
 
 ---
 

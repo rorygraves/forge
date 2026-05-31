@@ -12,10 +12,21 @@ class Fsm_11_1_SpecPhaseSuite extends munit.FunSuite:
     val (out, drafts) = Fsm.transition(f, FsmEvent.SessionSpawned("claude", "driver", "sess-1", None))
     assertEquals(out.state, FsmState.InteractiveSpec)
     assertEquals(out.designSessionId, Some("sess-1"))
-    assertEquals(drafts.size, 1)
+    // gap #7: the spec spawn emits BOTH the fsm.transition (seq-0 record) and the `<actor>.spawn` durability entry
+    // so `designSessionId` survives a cold rebuild from the log (a `forge run` restart after `forge spec`).
+    assertEquals(drafts.size, 2)
     assertEquals(drafts.head.kind, "fsm.transition")
     assertEquals(drafts.head.payload("from").str, "Drafting")
     assertEquals(drafts.head.payload("to").str, "InteractiveSpec")
+    val spawn = drafts(1)
+    assertEquals(spawn.kind, "claude.spawn")
+    assertEquals(spawn.actor, Some("claude"))
+    assertEquals(
+      spawn.piece,
+      None,
+      "design spawn carries no piece (projects designSessionId, not currentPieceSessionId)"
+    )
+    assertEquals(spawn.payload("sessionId").str, "sess-1")
 
   test("InteractiveSpec + Settled(Spec, Clean) → DesignReviewing(1)"):
     val f = featureIn(FsmState.InteractiveSpec, designSessionId = Some("sess-1"))

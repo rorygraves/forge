@@ -161,10 +161,24 @@ object Fsm:
   private def specDraftingTransitions(feature: Feature, event: FsmEvent): (Feature, Vector[ActionDraft]) =
     event match
       // §11.1 step 2: spec-driver spawn projects designSessionId and transitions to InteractiveSpec.
-      case FsmEvent.SessionSpawned(_, _, sessionId, None) =>
+      case FsmEvent.SessionSpawned(actor, role, sessionId, None) =>
         val to = FsmState.InteractiveSpec
         val updated = feature.copy(state = to, designSessionId = Some(sessionId))
-        (updated, Vector(fsmTransitionDraft(feature, FsmState.Drafting, to)))
+        // gap #7: also emit the §19 `<actor>.spawn` entry so `RebuildState`/`Replay` can project `designSessionId`
+        // from the canonical log. Without it the id lives only in the state cache; a `forge run` restart after
+        // `forge spec` rebuilds the feature from the log alone, gets `designSessionId = None`, and dead-ends at a
+        // spurious `NeedsHumanIntervention("missing design session id")` before implementation (the §11.3 design
+        // resume can't re-open the design driver). Emitted **after** the transition so seq-0 stays the
+        // `Drafting → InteractiveSpec` record; replay order is immaterial (the spawn projection does not gate on the
+        // running state). See design-2.0 §4 (gap #7); the analogous piece-spawn / resume entries remain unwired
+        // (a separate, larger session-id-durability carry-forward — roadmap §3.5).
+        (
+          updated,
+          Vector(
+            fsmTransitionDraft(feature, FsmState.Drafting, to),
+            sessionSpawnDraft(feature, actor, role, sessionId, piece = None)
+          )
+        )
       case _ => noop(feature)
 
   private def specInteractiveTransitions(feature: Feature, event: FsmEvent): (Feature, Vector[ActionDraft]) =
@@ -1086,6 +1100,28 @@ object Fsm:
         payload("wait") = ujson.Obj("edge" -> ujson.Str("leave"), "kind" -> ujson.Str(leaveKind))
       case (None, None) => ()
     ActionDraft(feature.id, piece, actor, role, "fsm.transition", payload)
+
+  /** §19 `<actor>.spawn` — records a freshly spawned driver session id in the canonical action log so `RebuildState` /
+    * `Replay.applySessionSpawn` can project `feature.designSessionId` (`piece = None`) or `currentPieceSessionId`
+    * (`piece = Some`) on a cold rebuild from the log alone. `kind` is `<actor>.spawn`; the payload carries the
+    * `sessionId` (the field `Replay` reads) plus the `role` for audit context. Wired for the design spawn to close gap
+    * #7; see the note at the §11.1 spec handler.
+    */
+  private def sessionSpawnDraft(
+      feature: Feature,
+      actor: String,
+      role: String,
+      sessionId: String,
+      piece: Option[PieceId]
+  ): ActionDraft =
+    ActionDraft(
+      feature.id,
+      piece,
+      actor = Some(actor),
+      role = Some(role),
+      kind = s"$actor.spawn",
+      payload = ujson.Obj("sessionId" -> ujson.Str(sessionId), "role" -> ujson.Str(role))
+    )
 
   /** Slice 2.0 Task 2.0.6 — the `audit.resume_from_nhi` marker written when a feature resumes from
     * `NeedsHumanIntervention`. It records the resume boundary explicitly (`{ hint, from, to, reason }`) so the

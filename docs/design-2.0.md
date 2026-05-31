@@ -460,6 +460,28 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
   `/code-review` of the Slice 2.0 diff → fix findings → flip the roadmap §3.1
   checkboxes (the tick is gated on that review per the roadmap convention) → the
   exit-criterion live MVP re-validation via `forge stats`.
+- 2026-05-31 — **Live re-validation reproduced gap #7; fixed it (pulled into
+  scope).** Driving the exit-criterion re-run (feature `readme-quickstart` on
+  `llm4s/szork`): `forge new` ✓, `forge spec` → `/done` ✓ (design PR opened), but
+  `forge run` dead-ended at `NeedsHumanIntervention("missing design session id,
+  cannot resume")` **before** the implement turn — the only thing that writes
+  `cost.update` / `session.complete`. Root cause = **gap #7**, reproduced live:
+  the committed log had **no `<actor>.spawn` entry** (only `fsm.transition`), so a
+  cold `RebuildState.run` on `forge run` startup rebuilt `designSessionId = None`.
+  Investigation found the §19 `<actor>.spawn` / `<actor>.resume` kinds are
+  *consumed* by `Replay`/`RebuildState` but were **never produced anywhere** — the
+  F1/F5/F6 property suites missed it because they assert on `Fsm.transition`
+  reconstruction or the cleared happy-path end-state, not mid-trajectory log
+  projection. **Fix (focused, gap #7 only):** the spec `SessionSpawned` seam
+  (`Fsm.scala`) now also emits the `<actor>.spawn` durability draft (after the
+  transition, so seq-0 stays the `Drafting → InteractiveSpec` record), so
+  `designSessionId` projects from the log. `Fsm_11_1_SpecPhaseSuite` updated (the
+  spec spawn now emits 2 drafts) + a new `FeatureFoldEventsSuite` producer→consumer
+  rebuild regression. The **broader** piece-spawn / resume log-durability stays a
+  carry-forward (roadmap §3.5 — pieces re-spawn fresh each turn, so it bites far
+  less). `forge-core` 392, `forge-app` 358 green. **Re-validation continues** on a
+  fresh run with the fixed code (the existing `readme-quickstart` log predates the
+  fix, so it must be re-driven).
 
 ## 4. Carry-forward (inherited + new)
 
@@ -475,14 +497,16 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
 
 ### Related Phase-1 gaps (in-scope only if cheap)
 
-- **Gap #7 — `designSessionId` durability.** `forge spec` `/done` persists
-  the design session id only to the Feature/state-cache, not the action
-  log, so `RebuildState.run` rebuilds it as `None` and the §11.3
-  design-PR-feedback resume fails after a rebuild. This is a log-
-  completeness bug adjacent to the observability theme (and overlaps
-  Task 2.0.6's "preserve history on resume"). Pull it in if Task 2.0.6
-  touches the same surface cheaply; otherwise leave it as a standalone
-  §11.3 durability fix and record the disposition at close-out.
+- **Gap #7 — `designSessionId` durability.** ✅ **Fixed 2026-05-31** at Task 2.0.7
+  close-out — the live re-validation reproduced it (a `forge run` after `forge
+  spec` dead-ended at `NHI("missing design session id")` before the implement
+  turn). `forge spec` `/done` persisted the design session id only to the
+  state-cache, not the action log, so a cold `RebuildState.run` rebuilt it as
+  `None`. The fix wires the §19 `<actor>.spawn` durability entry at the spec
+  `SessionSpawned` seam (`Fsm.scala`) so the id projects from the log; see the
+  status-log entry above + roadmap §3.5. The **broader** session-id log-durability
+  for piece spawns + resumes (the §19 `<actor>.spawn`/`.resume` kinds are consumed
+  but were never produced anywhere) stays a carry-forward (roadmap §3.5).
 
 ### New decisions opened in Slice 2.0 (reconcile at Task 2.0.7)
 

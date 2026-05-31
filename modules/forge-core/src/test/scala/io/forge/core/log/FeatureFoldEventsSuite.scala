@@ -53,6 +53,22 @@ class FeatureFoldEventsSuite extends munit.FunSuite:
     assertEquals(result.feature.state, FsmState.DesignReviewing(1): FsmState)
     assertEquals(result.observedTransitions.size, 2)
 
+  test("foldEvents — gap #7: the spec spawn's <actor>.spawn entry projects designSessionId on a cold rebuild"):
+    // Producer→consumer regression for gap #7. The drafts the FSM emits for the spec-driver spawn, folded back from
+    // the log alone (exactly what a `forge run` restart after `forge spec` does via RebuildState), must restore
+    // designSessionId. Before the fix the FSM emitted only the fsm.transition, so the fold produced None and
+    // `forge run` dead-ended at NHI("missing design session id") before implementation.
+    val seed = Feature.initial(FeatureA, FsmFixtures.manifest(Vector(piecePending(P1, 1))))
+    val (_, drafts) = Fsm.transition(seed, FsmEvent.SessionSpawned("claude", "driver", "sess-1", None))
+    val log = drafts.zipWithIndex.map { case (d, i) => d.stamp(seq = i.toLong, at = at(i)) }
+    val Right(result) = Feature.foldEvents(seed, log): @unchecked
+    assertEquals(result.feature.state, FsmState.InteractiveSpec: FsmState)
+    assertEquals(
+      result.feature.designSessionId,
+      Some("sess-1"),
+      "designSessionId must project from the logged <actor>.spawn so it survives a cold rebuild"
+    )
+
   test("foldEvents — TransitionFromMismatch when payload.from disagrees with running state"):
     val seed = Feature.initial(FeatureA, FsmFixtures.manifest(Vector(piecePending(P1, 1))))
     val log = Vector(
