@@ -12,7 +12,8 @@
 > land; the roadmap section gets ticked off only after a code review on
 > the section as a whole.
 >
-> **Status:** 🟢 open — 2026-05-27. Slice 1.4 is the largest of Phase 1
+> **Status:** ✅ closed — 2026-05-31 (Phase-1 MVP gate met; this file
+> is now an audit trail). Slice 1.4 was the largest of Phase 1
 > and the MVP-gate that closes Phase 1. Split dependency-shaped into
 > **1.4a** (reviewer assets, `forge-specs` repopulation, Task 1.4.7
 > regression gate — writable foundation) and **1.4b** (orchestrator
@@ -1675,7 +1676,7 @@ Whichever option B3 (in Task 1.4.2) chose — explicit FSM handlers
   roadmap §7.2.2 S2-8/S3-5 entry + §7.2.4 S3-5 entry flipped to
   ✅ CLOSED.
 
-### Task 1.4.13 — CLI surface (every §17 / §15 command)
+### Task 1.4.13 — CLI surface (every §17 / §15 command)  ✅ landed 2026-05-31
 
 The user-facing surface. Per-command handlers wire into the
 orchestrator (Task 1.4.10) or are read-only / preflight-only.
@@ -1859,7 +1860,7 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
   log then follows appends (1s poll) until cancelled; a missing log
   exits 0 with a note. The unit-testable seam is `existing(path)`;
   the O3 first-line-read smoke test is Task 1.4.15.
-- [ ] **M12.** Unit + IT coverage — per-command handler
+- [x] **M12.** Unit + IT coverage — per-command handler
   unit tests in `modules/forge-app/src/test/`; the
   MVP-gate end-to-end run (Task 1.4.16) exercises the integration
   surface.
@@ -1889,7 +1890,7 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
   land; only the IT surface remains** — the MVP-gate end-to-end run
   (Task 1.4.16) exercises it, so M12 stays open until then.
 
-### Task 1.4.14 — **C14** Codex resume role-framing closure
+### Task 1.4.14 — **C14** Codex resume role-framing closure  ✅ landed 2026-05-30
 
 The orchestrator-side half of **C14**. v1.3 chooses between (i) drop
 the §7.10(a) "applies to resume" claim, or (ii) widen the trait to
@@ -1926,7 +1927,7 @@ site now that the orchestrator is real.
   `specify.<cli>.md`. The Task 1.4.7 `ReviewerRegressionSuite` stays
   the real-CLI bar.
 
-### Task 1.4.15 — Targeted polish (§2.5)
+### Task 1.4.15 — Targeted polish (§2.5)  ✅ landed 2026-05-31
 
 The MVP-gate enablers — Forge is unusable without these.
 
@@ -2121,7 +2122,7 @@ Mirror of Slice 1.3 Task 1.3.8 but for the whole §2.4 bullet
 (both 1.4a and 1.4b). Flips the roadmap `[~]` → `[x]` and
 opens Phase 2.
 
-- [ ] **Q1.** Section-level code review on Task 1.4.1 through
+- [x] **Q1.** Section-level code review on Task 1.4.1 through
   Task 1.4.16:
   - Every §17 slice-4 deliverable shipped (orchestrator
     loop, line-mode REPL, every command in §15)?
@@ -2135,26 +2136,53 @@ opens Phase 2.
   - Section-level coherence pass per the AGENTS.md
     "Testing & review discipline" rule "Review comments on
     design docs are signals, not the patch list".
-- [ ] **Q2.** `roadmap.md` §2.4 bullet flips `[~]` →
+- [x] **Q2.** `roadmap.md` §2.4 bullet flips `[~]` →
   `[x]`. Status block updated to ✅. Top status line
   bumps draft revision.
-- [ ] **Q3.** `AGENTS.md` "Current state" — Slice 1.4
+- [x] **Q3.** `AGENTS.md` "Current state" — Slice 1.4
   paragraph (mirror Slice 1.3's structure / length).
   Active design-`<section>`.md list returns to
   *(none currently open — Phase 2 opens its own
   doc when work starts)*. Recently-closed audit
   trails list grows to include `design-1.4.md`.
-- [ ] **Q4.** `CLAUDE.md` TL;DR mirrors the same
+- [x] **Q4.** `CLAUDE.md` TL;DR mirrors the same
   updates; "Current state" rewritten covering
   Slices 1–4 + the MVP-gate landing.
-- [ ] **Q5.** §4 carry-forward final walk — every
+- [x] **Q5.** §4 carry-forward final walk — every
   Slice 1.1/2/3 carry-forward either closed in Slice 1.4
   or explicitly carried to v1.3 / Phase 2 with a
   durable home in `design-rationale.md`.
-- [ ] **Q6.** This file flipped from "active" to
+- [x] **Q6.** This file flipped from "active" to
   "audit trail" (status header at the top of §0
   reflects ✅ closed). Phase 2's first design doc
   opens when work starts.
+
+**As landed (2026-05-31).** Q1 — section review confirmed every
+§17 slice-4 deliverable (orchestrator loop in
+`io.forge.app.orchestrator.Orchestrator`, the `forge spec`
+line-mode REPL, all eleven §15 commands via `CommandRouter`) and
+that every §11 lifecycle path is exercised — the in-tree e2e
+suites (`OrchestratorE2EHappyPathSuite` /
+`OrchestratorE2ECrashRecoverySuite` / `OrchestratorRestartSuite` /
+`OrchestratorPostSettleSynthesisSuite` / `OrchestratorAtomicMergeSuite`)
+plus the Task 1.4.16 real-CLI MVP run cover spec → design review →
+design PR gate → implement → fix-up → CI & review → refining →
+next piece → `FeatureDone`; every `NeedsHumanIntervention` hint
+renders via `TerminalReport` with its `forge resume --<flag>`
+(`ResumeHintCoverageSuite`). Q2–Q4/Q6 — `roadmap.md` §2.4 flipped
+`[~]` → `[x]` (Phase 1 closed, Phase 2 + Slice 2.0 opened),
+`AGENTS.md` / `CLAUDE.md` "Current state" rewritten, this file's
+§0 header flipped to ✅ closed. Q5 — final carry-forward walk in
+§4: **C14 / C15 / S2-5 / S2-8 / S3-5 closed** (named suites exist
+and pass), **C16 / C17 / C18 documented**, **S2-1…S2-10 /
+S3-1…S3-8 spec-text reconciled into `forge-design-1.3.md` §1**,
+**S4-1 / S4-4 closed**, **S4-2 closed (replay→tail)**, and
+**S4-3 / S4-5 / S4-6 rolled forward to Phase 2** ("instrument
+before optimise" — see `design-rationale.md`). Build green:
+`sbt clean compile test scalafmtCheckAll` exit 0
+(forge-core 377, forge-agents 197, forge-git 141, forge-specs 190,
+forge-app 329 = **1234 unit tests**, Failed 0 / Errors 0) and
+`forge-it` compiles.
 
 ## 2. Order of work
 
@@ -3244,6 +3272,19 @@ ticks off only after Task 1.4.17 lands.
   [`docs/slice-4/mvp-run/image-creds-dedup/`](slice-4/mvp-run/image-creds-dedup/),
   full findings in [`docs/slice-4/mvp-friction.md`](slice-4/mvp-friction.md).
   **Slice 1.4 is now feature-complete; Task 1.4.17 (close-out) remains.**
+
+- **2026-05-31 — Task 1.4.17 (Slice 1.4 close-out + Phase 1 exit)
+  COMPLETE.** Full unit suite green (`sbt clean compile test
+  scalafmtCheckAll`, exit 0; forge-core 377, forge-agents 197,
+  forge-git 141, forge-specs 190, forge-app 329 = 1234 tests,
+  Failed 0 / Errors 0) and `forge-it` compiles. Q1 section review +
+  Q5 final carry-forward walk done (every inherited item closed or
+  rolled to v1.3 / Phase 2 with a durable home in
+  `design-rationale.md`); Task 1.4.13/1.4.14/1.4.15 headers flipped to
+  ✅; M12's residual real-CLI smoke filed as **S4-6**; S4-3 / S4-5
+  reviewer cost/tuning rolled to Phase 2. **`roadmap.md` §2.4
+  `[~]` → `[x]`; Phase 1 (MVP) closed; Phase 2 (MLP) opens with
+  Slice 2.0 (run observability).** This file is now an audit trail.
 
 ## 4. Carry-forward (inherited + new)
 

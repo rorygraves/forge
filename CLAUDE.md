@@ -7,18 +7,19 @@ that first; everything below is Claude-Code-specific.
 
 - **Implementation contract:** [`docs/forge-design-1.2.md`](docs/forge-design-1.2.md). The 1.1 revision is kept in-tree as an evolution record but is superseded.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
-- **Active implementation plan:**
-  [`docs/design-1.4.md`](docs/design-1.4.md) — Slice 1.4 (Phase-1 MVP
-  gate). Opened 2026-05-27. **Slice 1.4a (Task 1.4.1 → Task 1.4.8) closed
-  2026-05-29; Slice 1.4b open** — Task 1.4.9 (`forge-app` entry skeleton +
-  config loader) is the entry point. The most recent closed audit
-  trails are [`docs/design-2.3.md`](docs/design-2.3.md) (Slice 1.3,
-  closed 2026-05-27), [`docs/design-2.2.md`](docs/design-2.2.md)
-  (Slice 1.2), and [`docs/design-2.1.md`](docs/design-2.1.md) (Slice
-  1.1). See `AGENTS.md` §"Per-section implementation plans" for the
-  pattern (Task breakdown with checkbox items).
+- **Active implementation plan:** *(none currently open — Phase 1 is
+  complete; Phase 2 opens its own `design-<section>.md` when work
+  starts).* The most recent closed audit trail is
+  [`docs/design-1.4.md`](docs/design-1.4.md) (Slice 1.4 — Phase-1 MVP
+  gate, ✅ closed 2026-05-31); older trails are
+  [`docs/design-2.3.md`](docs/design-2.3.md) (Slice 1.3),
+  [`docs/design-2.2.md`](docs/design-2.2.md) (Slice 1.2), and
+  [`docs/design-2.1.md`](docs/design-2.1.md) (Slice 1.1). See
+  `AGENTS.md` §"Per-section implementation plans" for the pattern
+  (Task breakdown with checkbox items).
 - **Current state:** Slices 1.1, 1.2, 1.3 ✅ closed 2026-05-27;
-  **Slice 1.4a ✅ closed 2026-05-29; Slice 1.4b 🟢 open.**
+  **Slice 1.4 ✅ closed 2026-05-31 — Phase 1 (MVP) complete; Phase 2
+  (MLP) open, first slice 2.0 (run observability).**
   Slice 1.1 shipped both connectors against v1.2 §7.1 with real-CLI
   integration coverage in `forge-it`. Slice 1.2 shipped `forge-core` —
   `ForgePaths`, relocated manifest data types,
@@ -38,20 +39,20 @@ that first; everything below is Claude-Code-specific.
   `ChangeCollector` + `StagingConfig`), the v1 templates, and the
   Task 1.4.7 `ReviewerRegressionSuite` that **closed C15** (≥19/20 for all
   six method × connector pairs; v1 config claude=`haiku` /
-  codex=`gpt-5.3-codex`, 3-min cap). Test scope: `forge-core` 358,
-  `forge-agents` 196, `forge-git` 168, `forge-specs` 132 (new),
-  `forge-app` 96, plus `forge-it` opt-in regression/smoke suites.
-  **Carry-forward into Slice 1.4b** (see
-  [`docs/design-1.4.md`](docs/design-1.4.md) §4,
-  [`docs/design-rationale.md`](docs/design-rationale.md), and
-  [`docs/roadmap.md`](docs/roadmap.md) §7.2): **C14** (Codex resume
-  role-framing — Task 1.4.14), **S2-5** (writer-side atomic-merge test —
-  Task 1.4.11), **S2-8** / **S3-5** (reviewer/refine `SettleTimeout`
-  mapping, B3 chose option (a) — Task 1.4.12), **S4-3** (reviewer cost /
-  kill diagnostics — watch item), **S4-5** (production reviewer
-  model/cap/retry tuning — Task 1.4.9 `ForgeConfig`); the long-standing
-  **S2-1**–**S2-10** / **S3-1**–**S3-8** spec-text items reconcile at
-  Task 1.4.17.
+  codex=`gpt-5.3-codex`, 3-min cap). **Slice 1.4b** shipped
+  `forge-app`'s headless `Orchestrator` (the §11 feature loop over
+  `Fsm.transition`, atomic-persist ordering = S2-5), the
+  `io.forge.app.command` CLI + `forge spec` line-mode REPL,
+  `ForgeConfig`, and drove the Task 1.4.16 MVP self-host run
+  (`image-creds-dedup` in `llm4s/szork` → `FeatureDone`). Test
+  scope at Phase-1 close: `forge-core` 377, `forge-agents` 197,
+  `forge-git` 141, `forge-specs` 190, `forge-app` 329 (= 1234 unit
+  tests), plus `forge-it` opt-in regression/smoke suites.
+  **All Slice 1.1–1.3 carry-forwards resolved:** C14 / C15 / S2-5 /
+  S2-8 / S3-5 closed; S2-1…S2-10 / S3-1…S3-8 spec-text reconciled
+  into [`docs/forge-design-1.3.md`](docs/forge-design-1.3.md) §1;
+  **S4-3 / S4-5 / S4-6 rolled forward to Phase 2** ("instrument
+  before optimise"). See [`docs/design-rationale.md`](docs/design-rationale.md).
 - **Two architectural seams to preserve in v1 work:**
   - `ForgePaths` helper — no `.forge/...` literals outside it. Enforced
     by `ForgePathsSuite`'s `os.walk` sweep over

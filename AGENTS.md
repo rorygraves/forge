@@ -176,6 +176,22 @@ fix this file.
   reviewer model/cap/retry tuning — Task 1.4.9 `ForgeConfig`). Slice 1.4b
   (Task 1.4.9 → Task 1.4.17) builds the headless orchestrator, the §17
   CLI, and the MVP self-hosting gate on top.
+- **Slice 1.4b (orchestrator loop + CLI + MVP self-host gate) — ✅
+  complete 2026-05-31; this closes Phase 1 (MVP).** `forge-app` gained
+  the headless `Orchestrator` (the §11 feature loop over
+  `Fsm.transition` with the S2-5 manifest-first atomic-persist order),
+  the `io.forge.app.command` CLI + `CommandRouter` for all eleven §15
+  commands, the `forge spec` line-mode REPL, `ForgeConfig`, the
+  `RealSideEffects` / `ConnectorFactory` real wiring, and
+  cross-restart durability (`PollBaselineStore` S4-1,
+  `RetryingReviewerCall` S4-5, `RestartRecovery` S4-4). Closed C14
+  (Codex resume role-framing, Task 1.4.14), S2-5 (Task 1.4.11), and
+  S2-8 / S3-5 (reviewer/refine `SettleTimeout` FSM handlers,
+  Task 1.4.12). The Task 1.4.16 MVP-gate run drove `image-creds-dedup`
+  through `llm4s/szork` to `FeatureDone`. Test scope at Phase-1 close:
+  forge-core 377, forge-agents 197, forge-git 141, forge-specs 190,
+  forge-app 329 (1234 unit tests). Reviewer cost/tuning + the CLI e2e
+  smoke roll forward to Phase 2 as S4-3 / S4-5 / S4-6.
 - Slices 1.4b and 2.1 (TUI) scoped in design §17.
 - Phase 4 (Forge-instance pivot: multi-repo, daemon, parallel,
   containerised) is post-v1 and needs its own design doc before any
@@ -394,17 +410,16 @@ implications of round 1's signature change; `design-1.4.md`
 
 ### Active design-`<slice-id>`.md files
 
-- [`docs/design-1.4.md`](docs/design-1.4.md) — Slice 1.4 (Phase-1 MVP
-  gate; reviewer assets + `forge-specs` (Slice 1.4a) → headless
-  orchestrator + REPL (Slice 1.4b)). Opened 2026-05-27. **Slice 1.4a
-  (Task 1.4.1 → Task 1.4.8) closed 2026-05-29; Slice 1.4b open** — Task 1.4.9
-  (`forge-app` entry skeleton + config loader) is the entry point.
+*(none currently open — Phase 1 is complete; Phase 2 opens its own
+`design-<slice-id>.md` when work starts.)*
 
-Recently-closed audit trails: [`docs/design-2.1.md`](docs/design-2.1.md)
-(Slice 1.1, closed 2026-05-26), [`docs/design-2.2.md`](docs/design-2.2.md)
-(Slice 1.2, closed 2026-05-26), [`docs/design-2.3.md`](docs/design-2.3.md)
-(Slice 1.3, closed 2026-05-27). Historical files retain their
-`design-2.N.md` filenames; they are sealed audit trails.
+Recently-closed audit trails: [`docs/design-1.4.md`](docs/design-1.4.md)
+(Slice 1.4 — Phase-1 MVP gate, closed 2026-05-31),
+[`docs/design-2.3.md`](docs/design-2.3.md) (Slice 1.3, closed 2026-05-27),
+[`docs/design-2.2.md`](docs/design-2.2.md) (Slice 1.2, closed 2026-05-26),
+[`docs/design-2.1.md`](docs/design-2.1.md) (Slice 1.1, closed 2026-05-26).
+Historical files retain their `design-2.N.md` filenames; they are sealed
+audit trails.
 
 Don't pre-write design-`<slice-id>`.md files for Slices that aren't
 being actively worked. They drift; the roadmap is enough until the

@@ -6,7 +6,7 @@
 > §17 of the design); later phases capture direction and have not yet been
 > turned into specs.
 >
-> **Status:** draft v0.8 — 2026-05-27. **Slices 1.1, 1.2, and 1.3 closed.**
+> **Status:** draft v0.9 — 2026-05-31. **Phase 1 (MVP) ✅ COMPLETE — Slices 1.1, 1.2, 1.3, and 1.4 all closed.** Phase 2 (MLP) is now open; first slice is Slice 2.0 (run observability, §3.1).
 > Slice 1.1 (Task 1.1.1 → Task 1.1.5 in [`design-2.1.md`](design-2.1.md)) ships
 > both connectors against the v1.2 §7.1 streaming-spec trait with
 > real-CLI integration tests in `forge-it`. Slice 1.2 (Task 1.2.1 → Task 1.2.7 in
@@ -245,18 +245,21 @@ there (Task 1.3.1 through Task 1.3.8) lives in
 
 ### 2.4 Slice 1.4 — Reviewer assets + `forge-specs` (Slice 1.4a) → headless orchestrator + REPL (Slice 1.4b)
 
-🟢 **Slice 1.4a complete, 1.4b open — 2026-05-29.** Implementation plan
-lives in [`design-1.4.md`](design-1.4.md) (Task 1.4.1 through Task 1.4.17
-across Slice 1.4a + Slice 1.4b). Slice 1.4a (Task 1.4.1 → Task 1.4.8) shipped
-the writable foundation: reviewer assets under `~/.forge/`, the
-`ReviewerCall` wall-clock wrappers, the repopulated `forge-specs`
-(`SpecStore` / `DocSync` / `ChangeCollector`), the v1 templates, and
-the Task 1.4.7 regression gate (C15 closed — ≥19/20 for all six method ×
-connector pairs with the v1 `haiku` / `gpt-5.3-codex` reviewer config).
-**Task 1.4.9 (`forge-app` entry skeleton + config loader) is the 1.4b entry
-point.** The §2.4 bullets below stay `[~]` until Task 1.4.17 lands; the
-audit trail in `design-1.4.md` ticks per-sub-PR checklists as items
-land.
+✅ **Slice 1.4 closed — 2026-05-31. This closes Phase 1 (MVP).**
+Implementation plan / audit trail lives in
+[`design-1.4.md`](design-1.4.md) (Task 1.4.1 through Task 1.4.17 across
+Slice 1.4a + Slice 1.4b). Slice 1.4a (Task 1.4.1 → Task 1.4.8, closed
+2026-05-29) shipped the writable foundation: reviewer assets under
+`~/.forge/`, the `ReviewerCall` wall-clock wrappers, the repopulated
+`forge-specs` (`SpecStore` / `DocSync` / `ChangeCollector`), the v1
+templates, and the Task 1.4.7 regression gate (C15 closed — ≥19/20 for
+all six method × connector pairs with the v1 `haiku` / `gpt-5.3-codex`
+reviewer config). Slice 1.4b (Task 1.4.9 → Task 1.4.17, closed
+2026-05-31) shipped the headless `Orchestrator` (the §11 feature loop
+over `Fsm.transition`, S2-5 atomic-persist order), the eleven §15 CLI
+commands + the `forge spec` line-mode REPL, `ForgeConfig`, and the
+Task 1.4.16 MVP self-host run that drove a real feature end-to-end
+through Forge to `FeatureDone`.
 
 Slice 1.4 is the largest of Phase 1 and has accreted a meaningful set of
 implicit deliverables. Split dependency-shaped: Slice 1.4a ships the writable
@@ -321,7 +324,10 @@ class of **observability gaps now captured as Slice 2.0** (§3.1) — Forge cann
 yet measure its own cost/latency. Task 1.4.16 audit trail in
 [`design-1.4.md`](design-1.4.md); findings in
 [`slice-4/mvp-friction.md`](slice-4/mvp-friction.md). The formal Slice 1.4
-close-out (Task 1.4.17) flips the §2.4 bullets `[~]` → `[x]`.
+close-out (Task 1.4.17, 2026-05-31) is **done** — full unit suite green
+(1234 tests across the five modules; `forge-it` compiles), the
+carry-forward walk landed (C14 / C15 / S2-5 / S2-8 / S3-5 closed;
+S4-3 / S4-5 / S4-6 rolled to Phase 2), and this §2.4 block is ✅ closed.
 
 ### 2.5 Targeted polish in Phase 1
 
