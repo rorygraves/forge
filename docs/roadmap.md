@@ -292,13 +292,14 @@ Slice 5.**
   `forge spec`, `forge run`, `forge status`, `forge resume`,
   `forge reconcile`, `forge refresh-cache`, `forge abandon`,
   `forge rebuild-state`, `forge unlock --force`.
-- **C14 resolution** — orchestrator's resume code path either
-  re-issues Codex role framing in the resume message, or v1.3
-  widens the trait to carry `systemPromptPath`. Coupled with the
-  v1.3 spec decision; either way the orchestrator has to handle it.
-- **S2-5 writer-side atomic-merge test** — assert the orchestrator
-  atomically persists `manifest.json` before the FSM transition
-  action and the state-cache write (§11.5 step 1 writer side).
+- **C14 resolution** — ✅ closed in Task 1.4.14 (option ii): v1.3 §7.1 /
+  §7.10(a) widens the trait to carry `systemPromptPath` on
+  `resumeStreamingSpec`; the orchestrator's resume path passes the
+  spawn-time `specify` prompt, Codex re-prepends it, Claude ignores it.
+- **S2-5 writer-side atomic-merge test** — ✅ closed in Task 1.4.11
+  (`OrchestratorAtomicMergeSuite`): asserts the orchestrator persists
+  `manifest.json` before the FSM transition action and the state-cache
+  write (§11.5 step 1 writer side); cache lags at the pre-transition state.
 - **S2-8 settle-timeout coverage decision** — either explicit
   reviewer/refine handlers in `Fsm.transition` (with
   `ResumeHintCoverageSuite` rows) or documented orchestrator-side
@@ -310,13 +311,17 @@ Slice 5.**
 - **Targeted polish (§2.5)** lands as part of Slice 1.4b, not as a
   separate slice.
 
-**MVP gate (Slice 1.4b exit, Phase 1 exit gate):** drive a small, concrete,
-low-variance feature through Forge end-to-end. Pick a contained
-target — a small `forge-git` helper, a narrow `forge-app`
-reporting/replay feature, or one of the v1.3 spec-text corrections
-with tests. **Do not** pick "have Forge build its own Slice 2.1 (TUI)" —
-TUI is a subjective UX-iteration loop, the wrong shape for a first
-self-hosted run.
+**MVP gate (Slice 1.4b exit, Phase 1 exit gate): ✅ PASSED 2026-05-31.**
+Drove the feature `image-creds-dedup` end-to-end through Forge against the
+external test repo `llm4s/szork` (real GitHub Actions CI + branch protection),
+`forge new` → `forge spec` → `forge run` → `FeatureDone`, both PRs merged. The
+full §11 lifecycle ran, including the §8 CI gate on both paths (fail→fix-up→
+green). The run surfaced 13 integration gaps (12 fixed, gap #7 deferred) and a
+class of **observability gaps now captured as Slice 2.0** (§3.1) — Forge cannot
+yet measure its own cost/latency. Task 1.4.16 audit trail in
+[`design-1.4.md`](design-1.4.md); findings in
+[`slice-4/mvp-friction.md`](slice-4/mvp-friction.md). The formal Slice 1.4
+close-out (Task 1.4.17) flips the §2.4 bullets `[~]` → `[x]`.
 
 ### 2.5 Targeted polish in Phase 1
 
@@ -371,20 +376,77 @@ for any new feature on this repo.
 
 Maps to design §17 slice 5 plus the polish that only real use surfaces.
 
-### 3.1 Slice 2.1 — TUI
+### 3.1 Slice 2.0 — Run observability (instrument before optimise)
+
+**Why this is first.** The Phase-1 MVP-gate run (Task 1.4.16) proved Forge
+*works* but also proved we cannot *measure* it. The action log captures FSM
+transitions + timestamps only, and the timestamps conflate three different
+things — Forge working, Forge waiting on a human, and the operator stopping the
+run to patch code and relaunch. Token counts and per-turn cost flow through the
+orchestrator at runtime (`ClaudeEventParser` → `AgentEvent.CostUpdate`) but are
+consumed by the cost-cap check and then **discarded**: the §19 `cost.update`
+action is fully specified and replayable (`Replay.applyCostUpdate`, `CostTotals`
+on `Feature`) yet **no app-layer code ever writes it** — the szork run's log has
+zero cost entries, so the entire cost-projection subsystem is dead
+infrastructure. The one hard efficiency datum from the run — gap #10's 2.18M
+tokens / 21 min / $9.56 implement turn — was read off the live CLI and is now
+unrecoverable. Phase 2's exit criterion ("you'd choose Forge over running Claude
+directly") is unmeasurable until this is fixed, and the prompt-iteration (§3.3)
+and TUI (§3.2) below both *consume* this data — so observability lands first.
+Findings: [`slice-4/mvp-friction.md`](slice-4/mvp-friction.md); evidence:
+[`slice-4/mvp-run/image-creds-dedup/`](slice-4/mvp-run/image-creds-dedup/).
+
+**Tier 1 — close the capture gap (the machinery already exists):**
+
+- [ ] **Wire the `cost.update` writer.** Draft a `cost.update` action from each
+  `AgentEvent.CostUpdate` the monitor already receives; `Replay.applyCostUpdate`
+  (`Replay.scala:333`) + `CostTotals` (`Cost.scala`) already project it. This is
+  the single highest-value fix — without it the cost subsystem is unfed.
+- [ ] **`session.complete` audit event** carrying `{phase, piece, durationMs,
+  model, turnCostUsd, success}`, built from the `AgentEvent.Result(success,
+  durationMs)` the parser already produces (`AgentEvent.scala:36`). Closes the
+  per-phase timing + attribution gap in one event. (Optionally model `num_turns`,
+  which is currently not captured at all.)
+
+**Tier 2 — make the data answerable:**
+
+- [ ] **`forge stats <feature>`** — fold the log into a per-phase cost /
+  wall-clock / turn-count breakdown. Turns the captured data into a direct answer
+  to "did this run efficiently".
+- [ ] **Separate working-time from wait-time** — stamp a marker when the loop
+  blocks on a human (`DesignAwaitingMerge`, `*NeedsHumanInput`,
+  `PieceAwaitingMerge`) so a 35-min "waiting for the operator to merge" no longer
+  reads as Forge being slow.
+
+**Tier 3 — debuggability & the dev loop itself:**
+
+- [ ] **Generalise the reviewer raw-dump to driver sessions** — an opt-in
+  per-session NDJSON sink (today only reviewers have `FORGE_REVIEWER_RAW_DUMP_DIR`,
+  `ClaudeConnector.scala:419`). Makes "what did the implement driver actually do
+  for $9.56" answerable after the fact, not only live.
+- [ ] **Clean resume-from-NHI that preserves history.** The truncate-and-replay
+  recovery used ~13× during the MVP run corrupts the timing record (seq 0/1 share
+  an identical timestamp because replay rewrites early transitions in a batch) and
+  re-pays full driver exploration on each relaunch (gap #10's compounding cost). A
+  resume that doesn't rewrite the log fixes both.
+
+**Exit:** a completed run's cost, latency, and turn-count are reconstructable
+from the committed log alone, broken down per phase, via `forge stats`.
+
+### 3.2 Slice 2.1 — TUI
 
 Termflow + Elm architecture. Panes per §3.1: status, active (streaming /
 log tail / Q&A / idle). Subjective; iterate based on what feels wrong
 during real use.
 
-### 3.2 Prompt iteration
+### 3.3 Prompt iteration
 
 The four role prompts (driver-spec, driver-implement, reviewer-design,
 reviewer-code) ship with v1 placeholders. After ~5–10 real features:
 revise based on observed failure modes, not on lab fixtures. Track
 prompt diffs in git; they're load-bearing for behaviour.
 
-### 3.3 OSS-readiness scaffolding
+### 3.4 OSS-readiness scaffolding
 
 - README that's actually useful to a stranger.
 - Config templates committed (`.forge/config.example.json`).
@@ -646,10 +708,11 @@ do not block Slice 1.4 code.
 - **S2-10 — `audit.piece_merged` payload key tightened to `"p"`
   only.** v1.3 §19 should pin the payload schema explicitly
   (`{ p, prNumber, mergeCommit, mergedAt }`).
-- **C14 (spec half) — §7.10(a) "applies to resume" claim.** v1.3
-  must either drop the claim or widen the trait signature to carry
-  `systemPromptPath`. Coupled to the Slice 1.4 orchestrator
-  decision below.
+- **C14 (spec half) — §7.10(a) "applies to resume" claim. ✅ CLOSED
+  2026-05-30 at Task 1.4.14 (option ii).** `forge-design-1.3.md` §7.1 /
+  §7.10(a) widens the trait to carry `systemPromptPath` on
+  `resumeStreamingSpec`; Claude ignores it, Codex re-prepends the
+  block. Shipped coupled with the orchestrator half below.
 - **S3-6 — `gh pr create` has no `--json` flag.** v1.3
   design-rationale BM8 needs the wording corrected to name the
   stdout-URL parse contract (`gh pr create … | parse /pull/<n>/`);
@@ -675,10 +738,11 @@ do not block Slice 1.4 code.
 These need code in Slice 1.4, not just spec text. Each is a gating
 deliverable on the relevant sub-PR (Slice 1.4a or Slice 1.4b per §2.4).
 
-- **C14 (orchestrator half).** Slice 1.4b orchestrator's resume path
-  either re-issues Codex role framing in the resume message, or
-  (if v1.3 chose to widen the trait) calls the widened signature.
-  The two halves of C14 ship coupled.
+- **C14 (orchestrator half). ✅ CLOSED 2026-05-30 at Task 1.4.14.**
+  v1.3 chose to widen the trait (option ii), so the orchestrator's
+  resume path (`RealSideEffects.resumeDesign`) calls the widened
+  signature, passing `promptPath("specify")` — the same driver prompt
+  the spawn used. Both halves of C14 shipped coupled in Task 1.4.14.
 - **C15 — Native schema regression suite (landed in Task 1.4.7). ✅ CLOSED
   2026-05-29.** ≥19/20 bar on `reviewDesign` / `reviewPr` / `refine`
   for each connector — **met for all six method × connector pairs** in
@@ -687,15 +751,23 @@ deliverable on the relevant sub-PR (Slice 1.4a or Slice 1.4b per §2.4).
   found and fixed inside 1.4a (C16 envelope, C17 Codex strict schema,
   C18 Claude 2.1.156 tolerant parse). Production reviewer (model, cap,
   timeout-retry) tuning deferred to Task 1.4.9 / S4-3.
-- **S2-5 — Writer-side atomic-merge ordering test.** Asserted
-  against the orchestrator-loop sub-PR in Slice 1.4b: orchestrator
-  atomically persists `manifest.json` before the FSM transition
-  action and the state-cache write (§11.5 step 1 writer side).
-- **S2-8 — `SettleTimeout` reviewer/refine coverage decision.**
-  Slice 1.4 picks: explicit `Fsm.transition` handlers for
-  `SessionPhase.{DesignReview, CodeReview, Refine}` (with
-  `ResumeHintCoverageSuite` rows) **or** documented
-  orchestrator-side conversion of these timeouts to `HarnessError`.
+- **S2-5 — Writer-side atomic-merge ordering test (landed in Task 1.4.11).
+  ✅ CLOSED 2026-05-29.** `OrchestratorAtomicMergeSuite` drives the real
+  orchestrator loop to `PieceAwaitingMerge`, crashes on the merge-audit
+  append, and pins the §11.5-step-1 writer order: manifest persisted
+  `merged` first, the action-log batch absent, and the state cache lagging
+  at the pre-transition state. A direct `RebuildState.run` restart recovers
+  to `Refining` via reconcile case (c).
+- **S2-8 / S3-5 — `SettleTimeout` reviewer/refine coverage decision
+  (landed in Task 1.4.12). ✅ CLOSED 2026-05-29.** Option (i) chosen:
+  `Fsm.transition` now handles all 7 `SessionPhase` variants —
+  `SettleTimeout(SessionPhase.{DesignReview, CodeReview, Refine}, _)`
+  route from `DesignReviewing` / `PieceAwaitingReview` / `Refining` to
+  phase-appropriate `NHI` hints (`ReopenDesign` / `RunAnotherFixup` ×2),
+  with three new `ResumeHintCoverageSuite` rows. The orchestrator-side
+  `ReviewerOutcome.Timeout` → `FsmEvent.SettleTimeout` mapping landed at
+  Task 1.4.10. The `SessionMonitor` driver-phase carve-out (S3-5) stands
+  as designed. See design-rationale **S2-8** / **S3-5** CLOSED notes.
 
 #### 7.2.3 Conditional watch items (fix only if Slice 1.4 measures the cost)
 
@@ -726,6 +798,27 @@ defaults, not code changes.
   first rate-limit becomes a hard `Failed`, or the threshold
   becomes config-shaped), S3-4 is the anchor.
 
+**Walked at Slice 1.4b Task 1.4.15 O5 (2026-05-30) — all four roll into
+v1.3 as documented defaults; none triggered a code change.** No cost
+cliff was surfaced: Slice 1.4b ships no throughput-benchmark harness
+(the orchestrator e2e suites assert correctness, not steady-state write
+rate) and the first lived-cadence run is the Task 1.4.16 MVP gate, which
+had not yet run when 1.4b closed its polish. Per-item disposition:
+**S2-3** — keep `CREATE,APPEND,SYNC`; at the single-digit-actions/sec
+peak the spec cites, fsync is dominated by orchestrator/network latency.
+**S2-9** — moot for v1: the landed `Orchestrator` rebuilds via
+`RebuildState.run` **only at startup** (`Orchestrator.scala:74/100`) and
+persists steady-state via `cache.save` per transition
+(`Orchestrator.scala:185`); `verifyAgainstLog` is **not wired into the
+loop at all**, so the unconditional-write cost it flagged never lands on
+a hot path. **S3-2** — keep the process-local `BranchProtectionCache`;
+the ~150ms re-fetch is per-`forge resume`, not per-poll, so it is
+imperceptible. **S3-4** — keep the three-consecutive cliff; no lived
+`forge run` cadence yet to judge it against. **Re-trigger:** the Task
+1.4.16 MVP run, or Phase-2 lived cadence, is the first real observation
+point; any cliff there reopens the matching fallback (documented in
+`design-rationale.md` S2-3 / S2-9 / S3-4 and in the S3-2 bullet above).
+
 #### 7.2.4 No v1.3 spec change needed (durable explanation in design-rationale)
 
 - **S2-4 — `PrSnapshot` ownership doc mismatch.** v1.2 §3.2 was
@@ -749,7 +842,7 @@ defaults, not code changes.
   watch; reviewer/refine are one-shot adapter calls whose
   wall-clock caps live in Slice 1.4a's reviewer-asset wrappers. No
   separate v1.3 spec change — S2-8's resolution covers both
-  sides.
+  sides. ✅ CLOSED 2026-05-29 with **S2-8** at Task 1.4.12 (see §7.2.2).
 
 ---
 

@@ -120,6 +120,23 @@ object CliParser:
         if rest.contains("--force") then Right(ForgeCommand.UnlockForce) else Left(CliError.UnlockRequiresForce)
       case other => Left(CliError.UnknownCommand(other))
 
+  /** Read-only feature-arg parse for the §15 read-only handlers (`status` / `tail` / `rebuild-state`). Phase 2
+    * collapses every read-only command to `ForgeCommand.ReadOnly(kind)` (the feature is not part of the `forge-git`
+    * `ForgeCommand` ADT), so the handler parses its own feature from the `rest` tokens carried on
+    * [[io.forge.app.command.ReadOnlyContext]]. A parse failure surfaces at handler time as `EX_USAGE` (exit 64), the
+    * same code Main's [[usageError]] uses. `command` names the command for the "requires a <feature>" message.
+    */
+  def requireFeature(command: String, rest: Vector[String]): Either[CliError, FeatureId] =
+    featureOnly(command, rest)
+
+  /** Like [[requireFeature]] but the feature is optional — backs `forge status [<feature>]`. `None` means "no feature
+    * argument given" (the overview form); a present-but-invalid id is still a [[CliError]].
+    */
+  def optionalFeature(rest: Vector[String]): Either[CliError, Option[FeatureId]] =
+    rest.find(t => !t.startsWith("--")) match
+      case None => Right(None)
+      case Some(raw) => FeatureId.fromString(raw).left.map(CliError.InvalidFeatureId(raw, _)).map(Some(_))
+
   /** The feature id a [[ForgeCommand]] binds to (for lock metadata). Read-only / unlock bind to no feature. */
   def featureOf(command: ForgeCommand): Option[FeatureId] = command match
     case ForgeCommand.New(f) => Some(f)

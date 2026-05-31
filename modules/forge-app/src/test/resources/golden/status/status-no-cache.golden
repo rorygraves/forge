@@ -1,0 +1,5 @@
+feature stripe-webhook — "Add Stripe webhook receiver"  [ClaudeDriver]
+  state:   no state cache yet — run `forge run` or `forge rebuild-state`
+  piece:   — (2 pieces: 0 merged, 1 in progress, 1 pending)
+  last:    — (no actions logged)
+  budget:  — (no cost recorded yet)

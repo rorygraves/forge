@@ -132,8 +132,11 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
     run(Vector("git", "status", "--porcelain")).map(_.map(_.isEmpty))
 
   override def stage(paths: Vector[String]): IO[Either[GitError, Unit]] =
+    // `-f`: callers only ever pass ChangeCollector-Allowed paths, and Forge's own source-of-truth lives under the
+    // gitignored `.forge/specs/...` (the repo gitignores `.forge/` so it doesn't dirty the worktree, §10.1 rule 4
+    // force-includes the specs). Without `-f`, `git add` refuses those ignored-but-allowed paths ("use -f").
     if paths.isEmpty then IO.pure(Right(()))
-    else run(Vector("git", "add", "-A", "--") ++ paths).map(_.map(_ => ()))
+    else run(Vector("git", "add", "-A", "-f", "--") ++ paths).map(_.map(_ => ()))
 
   override def status(includeIgnored: Boolean): IO[Either[GitError, Vector[StatusEntry]]] =
     val argv =
@@ -141,9 +144,14 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
     run(argv).map(_.map(RealGitClient.parseStatusZ))
 
   override def commit(message: String): IO[Either[GitError, CommitResult]] =
+    // `--no-verify`: Forge's commit is a mechanical orchestration step — verification is the remote CI gate (§8) plus
+    // the reviewer, NOT the target repo's local dev hooks. Some repos install a pre-commit hook that runs the full
+    // formatter/build (e.g. szork runs `sbt scalafmtCheck`), which is slow and would block (or fail) the orchestrator's
+    // commit on unformatted-but-about-to-be-CI-checked code. Bypass local hooks; let CI catch formatting → fix-up.
     // Deliberately no `-q`: git prints "nothing to commit" to stdout, which the classifier keys off.
     IO.blocking {
-      val res = os.proc("git", "commit", "-m", message).call(cwd = repoRoot, check = false, stderr = os.Pipe)
+      val res =
+        os.proc("git", "commit", "--no-verify", "-m", message).call(cwd = repoRoot, check = false, stderr = os.Pipe)
       RealGitClient.classifyCommit(res.exitCode, res.out.text(), res.err.text())
     }
 

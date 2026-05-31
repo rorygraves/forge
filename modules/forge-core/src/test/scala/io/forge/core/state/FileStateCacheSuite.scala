@@ -191,6 +191,30 @@ class FileStateCacheSuite extends munit.FunSuite:
       "cache_unreadable entry should carry the decode-failure detail for forensic context"
     )
 
+  // --- O4: loadStrict surfaces corruption instead of collapsing it to None ---
+
+  tempFixture.test("loadStrict returns Right(None) on a missing cache"): root =>
+    val cache = new FileStateCache(new ForgePaths(repoRoot = root))
+    assertEquals(cache.loadStrict(FeatureA).unsafeRunSync(), Right(None))
+
+  tempFixture.test("loadStrict returns Right(Some(feature)) on a clean cache"): root =>
+    val cache = new FileStateCache(new ForgePaths(repoRoot = root))
+    val original = freshFeature(FsmState.DesignReady)
+    cache.save(FeatureA, original).unsafeRunSync()
+    assertEquals(cache.loadStrict(FeatureA).unsafeRunSync(), Right(Some(original)))
+
+  tempFixture.test("loadStrict returns Left(CacheCorrupt) on a present-but-undecodable cache"): root =>
+    val paths = new ForgePaths(repoRoot = root)
+    val cache = new FileStateCache(paths)
+    val stateFile = paths.stateFile(FeatureA)
+    os.makeDir.all(stateFile / os.up)
+    os.write(stateFile, "{ \"state\": { truncated")
+    cache.loadStrict(FeatureA).unsafeRunSync() match
+      case Left(RebuildError.CacheCorrupt(id, detail)) =>
+        assertEquals(id, FeatureA)
+        assert(detail.nonEmpty, "CacheCorrupt should carry a non-empty decode-failure detail")
+      case other => fail(s"expected Left(CacheCorrupt), got $other")
+
   // --- E5 regression: durability — save flushes data + parent directory entry (review finding 2) ---
 
   tempFixture.test("save survives a fresh FileStateCache instance reading the same path"): root =>

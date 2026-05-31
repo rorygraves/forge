@@ -38,6 +38,12 @@ final class FileStateCache(paths: ForgePaths) extends StateCache:
       case Left(_) => None
     }
 
+  override def loadStrict(featureId: FeatureId): IO[Either[RebuildError, Option[Feature]]] =
+    loadOrUnreadable(featureId).map {
+      case Right(opt) => Right(opt)
+      case Left(detail) => Left(RebuildError.CacheCorrupt(featureId, detail))
+    }
+
   override def save(featureId: FeatureId, feature: Feature): IO[Unit] =
     IO.blocking {
       val target = paths.stateFile(featureId)

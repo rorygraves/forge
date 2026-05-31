@@ -95,6 +95,16 @@ enum FsmEvent derives ReadWriter:
     */
   case CheckDiscoveryComplete(piece: PieceId, prNumber: PrNumber)
 
+  /** §8 — the orchestrator's CI-readiness gate determined a piece PR can never go green without a human push: no checks
+    * discovered after `checkDiscoveryTimeoutSec`, a required check never appeared, or fewer than
+    * `minimumExpectedChecks` were observed (§8 discovery rules 1-3). The event carries the operator-facing `reason`;
+    * the FSM is `CiPolicy`-agnostic — it routes `(reason, ResumeAfterHumanPush(p, prNumber))` to
+    * `NeedsHumanIntervention` without knowing anything about checks/overlays/timeouts. A dedicated event (rather than
+    * `HarnessError`) is needed because §8 mandates the `ResumeAfterHumanPush` hint, whereas a `PieceAwaitingCi`
+    * `HarnessError` resolves to `RunAnotherFixup`.
+    */
+  case CiReadinessBlocked(piece: PieceId, prNumber: PrNumber, reason: String)
+
   /** §11.5 step 1 — piece merged upstream. Two timestamps because they mean different things:
     *
     *   - `mergedAt`: the historical fact from GitHub (the moment the PR went to MERGED state). Stored durably in the
@@ -202,3 +212,9 @@ enum UserCommand derives ReadWriter:
 
   /** `/done` in the spec REPL (§11.1). Drives `InteractiveSpec → DesignReviewing(1)`. */
   case Done
+
+  /** `forge refresh-cache <feature>` (§15) — manual branch-protection cache invalidation. Bumps
+    * `branchProtectionCacheEpoch` only; the FSM stays in its current state (no lifecycle transition). Mirrors the epoch
+    * bump that `Resume` performs in `handleResume`, but without the accompanying state change.
+    */
+  case RefreshCache

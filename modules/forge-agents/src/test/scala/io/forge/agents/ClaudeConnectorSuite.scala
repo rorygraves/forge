@@ -48,6 +48,42 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     assert(argv.containsSlice(List("--input-format", "stream-json")), clue = argv)
     assert(argv.containsSlice(List("--output-format", "stream-json")), clue = argv)
 
+  test("driver argv carries --permission-mode + --allowedTools so headless sessions can write/edit/run"):
+    // §7.1: driver sessions (spec/implement/fix-up) run headless with no interactive approver, so their tools must be
+    // pre-authorised or every Write/Edit/Bash is denied. The default (mode "default" + empty allowlist) emits nothing
+    // so the reviewer/legacy argv shape is unchanged.
+    assertEquals(ClaudeConnector.driverPermissionFlags("default", Vector.empty), List.empty[String])
+    val spec = ClaudeConnector.streamingSpecArgv(
+      "claude",
+      os.Path("/tmp/spec.md"),
+      "acceptEdits",
+      Vector("Read", "Write", "Bash")
+    )
+    assert(spec.containsSlice(List("--permission-mode", "acceptEdits")), clue = spec)
+    assert(spec.containsSlice(List("--allowedTools", "Read", "Write", "Bash")), clue = spec)
+    val headless =
+      ClaudeConnector.headlessArgv("claude", os.Path("/tmp/impl.md"), "do it", "acceptEdits", Vector("Edit"))
+    assert(headless.containsSlice(List("--permission-mode", "acceptEdits")), clue = headless)
+    assert(headless.containsSlice(List("--allowedTools", "Edit")), clue = headless)
+    // disallowedTools (e.g. the `Task` sub-agent spawner) is appended when supplied (S4-5: a focused driver must not
+    // fan out into sub-agents that re-scan the repo + run the heavy build).
+    val withDisallow = ClaudeConnector.headlessArgv(
+      "claude",
+      os.Path("/tmp/impl.md"),
+      "do it",
+      "acceptEdits",
+      Vector("Edit"),
+      Vector("Task")
+    )
+    assert(withDisallow.containsSlice(List("--disallowedTools", "Task")), clue = withDisallow)
+    assertEquals(
+      ClaudeConnector.driverPermissionFlags("default", Vector.empty, Vector("Task")).take(1),
+      List("--disallowedTools")
+    )
+    // Default-arg call (used by existing tests) stays flag-free.
+    assert(!ClaudeConnector.streamingSpecArgv("claude", os.Path("/tmp/spec.md")).contains("--permission-mode"))
+    assert(!ClaudeConnector.streamingSpecArgv("claude", os.Path("/tmp/spec.md")).contains("--disallowedTools"))
+
   test("encodeUserMessageJson wraps text in the wire shape `--input-format stream-json` expects"):
     val frame = ClaudeConnector.encodeUserMessageJson("hello")
     val parsed = ujson.read(frame)
@@ -166,8 +202,12 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     val sid = "sid-resume-1"
     val fake = fakeStreamingClaude(sid)
     val connector = ClaudeConnector(binary = fake.toString)
+    // C14: the widened trait carries `systemPromptPath`, but Claude ignores it — `--resume` restores the spawn-time
+    // system prompt server-side, and `resumeStreamingSpecArgv` (asserted above) omits `--system-prompt-file`. Pass a
+    // path that does not exist on disk to prove the adapter never reads it.
+    val ignoredPrompt = os.temp.dir() / "does-not-exist.md"
     val (returnedSid, events) = connector
-      .resumeStreamingSpec(sid, "next turn please")
+      .resumeStreamingSpec(sid, ignoredPrompt, "next turn please")
       .flatMap: session =>
         for
           drained <- session.events.compile.toVector

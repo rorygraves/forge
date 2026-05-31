@@ -47,6 +47,15 @@ class ResumeHintCoverageSuite extends munit.FunSuite:
       case ResumeHint.ReopenDesign(_) => true
       case _ => false
 
+  test("§B3(a)/S2-8 design review settle timeout → NHI(ReopenDesign(currentDesignPr))"):
+    assertNhi(
+      "design review settle timeout",
+      featureIn(FsmState.DesignReviewing(1), designSessionId = Some("s"), designPr = Some(DesignPr)),
+      FsmEvent.SettleTimeout(SessionPhase.DesignReview, "x")
+    ):
+      case ResumeHint.ReopenDesign(Some(pr)) => pr == DesignPr
+      case _ => false
+
   test("§11.3 design PR closed without merge → NHI(ReopenDesign(Some(prNumber)))"):
     assertNhi(
       "design pr closed",
@@ -81,6 +90,18 @@ class ResumeHintCoverageSuite extends munit.FunSuite:
       case ResumeHint.RunAnotherFixup(p, pr) => p == P1 && pr == P1Pr
       case _ => false
 
+  test("§8 CI readiness blocked (discovery rules 1-3) → NHI(ResumeAfterHumanPush)"):
+    assertNhi(
+      "ci readiness blocked",
+      featureIn(
+        FsmState.PieceAwaitingCi(P1, P1Pr),
+        pieces = Vector(pieceInProgress(P1, 1, prNumber = Some(P1Pr)), piecePending(P2, 2))
+      ),
+      FsmEvent.CiReadinessBlocked(P1, P1Pr, "no CI checks discovered")
+    ):
+      case ResumeHint.ResumeAfterHumanPush(p, pr) => p == P1 && pr == P1Pr
+      case _ => false
+
   test("§11.5 PR closed without merge → NHI(RunAnotherFixup)"):
     assertNhi(
       "piece pr closed",
@@ -89,6 +110,31 @@ class ResumeHintCoverageSuite extends munit.FunSuite:
         pieces = Vector(pieceInProgress(P1, 1, prNumber = Some(P1Pr)), piecePending(P2, 2))
       ),
       FsmEvent.PrSnapshotUpdated(P1, closedSnapshot(P1Pr))
+    ):
+      case ResumeHint.RunAnotherFixup(p, pr) => p == P1 && pr == P1Pr
+      case _ => false
+
+  test("§B3(a)/S2-8 code review settle timeout → NHI(RunAnotherFixup)"):
+    assertNhi(
+      "code review settle timeout",
+      featureIn(
+        FsmState.PieceAwaitingReview(P1, P1Pr),
+        pieces = Vector(pieceInProgress(P1, 1, prNumber = Some(P1Pr)), piecePending(P2, 2))
+      ),
+      FsmEvent.SettleTimeout(SessionPhase.CodeReview, "x")
+    ):
+      case ResumeHint.RunAnotherFixup(p, pr) => p == P1 && pr == P1Pr
+      case _ => false
+
+  test("§B3(a)/S3-5 refine settle timeout → NHI(RunAnotherFixup)"):
+    assertNhi(
+      "refine settle timeout",
+      featureIn(
+        FsmState.Refining(P1, P1Pr, ObservedAt),
+        pieces = Vector(pieceMerged(P1, 1, P1Pr), piecePending(P2, 2)),
+        currentPieceSessionId = Some("s")
+      ),
+      FsmEvent.SettleTimeout(SessionPhase.Refine, "x")
     ):
       case ResumeHint.RunAnotherFixup(p, pr) => p == P1 && pr == P1Pr
       case _ => false

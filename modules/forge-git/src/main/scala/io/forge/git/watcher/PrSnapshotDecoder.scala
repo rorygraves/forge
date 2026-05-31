@@ -252,6 +252,11 @@ object PrSnapshotDecoder:
         v.strOpt match
           case None =>
             Left(DecodeError.MalformedShape(s"$pathPrefix.conclusion", "string", shapeName(v)))
+          case Some("") =>
+            // A check that is still queued/in-progress has no conclusion yet; `gh` flattens that null to the empty
+            // string (same quirk as `reviewDecision`, S3-8). Decode it as `None` — `Fsm.ciOutcome` reads a required
+            // check with `conclusion = None` as still-pending, which is exactly right.
+            Right(None)
           case Some(s) =>
             CheckConclusion
               .fromString(s)

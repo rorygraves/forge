@@ -109,7 +109,7 @@ class ClaudeStreamingSpecSuite extends munit.FunSuite:
     assert(uuidRegex.matches(sid), clue = sid)
 
     val resumed = connector
-      .resumeStreamingSpec(sid, "Say 'done' and stop.")
+      .resumeStreamingSpec(sid, sys, "Say 'done' and stop.")
       .flatMap: session =>
         for
           _ <- session.close()

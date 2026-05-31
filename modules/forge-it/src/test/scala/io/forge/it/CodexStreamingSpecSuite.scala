@@ -113,7 +113,7 @@ class CodexStreamingSpecSuite extends munit.FunSuite:
     assert(firstSid.nonEmpty, clue = firstSid)
 
     val resumed = connector
-      .resumeStreamingSpec(firstSid, "Say 'two' and stop.")
+      .resumeStreamingSpec(firstSid, sys, "Say 'two' and stop.")
       .flatMap: session =>
         session.close().as(session.sessionId)
       .unsafeRunSync()

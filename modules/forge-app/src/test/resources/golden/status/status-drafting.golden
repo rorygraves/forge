@@ -1,0 +1,5 @@
+feature stripe-webhook — "Add Stripe webhook receiver"  [ClaudeDriver]
+  state:   drafting (spec not started)
+  piece:   — (2 pieces: 0 merged, 1 in progress, 1 pending)
+  last:    fsm.transition @ 2026-05-30T09:00:00Z
+  budget:  feature $1.50 / $25.00 · piece $0.75 / $8.00

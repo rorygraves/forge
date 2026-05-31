@@ -29,7 +29,7 @@ class ConnectorContractSuite extends munit.FunSuite:
 
     def runStreamingSpec(systemPromptPath: os.Path, initialUserMessage: String): IO[StreamingSession] =
       IO.pure(NoopSession)
-    def resumeStreamingSpec(sessionId: String, message: String): IO[StreamingSession] =
+    def resumeStreamingSpec(sessionId: String, systemPromptPath: os.Path, message: String): IO[StreamingSession] =
       IO.pure(NoopSession)
     def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] = IO.pure(NoopSession)
     def runFixup(prompt: FixupPrompt): IO[AgentSession] = IO.pure(NoopSession)

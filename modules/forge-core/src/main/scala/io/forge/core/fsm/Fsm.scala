@@ -90,6 +90,13 @@ object Fsm:
           if feature.state.isInstanceOf[FsmState.NeedsHumanIntervention] =>
         Some(handleResume(feature, hint))
 
+      // §15 `forge refresh-cache`: bump the branch-protection cache epoch only — no lifecycle transition. Mirrors the
+      // epoch bump in `handleResume` but stays in the current state and emits no drafts (the state is unchanged, so
+      // there is no `fsm.transition` to record). The terminal-state guard lives in the command derivation
+      // (`deriveRefreshCache`); the pure FSM stays total here.
+      case FsmEvent.UserCommandReceived(UserCommand.RefreshCache) =>
+        Some((feature.copy(branchProtectionCacheEpoch = feature.branchProtectionCacheEpoch + 1), Vector.empty))
+
       case FsmEvent.BudgetBreached(scope, message) if !isTerminal(feature.state) =>
         val _ = scope
         Some(toNeedsHumanIntervention(feature, s"budget exceeded: $message", hintFromState(feature)))
@@ -200,9 +207,10 @@ object Fsm:
 
       // §11.2 step 12: request_changes. Validate designSessionId per §11.0 step 5; on missing → NHI(ReopenDesign(None)).
       // On present → next revision round (gated by config.maxDesignReviewRounds).
-      // C14 awareness: when the orchestrator handles this transition by calling driver.resumeStreamingSpec(...), the
-      // Codex connector cannot re-apply --system-prompt-file (design-rationale C14). The orchestrator-side wiring (lands
-      // in Slice 4) must re-issue role framing in the revisionMessage for Codex. The FSM itself does not branch on Mode.
+      // C14 (closed, v1.3 §7.10(a) / Task 1.4.14): when the orchestrator handles this transition it calls
+      // driver.resumeStreamingSpec(sessionId, systemPromptPath, revisionMessage) — the trait now carries the driver
+      // prompt path so the Codex connector re-prepends the §7.10(a) system block on resume (Claude ignores it). The FSM
+      // itself does not branch on Mode.
       case FsmEvent.DesignReviewReceived(round, DesignReviewVerdict.RequestChanges(_)) =>
         requireSessionId(
           feature.designSessionId,
@@ -252,6 +260,16 @@ object Fsm:
         toNeedsHumanIntervention(
           feature,
           "design revision settle timeout",
+          ResumeHint.ReopenDesign(currentDesignPr(feature))
+        )
+
+      // §B3 option (a) / S2-8: reviewer-side wall-clock cap. The orchestrator's `designReviewEvent` maps
+      // `ReviewerOutcome.Timeout` → `SettleTimeout(SessionPhase.DesignReview, _)` (distinct from the driver-side
+      // DesignRevision phase above). Route to NHI with the same design-phase hint as the revision/converge paths.
+      case FsmEvent.SettleTimeout(SessionPhase.DesignReview, _) =>
+        toNeedsHumanIntervention(
+          feature,
+          "design review settle timeout",
           ResumeHint.ReopenDesign(currentDesignPr(feature))
         )
 
@@ -457,6 +475,12 @@ object Fsm:
       case FsmEvent.CheckDiscoveryComplete(piece, prNumber) if piece == state.p && prNumber == state.prNumber =>
         noop(feature)
 
+      // §8 discovery rules 1-3: the orchestrator's CI-readiness gate gave up (no checks / required check missing /
+      // too few observed). Route to NeedsHumanIntervention with the §8-mandated ResumeAfterHumanPush hint. The FSM
+      // stays CiPolicy-agnostic — `reason` is pre-rendered by the orchestrator (CiReadiness.evaluate).
+      case FsmEvent.CiReadinessBlocked(piece, prNumber, reason) if piece == state.p && prNumber == state.prNumber =>
+        toNeedsHumanIntervention(feature, reason, ResumeHint.ResumeAfterHumanPush(state.p, state.prNumber))
+
       case _ => noop(feature)
 
   private def pieceAwaitingReviewTransitions(
@@ -505,6 +529,16 @@ object Fsm:
           ,
           exhaustedReason = s"piece ${state.p.value} fix-up exhausted after human override",
           exhaustedHint = ResumeHint.RunAnotherFixup(state.p, state.prNumber)
+        )
+
+      // §B3 option (a) / S2-8: reviewer-side wall-clock cap. The orchestrator's `prReviewEvent` maps
+      // `ReviewerOutcome.Timeout` → `SettleTimeout(SessionPhase.CodeReview, _)`. Route to NHI with the same fix-up
+      // hint the review-failed / human-override paths use.
+      case FsmEvent.SettleTimeout(SessionPhase.CodeReview, _) =>
+        toNeedsHumanIntervention(
+          feature,
+          s"code review settle timeout for piece ${state.p.value}",
+          ResumeHint.RunAnotherFixup(state.p, state.prNumber)
         )
 
       case _ => noop(feature)
@@ -644,6 +678,18 @@ object Fsm:
         )
         val updated = feature.copy(state = to, currentPieceSessionId = None)
         (updated, Vector(fsmTransitionDraft(feature, state, to, piece = Some(state.p))))
+
+      // §B3 option (a) / S3-5: refinery wall-clock cap. The orchestrator's `refineEvent` maps
+      // `ReviewerOutcome.Timeout` → `SettleTimeout(SessionPhase.Refine, _)`. The piece is already merged at this point,
+      // so the recovery hint is RunAnotherFixup (matching hintFromState for Refining); `toNeedsHumanIntervention`
+      // clears the stale currentPieceSessionId per §6.1.
+      case FsmEvent.SettleTimeout(SessionPhase.Refine, _) =>
+        toNeedsHumanIntervention(
+          feature,
+          s"refine settle timeout for piece ${state.p.value}",
+          ResumeHint.RunAnotherFixup(state.p, state.prNumber)
+        )
+
       case _ => noop(feature)
 
   private def planningUpdateTransitions(

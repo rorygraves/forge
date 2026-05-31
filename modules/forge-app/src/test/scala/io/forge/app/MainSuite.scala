@@ -32,14 +32,17 @@ class MainSuite extends munit.FunSuite:
     assertEquals(run(repo, "unlock"), ExitCode(64))
   }
 
-  tempFixture.test("a read-only shell routes and exits 70 (not implemented)") { repo =>
-    assertEquals(run(repo, "status"), ExitCode(70))
+  tempFixture.test("a read-only command routes without locking and exits 0 (status overview)") { repo =>
+    // `forge status` with no feature prints the (empty) overview; the point is that the read-only class routes to the
+    // wired handler (Task 1.4.13) without acquiring the lock.
+    assertEquals(run(repo, "status"), ExitCode.Success)
   }
 
-  tempFixture.test("a state-changing command acquires then releases the lock around its shell") { repo =>
-    // shell exits 70; the run must release the lock so a second run can re-acquire it.
-    assertEquals(run(repo, "run", "my-feat"), ExitCode(70))
-    assertEquals(run(repo, "run", "my-feat"), ExitCode(70))
+  tempFixture.test("a state-changing command acquires then releases the lock around its handler") { repo =>
+    // `forge run` on an undesigned feature exits 1 (no manifest yet); the point is the lock bracket — the handler runs
+    // inside the lock Resource and must release it so a second run re-acquires (rather than seeing a held/stale lock).
+    assertEquals(run(repo, "run", "my-feat"), ExitCode(1))
+    assertEquals(run(repo, "run", "my-feat"), ExitCode(1))
   }
 
   tempFixture.test("config is loaded for non-unlock commands; a malformed config exits 78") { repo =>

@@ -254,9 +254,14 @@ class CodexConnectorSuite extends munit.FunSuite:
     assertEquals(events.headOption, Some(AgentEvent.Init("thr-kill")), clue = events)
     assert(!events.exists(_.isInstanceOf[AgentEvent.Result]), clue = events)
 
-  test("resumeStreamingSpec: spawns codex exec resume <sid> ..., verifies thread_id matches"):
+  test("resumeStreamingSpec: spawns codex exec resume <sid>, re-prepends the §7.10(a) system block (C14)"):
+    // C14 / N5 regression: the widened trait carries `systemPromptPath` so each `codex exec resume` re-prepends the
+    // original driver framing (a fresh subprocess remembers nothing the adapter doesn't pass in). The fake echoes the
+    // last positional arg — the combined prompt — back as assistant text, so the system block must show up there.
     val tid = "thr-resume-1"
     val fake = fakeCodex(tid)
+    val systemPrompt =
+      os.temp(contents = "Act as the design driver.", prefix = "sys-", suffix = ".md", deleteOnExit = true)
     val connector = CodexConnector(
       binary = fake.toString,
       model = model,
@@ -264,7 +269,7 @@ class CodexConnectorSuite extends munit.FunSuite:
       sessionSettings = defaultSettings
     )
     val (returnedSid, events) = connector
-      .resumeStreamingSpec(tid, "continue please")
+      .resumeStreamingSpec(tid, systemPrompt, "continue please")
       .flatMap: session =>
         for
           _ <- session.close()
@@ -273,12 +278,13 @@ class CodexConnectorSuite extends munit.FunSuite:
       .unsafeRunSync()
     assertEquals(returnedSid, tid)
     assertEquals(events.headOption, Some(AgentEvent.Init(tid)))
-    // Resume case has no system prompt path; assistant text echoes just the user message verbatim.
     val texts = events.collect { case AgentEvent.AssistantText(t, _) => t }
-    assert(texts.exists(_.contains("continue please")), clue = texts)
+    assert(texts.exists(_.contains("Act as the design driver.")), clue = texts) // system block reached Codex
+    assert(texts.exists(_.contains("continue please")), clue = texts) // user message too
 
   test("resumeStreamingSpec: mismatched thread_id raises rather than silently lying about sessionId"):
     val fake = fakeCodex("thr-actual")
+    val systemPrompt = os.temp(contents = "S", prefix = "sys-", suffix = ".md", deleteOnExit = true)
     val connector = CodexConnector(
       binary = fake.toString,
       model = model,
@@ -286,7 +292,7 @@ class CodexConnectorSuite extends munit.FunSuite:
       sessionSettings = defaultSettings
     )
     val result = connector
-      .resumeStreamingSpec("thr-expected-different", "msg")
+      .resumeStreamingSpec("thr-expected-different", systemPrompt, "msg")
       .attempt
       .unsafeRunSync()
     assert(result.left.exists(_.getMessage.contains("thr-actual")), clue = result)

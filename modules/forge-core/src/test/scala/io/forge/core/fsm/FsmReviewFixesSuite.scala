@@ -297,3 +297,16 @@ class FsmReviewFixesSuite extends munit.FunSuite:
     assertEquals(mismatch.payload("event").str, "Merged")
     assertEquals(mismatch.payload("expectedPr").num.toInt, P1Pr.value)
     assertEquals(mismatch.payload("observedPr").num.toInt, wrongPr.value)
+
+  // ---------------------------------------------------------------------------
+  // M7: refresh-cache bumps branchProtectionCacheEpoch without a state change (§15)
+  // ---------------------------------------------------------------------------
+
+  test("M7 — refresh-cache bumps branchProtectionCacheEpoch without a state change (§15)"):
+    // `forge refresh-cache` (UserCommand.RefreshCache) is the manual cache-invalidation command: it bumps the epoch
+    // exactly like resume's §8.1 bump, but must stay in the current lifecycle state and emit no drafts.
+    val f = featureIn(FsmState.DesignReviewing(1), designSessionId = Some("sess-1"), designPr = Some(DesignPr))
+    val (out, drafts) = Fsm.transition(f, FsmEvent.UserCommandReceived(UserCommand.RefreshCache))
+    assertEquals(out.branchProtectionCacheEpoch, f.branchProtectionCacheEpoch + 1)
+    assertEquals(out.state, f.state, "refresh-cache must not change the lifecycle state")
+    assertEquals(drafts, Vector.empty, "refresh-cache emits no drafts")

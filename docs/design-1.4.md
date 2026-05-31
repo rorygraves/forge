@@ -1055,7 +1055,7 @@ on.
   and the I3-mandated `ForgeCommand.ReadOnlyKind` change — neither a
   behavioural surface expansion.
 
-### Task 1.4.10 — `Orchestrator` loop (the headless feature engine)
+### Task 1.4.10 — `Orchestrator` loop (the headless feature engine)  ✅ landed 2026-05-29
 
 The heart of Slice 1.4b. Wires Slices 1–3 together through
 `Fsm.transition`.
@@ -1080,14 +1080,14 @@ so a half-built engine never reads as "J-item done".
   the J4 atomic-persist order, and the scripted-fake e2e suites (J5).
   Every git/gh/`Connector`/prompt interaction stays behind the
   `SideEffects` seam (no real impl yet). (commit `96ba820`, 2026-05-29)
-- [ ] **1.4.10-d2a** — `forge-git` commit/status seam. Adds
+- [x] **1.4.10-d2a** — `forge-git` commit/status seam. Adds
   `GitClient.stage` / `commit` / structured `status` (+ `StatusEntry`
   / `CommitResult`), the `RealGitClient` impl, the `FakeGitClient`
   stubs, pure parser/classifier units, and a real-`git`
   integration suite. Pure git-domain (forge-git depends only on
   forge-core); no forge-app changes. Unblocks the `ChangeCollector`
   + §11.4/§11.6 commit→push wiring in d2b.
-- [ ] **1.4.10-d2b** — real `SideEffects` impl + J3 connector factory
+- [x] **1.4.10-d2b** — real `SideEffects` impl + J3 connector factory
   + minimal v1 driver system prompts. `RealSideEffects` wiring the
   `Connector` (J3 — constructed once per `Mode`, shared across
   `runStreamingSpec`/`runHeadlessImplementation`/`runFixup`/
@@ -1096,19 +1096,38 @@ so a half-built engine never reads as "J-item done".
   `SpecStore`/`DocSync`, and template-rendered prompt/PR-body/audit
   assembly; six driver system prompts (spec/implement/fixup ×
   claude/codex) added to `assets/` + `AssetInstaller`. **Completes J3.**
-- [ ] **1.4.10-d2c** — `Main` wiring + cross-restart durability +
-  real-CLI integration. `forge run` / `spec` / `new` handlers
-  instantiate the `Orchestrator` inside the lock `Resource`; **S4-1**
-  poll-baseline file persistence; **S4-5** reviewer process-failure
-  retry; a `forge-it` end-to-end driving real `claude`/`codex` +
-  git/gh. **Closes Task 1.4.10**: flips J1–J5, adds the §3
-  status-log entry.
+  **As landed:** `ConnectorFactory.build(mode, paths, config)` (J3 —
+  one `Connector` per `Mode`, reviewer assets from `~/.forge/`, v1
+  models hard-wired pending **S4-5**); `RealSideEffects` implementing
+  all 17 `SideEffects` methods (manifest mutations stay with the FSM —
+  side effects only return events; `Deny`/`Ask` → `Left` for the
+  loop's NHI routing); pure `RealSideEffects.statusToFileChanges`
+  (`StatusEntry → FileChange`, carrying `gitIgnored` + rename source);
+  `pr-body.md.hbs` rendered via `HandlebarsLite` with a plain-body
+  fallback. Six driver prompts shipped + registered in
+  `AssetInstaller.PromptLeaves`. Tests: `RealSideEffectsSuite` (8) +
+  `ConnectorFactorySuite` (2) + the `AssetInstallerSuite` extension;
+  forge-app 203, all unit modules green; `scalafmtCheckAll` clean.
+  J1–J5 / §3 status-log / roadmap fold stay unticked pending d2c.
+- [x] **1.4.10-d2c** — `Main` wiring + cross-restart durability +
+  wiring smoke. `forge run` / `forge new` handlers instantiate the
+  `Orchestrator` (via `OrchestratorBuilder`) inside the lock
+  `Resource`; **S4-1** poll-baseline file persistence
+  (`PollBaselineStore`); **S4-5** reviewer process-failure retry
+  (`RetryingReviewerCall`); terminal-state rendering (`TerminalReport`).
+  **Scope confirmed with the maintainer:** `forge spec` REPL +
+  `status`/`tail`/`reconcile` stay Task 1.4.13; the full real-CLI
+  feature drive is the Task 1.4.16 MVP gate, so d2c closes with an
+  opt-in `forge-it` construction smoke
+  (`OrchestratorWiringSmokeSuite`, `FORGE_IT_RUN_WIRING_SMOKE=1`)
+  rather than a real `claude`/`codex`/gh end-to-end. **Closes
+  Task 1.4.10**: flips J1–J5, adds the §3 status-log entry.
 
 J-item mapping: **J2** ← a/b + c; **J1 + J4 + J5** ← d1; **J3** ←
 d2b; the real git/gh/`Connector` behaviour behind J1/J4 is realized
 across d2a–d2c.
 
-- [ ] **J1.** `io.forge.app.orchestrator.Orchestrator` —
+- [x] **J1.** `io.forge.app.orchestrator.Orchestrator` —
   the headless feature loop. Pseudocode (the three
   sub-phases from J2 are explicit; `currentDriverSession`
   is the `Ref[IO, Option[ActiveSession]]` defined in J2):
@@ -1170,7 +1189,7 @@ across d2a–d2c.
   of `RebuildState.run`'s return shape (carry-forward
   **S4-4**); see J2 for the per-phase × FSM-state
   synthetic-`HarnessError` mapping.
-- [ ] **J2.** Event sources, session lifecycle, post-settle
+- [x] **J2.** Event sources, session lifecycle, post-settle
   synthesis, and restart recovery. `Orchestrator`'s loop has
   **three internal sub-phases** that interleave the pure
   `Fsm.transition` reactive core with the §11 side-effect
@@ -1552,14 +1571,14 @@ across d2a–d2c.
   `observedTransitions` and `observedPieceMerges` but no
   in-flight bookkeeping). Filed as new carry-forward
   **S4-4** in §4.
-- [ ] **J3.** Connector lifetime — `Connector` is
+- [x] **J3.** Connector lifetime — `Connector` is
   constructed once at orchestrator start per `Mode`
   (Claude or Codex). `runStreamingSpec /
   runHeadlessImplementation / runFixup /
   resumeStreamingSpec` calls share the connector
   resource. **C14 watch:** the Codex resume call needs
   to handle role framing per Task 1.4.14's resolution.
-- [ ] **J4.** Atomic manifest persistence — `SpecStore.saveManifest`
+- [x] **J4.** Atomic manifest persistence — `SpecStore.saveManifest`
   (1.4a Task 1.4.3) is called **before** the action log append +
   state cache write. Per §11.5 step 1, if the orchestrator
   crashes between manifest write and FSM transition action,
@@ -1567,7 +1586,7 @@ across d2a–d2c.
   manifest and `RebuildState.reconcile` synthesises the
   missing `audit.piece_merged` action. This is the writer
   side of the invariant that **S2-5** flagged.
-- [ ] **J5.** Unit suite — orchestrator loop happy paths via
+- [x] **J5.** Unit suite — orchestrator loop happy paths via
   fake event sources (fake `SessionMonitor`, fake
   `PRWatcher`, fake `ReviewerCall`). Cover at minimum:
   - Spec phase end-to-end (`Drafting → InteractiveSpec →
@@ -1582,13 +1601,13 @@ across d2a–d2c.
     append; restart reads manifest, reconcile synthesises
     the missing action, FSM advances normally.
 
-### Task 1.4.11 — **S2-5** writer-side atomic-merge test
+### Task 1.4.11 — **S2-5** writer-side atomic-merge test  ✅ landed 2026-05-29
 
 A focused PR that pins the writer-side invariant Slice 1.2 Task 1.2.6
 deferred. Task exists as its own anchor so a future reviewer
 walking carry-forwards can find the test directly.
 
-- [ ] **K1.** `OrchestratorAtomicMergeSuite` in `forge-app`
+- [x] **K1.** `OrchestratorAtomicMergeSuite` in `forge-app`
   test scope. Uses a fault-injection `SpecStore` /
   `FileActionLog` / `FileStateCache` triple:
   - Inject crash between manifest write and action-log
@@ -1599,59 +1618,131 @@ walking carry-forwards can find the test directly.
   - Restart via `RebuildState.run`. Assert reconciliation
     synthesises the missing `audit.piece_merged` and FSM
     advances to `Refining` correctly.
-- [ ] **K2.** Close **S2-5** in `design-rationale.md` —
+  **As landed:** the suite reuses the J5 `OrchestratorTestKit`
+  fakes (`FaultOnMergeAuditLog` injects the crash on the
+  `audit.piece_merged` append; the real `File*` triad backs a temp
+  tree) and drives the **real** `Orchestrator` loop from `Drafting`
+  to `PieceAwaitingMerge`, where the watcher offers the merged
+  snapshot. The crashed transition pins all three writer steps in
+  order: (1) the manifest is already persisted `merged`
+  (`SpecStore.saveManifest` ran first); (2) the action-log batch —
+  `fsm.transition` + `audit.piece_merged`, written all-or-nothing by
+  `appendAll` — never landed; (3) **the new assertion the e2e
+  crash-recovery suite did not make** — the state cache *lags behind*
+  the manifest, still holding the pre-transition
+  `PieceAwaitingMerge(p1, pr)` state, because `cache.save` is the
+  third write and the crash fired on the second. Pass 2 then calls
+  `RebuildState.run` *directly* (not the full loop): the log folds to
+  `PieceAwaitingMerge`, so reconcile takes the three-draft case (c)
+  — `fsm.transition` + `audit.piece_merged` + `harness.crash_recovered`
+  — and the FSM advances to `Refining`. (Distinct from
+  `OrchestratorE2ECrashRecoverySuite`, which drives the whole loop on
+  to `FeatureDone`; this suite is the focused writer-order anchor.)
+- [x] **K2.** Close **S2-5** in `design-rationale.md` —
   "Action required" flips from "deferred to Slice 1.4" to
   "closed in Slice 1.4b Task 1.4.11". Roadmap §7.2.2 entry
   updated.
+  **Done** — S2-5 "Action required" flipped to "CLOSED in Slice 1.4b
+  Task 1.4.11 (2026-05-29)" with the writer-side test path recorded;
+  roadmap §7.2.2 gate entry marked "✅ CLOSED 2026-05-29" and the §2.4
+  carry-forward bullet updated.
 
-### Task 1.4.12 — **S2-8** / **S3-5** reviewer/refine SettleTimeout closure
+### Task 1.4.12 — **S2-8** / **S3-5** reviewer/refine SettleTimeout closure  ✅ landed 2026-05-29
 
 Whichever option B3 (in Task 1.4.2) chose — explicit FSM handlers
 (a) or documented orchestrator-side conversion (b).
 
-- [ ] **L1.** **If (a):** Add `Fsm.transition` handlers for
+- [x] **L1.** **If (a):** Add `Fsm.transition` handlers for
   `SettleTimeout(SessionPhase.DesignReview, _)` from
   `DesignReviewing(round)`, `SettleTimeout(CodeReview, _)`
   from `PieceAwaitingReview`, `SettleTimeout(Refine, _)`
   from `Refining`. Each routes to `NeedsHumanIntervention`
   with a phase-appropriate `ResumeHint`. Add
-  `ResumeHintCoverageSuite` rows.
-- [ ] **L2.** **If (b):** `Orchestrator.handleReviewerOutcome`
+  `ResumeHintCoverageSuite` rows. **DONE 2026-05-29:** option (a)
+  per B3. Three handlers added (`DesignReview`→`ReopenDesign`,
+  `CodeReview`/`Refine`→`RunAnotherFixup`); three new
+  `ResumeHintCoverageSuite` rows; `forge-core` green (371).
+- [x] **L2.** **If (b):** ~~`Orchestrator.handleReviewerOutcome`
   converts `Timeout(_)` to
-  `FsmEvent.HarnessError("<phase> settle timeout")`.
-  Document the conversion in `Fsm.scala`'s scaladoc and in
-  `Orchestrator.handleReviewerOutcome`'s scaladoc; the FSM
-  doesn't gain new handlers. Add an
-  `OrchestratorReviewerTimeoutSuite` row pinning the
-  conversion.
-- [ ] **L3.** Close **S2-8** and **S3-5** in
-  `design-rationale.md`. Roadmap §7.2.2 entry updated.
+  `FsmEvent.HarnessError("<phase> settle timeout")`.~~ **N/A —
+  B3 chose option (a); L1 is the live path.** (The orchestrator
+  *does* map `ReviewerOutcome.Timeout` → `FsmEvent.SettleTimeout`
+  in `designReviewEvent`/`prReviewEvent`/`refineEvent`, landed at
+  Task 1.4.10 — but to `SettleTimeout`, not `HarnessError`.)
+- [x] **L3.** Close **S2-8** and **S3-5** in
+  `design-rationale.md`. Roadmap §7.2.2 entry updated. **DONE
+  2026-05-29:** both CLOSED notes added in `design-rationale.md`;
+  roadmap §7.2.2 S2-8/S3-5 entry + §7.2.4 S3-5 entry flipped to
+  ✅ CLOSED.
 
 ### Task 1.4.13 — CLI surface (every §17 / §15 command)
 
 The user-facing surface. Per-command handlers wire into the
 orchestrator (Task 1.4.10) or are read-only / preflight-only.
 
-- [ ] **M1.** `forge new "<title>" [--mode <mode>] [--id <slug>]`
+- [x] **M1.** `forge new "<title>" [--mode <mode>] [--id <slug>]`
   — slugs per §5.2; creates `<branchPrefix>/<feature>/design`;
   initializes manifest with empty pieces; emits
   `UserCommandReceived(UserCommand.New)`; loops in
   Orchestrator until `InteractiveSpec`.
-- [ ] **M2.** `forge spec <feature>` — **line-mode REPL.** The
+  **Landed Task 1.4.10-d2c** (`NewFeature.scaffold`): preflight →
+  `syncBase` → `createDesignBranch` → seed a `Drafting` manifest.
+  Does not spawn the spec driver (that is `forge spec`, M2). v1
+  takes the title from the feature id; `--mode` / `--id` flag
+  parsing folds into the M2/M5 CLI-parser pass.
+- [x] **M2.** `forge spec <feature>` — **line-mode REPL.** The
   one stateful interactive command. Wires
   `runStreamingSpec(specifyPrompt, firstMessage)` directly to
   stdin/stdout: assistant-text events stream to stdout;
   `AskUserQuestion` events prompt the human; answers route via
   `session.answerQuestion(toolUseId, answer)`. `/done`
   triggers `UserCommandReceived(UserCommand.Done)`.
-- [ ] **M3.** `forge run <feature>` — fully headless. Loops
+  **As landed (Task 1.4.13 incr 3):** `SpecRepl` is a **standalone
+  handler** (not the orchestrator loop) — the J2 `InteractiveSpec`
+  "SessionMonitor + REPL race" can't work as drawn (a session's
+  `events` is a single-consumer fs2 `Channel`; the two would steal
+  events from each other), so the REPL is the **sole** consumer of the
+  event stream and the orchestrator's `EventSource.Repl` stays
+  `IO.never` (headless `forge run` never enters the spec phase). The
+  loop reacts at `Result` boundaries: a `Result` after an
+  `AskUserQuestion` prompts for *that* question and routes via
+  `answerQuestion`; a plain `Result` prompts for the next free message
+  (or `/done`) and routes via `send`. **Persist is at `/done` only**
+  (`SessionSpawned` then `UserCommand.Done`, manifest **reloaded** from
+  disk since the driver owns `manifest.json` through decomposition —
+  Forge writes the log + cache but never the manifest, to avoid
+  clobbering the driver's pieces); an interrupted session leaves
+  `Drafting` and a re-run starts fresh. The §11.1 step-7 coherence
+  post-check is skipped on the human-driven `/done` path (operator is
+  the gate). Deviations carried to §4: **S4-6** (standalone REPL /
+  `EventSource.Repl` stays `IO.never`), **S4-7** (no
+  InteractiveSpec-resume — interrupted spec restarts fresh), **S4-8**
+  (step-7 coherence skipped on `/done`). Unit seams:
+  `SpecReplSuite` (13 cases — `runLoop` via scripted session+console,
+  `finalizeDone` against real `File*` stores, the `classifyStart` gate
+  and answer helpers). Real-CLI spec session is Task 1.4.16.
+- [x] **M3.** `forge run <feature>` — fully headless. Loops
   Orchestrator from current state through to `FeatureDone` or
   `NeedsHumanIntervention`. Prints state transitions to
   stdout; full detail in `.forge/log/<feature>.jsonl`.
-- [ ] **M4.** `forge status [<feature>]` — Per §2.5 polish:
+  **Landed Task 1.4.10-d2c** (`RunFeature.execute`): loads the
+  manifest for `mode`, builds the real `Orchestrator` via
+  `OrchestratorBuilder`, drives to a loop-terminal state, and
+  renders it via `TerminalReport`.
+- [x] **M4.** `forge status [<feature>]` — Per §2.5 polish:
   current state, current piece, last action, budget remaining.
   Read-only; doesn't acquire the lock (per §15: read-only).
-- [ ] **M5.** `forge resume <feature> --<hint>` — variants
+  **As landed (Task 1.4.13 incr 1):** `StatusReport` reads the
+  rebuildable `FileStateCache` directly (not `RebuildState.run` —
+  status must not write while a `forge run` may be mid-flight) +
+  the manifest (authoritative title/mode/pieces) + the last NDJSON
+  log line (decoded in place, not via `replay`, whose repair-on-read
+  could write). With no feature arg it prints a one-line-per-feature
+  overview across `.forge/specs/`. When no cache exists yet it
+  renders from the manifest and points at `forge run` /
+  `rebuild-state`. The §2.5 golden-file formatting polish is
+  Task 1.4.15 O2; this is the v1 rendering.
+- [x] **M5.** `forge resume <feature> --<hint>` — variants
   per §15 / §6 `ResumeHint`:
   - `--after-human-push` → `ResumeAfterHumanPush(p, prNumber)`.
   - `--commit-human-fix` → `CommitAndPushHumanFix(p, prNumber)`.
@@ -1661,90 +1752,240 @@ orchestrator (Task 1.4.10) or are read-only / preflight-only.
     surface as explicit flags or are inferred from current
     `NeedsHumanIntervention` state.
   Bumps `branchProtectionCacheEpoch` per §8.1.
-- [ ] **M6.** `forge reconcile <feature>` — runs **M2** /
+  **As landed (Task 1.4.13 incr 2):** the three CLI flags carry only
+  feature + piece; the authoritative `ResumeHint` (with its
+  `prNumber`) is read off the persisted `NeedsHumanIntervention`
+  state, so the flag + piece act as a safety check (`ResumeFeature.
+  matchHint` rejects a flag that names a different hint kind or
+  piece than the one the NHI awaits, naming the correct recovery via
+  `TerminalReport.recovery`). The other four hints are **not** new
+  flags: they are reached via `forge run` / `forge spec` /
+  `forge abandon` per the NHI render (TerminalReport), matching the
+  §15 three-flag surface. The epoch bump is the FSM's
+  (`Fsm.handleResume`), asserted in `OrchestratorUserCommandSuite`.
+  `forge resume` then **drives the feature forward** to its next
+  loop-terminal state (the recovery complement to `forge run`) via
+  the shared `Orchestrator.applyUserCommand`.
+- [x] **M6.** `forge reconcile <feature>` — runs **M2** /
   §5.4 manifest reconcile against `decomposition.md`'s
   HTML-comment editable regions. Re-renders if no edits
   detected; surfaces `ManifestPatch` if edits valid; refuses
   if edits outside editable regions.
-- [ ] **M7.** `forge refresh-cache <feature>` — bumps
+  **As landed (Task 1.4.13 incr 5):** pure `io.forge.specs.Reconcile`
+  parses the `forge:order-start/-end` region (order + per-piece
+  `forge:editable-summary` text) and `buildPatch`-diffs it against the
+  manifest (`EditPiece(summary)` + `ReorderPieces`); `DocSync` gained
+  `renderManifest(manifest)` so the `ReconcileCommand` handler can
+  render a **candidate** manifest. The handler renders canonical → if
+  it equals on-disk, NoChange; else parse → patch → apply → re-render
+  the candidate and require it to match the on-disk file byte-for-byte
+  (the round-trip proof that every on-disk diff is a reconcilable
+  editable-region edit). Out-of-region edits (piece id/title, status
+  badge, surrounding prose) leave a residual → refuse with line hunks.
+  Confirm is interactive y/N (§5.4) over the shared `ReplConsole`;
+  apply is **direct** `SpecStore.saveManifest`, **no FSM transition**
+  (the FSM `PlanningUpdate` state's advance-to-next-piece is the
+  refinery flow's semantics, wrong for a planning edit) — filed as
+  **S4-9**. Merged-piece edits / §5.5 violations refuse via
+  `ManifestPatch.validate`; a missing `decomposition.md` is
+  (re)rendered. The §5.4 *cross-command* reconcile-preflight gate ("on
+  every command except read-only / reconcile") is **not** wired here —
+  filed as **S4-10**.
+- [x] **M7.** `forge refresh-cache <feature>` — bumps
   `branchProtectionCacheEpoch` only; no state mutation
   beyond that (per §15).
-- [ ] **M8.** `forge abandon <feature>` — emits
+  **As landed (Task 1.4.13 incr 4):** added `UserCommand.RefreshCache`
+  + a cross-cutting `Fsm` handler that returns the same `FsmState` with
+  `branchProtectionCacheEpoch + 1` and no drafts — it mirrors
+  `handleResume`'s epoch bump but **without** the lifecycle state
+  change, keeping `Fsm.transition` pure and total. `RefreshCacheFeature`
+  (mirroring `AbandonFeature`) drives the bump through the shared
+  `UserCommandDriver` → `Orchestrator.applyUserCommand` apply→persist
+  pipeline; `deriveRefreshCache` rejects terminal
+  `FeatureDone`/`Abandoned` and allows every other state.
+  `Orchestrator.applyUserCommandTo`'s no-op backstop was widened from
+  "`state` unchanged + no drafts" to "whole `Feature` unchanged + no
+  drafts" so the epoch-only bump is driven (behaviour-preserving for
+  resume/abandon, which always change `state` or emit drafts). Note: the
+  epoch is an in-process counter — `Replay.foldEvents` replays `state`
+  only and `StateCacheEntry` doesn't persist it across processes (same
+  as `resume`); the persist pipeline still runs (empty draft append +
+  cache refresh) and leaves the lifecycle state untouched. Tests: FSM
+  epoch+state assertion in `FsmReviewFixesSuite` (mirroring its resume
+  §8.1 epoch-bump test), pure `deriveRefreshCache` cases in
+  `UserCommandHandlerSuite` (the shared `UserCommandDriver`
+  manifest-not-found short-circuit is already covered there from
+  incr 2), and an apply→persist case (epoch +1, state unchanged,
+  persisted) + a terminal-reject case in `OrchestratorUserCommandSuite`.
+- [x] **M8.** `forge abandon <feature>` — emits
   `UserCommandReceived(UserCommand.Abandon(reason))`;
   Orchestrator transitions to `Abandoned(reason)`.
-- [ ] **M9.** `forge rebuild-state <feature>` — calls
+  **As landed (Task 1.4.13 incr 2):** `AbandonFeature` applies
+  `UserCommand.Abandon` as a one-shot transition (via the shared
+  `Orchestrator.applyUserCommand`), persisting the terminal
+  `Abandoned` through the J4 manifest→log→cache pipeline. Applied
+  **before** any entry hook so abandoning a mid-flight feature does
+  not re-spawn its driver. v1 has no `--reason` flag (CLI parses the
+  feature only), so the reason is captured generically; an
+  already-terminal feature (`FeatureDone` / `Abandoned`) is rejected
+  with exit 1.
+- [x] **M9.** `forge rebuild-state <feature>` — calls
   `RebuildState.run` directly; reports any
   `RebuildError`. Per §2.5 polish, prove this on a
   deliberately corrupted cache fixture (one test that
   hand-mutates `.forge/state/<feature>.json`).
-- [ ] **M10.** `forge unlock --force` — calls
+  **As landed (Task 1.4.13 incr 1):** `RebuildStateCommand` runs the
+  `RebuildState.run` pipeline (manifest seed → `foldEvents` →
+  `reconcile` → atomic `cache.save`), reports the recovered state
+  and any interrupted in-flight driver sessions, and maps each
+  `RebuildError` variant to an operator message. Classified §15
+  read-only (no lock) even though it writes the cache — recovery
+  must work while a stuck `forge run` holds nothing useful. **The
+  deliberately-corrupted-cache proof is Task 1.4.15 O4** (and depends
+  on a `RebuildError.CacheCorrupt` variant that does not exist yet —
+  `StateCache.load` currently maps an unreadable cache to `None`, so
+  the proof lands with O4, not here).
+- [x] **M10.** `forge unlock --force` — calls
   `ProcessLock.forceRelease` (Slice 1.3). Refuses with
   exit 2 on `LiveHolderRefused`.
-- [ ] **M11.** `forge tail <feature>` — §2.5 polish; tails
+  **Landed Task 1.4.9** (`unlock` handler + `Main` step-3
+  short-circuit): `Released` / `NoLockPresent` → exit 0;
+  `LiveHolderRefused(meta)` → exit 2 with holder info.
+- [x] **M11.** `forge tail <feature>` — §2.5 polish; tails
   `.forge/log/<feature>.jsonl`. Read-only; doesn't acquire
   the lock. Routes through Task 1.4.9's
   `ForgeCommand.ReadOnly(ReadOnlyKind.Tail)`.
+  **As landed (Task 1.4.13 incr 1):** `TailCommand` dumps the current
+  log then follows appends (1s poll) until cancelled; a missing log
+  exits 0 with a note. The unit-testable seam is `existing(path)`;
+  the O3 first-line-read smoke test is Task 1.4.15.
 - [ ] **M12.** Unit + IT coverage — per-command handler
   unit tests in `modules/forge-app/src/test/`; the
   MVP-gate end-to-end run (Task 1.4.16) exercises the integration
   surface.
+  **Partial (Task 1.4.13 incr 1 + 2 + 3):** `ReadOnlyHandlerSuite` (15
+  cases) covers the read-only trio (`status` / `tail` /
+  `rebuild-state`); `MainSuite`'s read-only routing row asserts exit
+  0. Incr 2 adds `OrchestratorUserCommandSuite` (4 cases — the
+  orchestrator `applyUserCommand` apply→persist→drive half for
+  resume + abandon, against real `File*` stores) and
+  `UserCommandHandlerSuite` (9 cases — the pure `deriveResume` /
+  `deriveAbandon` CLI-flag→`UserCommand` derivation + the git-free
+  manifest-not-found short-circuit). Incr 3 adds `SpecReplSuite` (13
+  cases — the `forge spec` `runLoop` / `finalizeDone` / `classifyStart`
+  seams). Incr 4 adds the `refresh-cache` coverage: the pure
+  `deriveRefreshCache` cases in `UserCommandHandlerSuite`, an
+  apply→persist case (epoch +1, lifecycle state unchanged, persisted) +
+  a terminal-reject case in `OrchestratorUserCommandSuite`, and the
+  `RefreshCache` epoch-bump + state-preserved assertion in
+  `FsmReviewFixesSuite`. Incr 5 adds the `reconcile` coverage:
+  `ReconcileSuite` (forge-specs, 9 — the pure parse/buildPatch/hunks +
+  the render round-trip proving parse is the inverse of render) and
+  `ReconcileCommandSuite` (forge-app, 9 — the handler end-to-end over
+  real `File*` stores + the shipped template + a scripted
+  `ReplConsole`: no-change, summary-edit y/N/EOF, reorder,
+  out-of-region refuse, merged-piece refuse, missing markers,
+  missing-file re-render). **All per-command handler unit tests now
+  land; only the IT surface remains** — the MVP-gate end-to-end run
+  (Task 1.4.16) exercises it, so M12 stays open until then.
 
 ### Task 1.4.14 — **C14** Codex resume role-framing closure
 
-The orchestrator-side half of **C14**. v1.3 (not yet
-written) chooses between (i) drop the §7.10(a) "applies to
-resume" claim, or (ii) widen the trait to carry
-`systemPromptPath`. Task 1.4.14 implements whichever v1.3 picks.
+The orchestrator-side half of **C14**. v1.3 chooses between (i) drop
+the §7.10(a) "applies to resume" claim, or (ii) widen the trait to
+carry `systemPromptPath`. **Task 1.4.14 picked (ii)** (user decision
+2026-05-30): keeping connector-specific framing inside the connector
+preserves the §7.1 seam, the trait becomes symmetric with
+`runStreamingSpec`, and the feared call-site churn is one production
+site now that the orchestrator is real.
 
-- [ ] **N1.** v1.3 spec decision filed in
-  `docs/forge-design-1.3.md` (new file per the §23
-  standalone-revisions rule). Task 1.4.14 adopts whichever
-  direction v1.3 specifies.
-- [ ] **N2.** **If (i):** Orchestrator's `resumeStreamingSpec`
-  call sites (§11.2 step 12, §11.3 step 2) embed role
-  framing in the `revisionMessage` / `feedbackMessage`
-  themselves — the message starts with the system-prompt
-  block before the actual feedback content. Document the
-  pattern in `Orchestrator`'s scaladoc at each call site
-  and centralise the framing construction in a new
-  `ReviewerPrompts.codexResumeFraming` helper.
-- [ ] **N3.** **If (ii):** Widen the `Connector.resumeStreamingSpec`
-  trait to carry `systemPromptPath`; update
-  `ClaudeConnector` (no-op — Claude restores via
-  `--resume`) and `CodexConnector` (reads the path and
-  prepends per §7.10(a)). Update every call site in
-  `forge-app`.
-- [ ] **N4.** Close **C14** in `design-rationale.md` —
-  "Action required" flips to "closed in Slice 1.4b Task 1.4.14
-  per v1.3 §7.10(a) revision (option <i|ii>)". Roadmap
-  §7.2.1 / §7.2.2 entries updated.
-- [ ] **N5.** Regression test against the resume path —
-  asserts the system-prompt content actually reaches
-  Codex on a resume call. Fake `Subprocess` is fine
-  (assert argv shape); the Task 1.4.7 regression suite is the
-  real-CLI bar.
+- [x] **N1.** v1.3 spec decision filed in
+  [`docs/forge-design-1.3.md`](forge-design-1.3.md) (new file per the
+  §23 standalone-revisions rule — full standalone copy of 1.2 with the
+  §7.1 / §7.10(a) / §11.2-12 / §11.3-2 / §23 / §24 edits folded in).
+  Option (ii) specified.
+- [~] **N2.** **If (i)** — **not taken.** (ii) was chosen, so no
+  in-message framing / `ReviewerPrompts.codexResumeFraming` helper.
+- [x] **N3.** **(ii) — landed.** Widened `Connector.resumeStreamingSpec`
+  to carry `systemPromptPath`; `ClaudeConnector` ignores it (no-op,
+  `--resume` restores the prompt; resume argv still omits
+  `--system-prompt-file`); `CodexConnector` re-prepends via
+  `CodexPrompt.withSystemBlock`, mirroring `runStreamingSpec`. Sole
+  production call site `RealSideEffects.resumeDesign` passes
+  `promptPath("specify")`; the four test fakes
+  (`ConnectorContractSuite`, `RoleSuite`, `FakeReviewerConnector`,
+  `RealSideEffectsSuite.FakeConnector`) updated.
+- [x] **N4.** Closed **C14** in `design-rationale.md` (Action-required
+  struck + CLOSED note, option ii). Roadmap §7.2.1 / §7.2.2 / §2.4
+  carry-forward C14 bullets flipped to ✅.
+- [x] **N5.** Regression coverage: `CodexConnectorSuite` resume test
+  asserts the system block reaches the combined prompt (fake CLI
+  echoes the positional arg); `ClaudeConnectorSuite` resume passes a
+  non-existent path to prove Claude never reads it;
+  `RealSideEffectsSuite` asserts the call site passes
+  `specify.<cli>.md`. The Task 1.4.7 `ReviewerRegressionSuite` stays
+  the real-CLI bar.
 
 ### Task 1.4.15 — Targeted polish (§2.5)
 
 The MVP-gate enablers — Forge is unusable without these.
 
-- [ ] **O1.** Human-readable `NeedsHumanIntervention`
+- [x] **O1.** Human-readable `NeedsHumanIntervention`
   rendering — every reason × every `ResumeHint` pair has a
   one-paragraph human-readable description naming exactly
   the `forge resume --<hint>` (or `forge abandon`) the
   operator runs next. Six paths per §6.
-- [ ] **O2.** `forge status` formatting per **M4** —
+  **As landed (Task 1.4.15):** `TerminalReport.recovery` now renders a
+  one-paragraph operator description per `ResumeHint` variant (what
+  stopped, what to do by hand, the exact command). The reason string
+  is rendered verbatim by `nhiMessage`, so every reason × hint pair is
+  covered. The `match` is total over the sealed enum (a new variant
+  fails compilation), and `TerminalReportSuite` pins each variant's
+  command plus a data-driven row asserting every variant yields a
+  non-empty, `forge `-command-bearing paragraph. The FSM-side
+  production of these hints stays pinned by `ResumeHintCoverageSuite`
+  (forge-core).
+- [x] **O2.** `forge status` formatting per **M4** —
   golden-file test against fixture features in each
   state.
-- [ ] **O3.** `forge tail` smoke test —
+  **As landed (Task 1.4.15):** `StatusReportGoldenSuite` (forge-app)
+  renders `StatusReport.renderFeature` for a fixture feature in **all
+  19 FSM states** plus a no-cache row, comparing byte-for-byte to
+  checked-in goldens under
+  `modules/forge-app/src/test/resources/golden/status/`. Mirrors the
+  forge-specs `TemplateRenderSuite` idiom: `FORGE_UPDATE_GOLDEN=1` is
+  the only write path; a missing golden on a normal run fails (adding
+  an FSM state without committing its golden fails CI).
+- [x] **O3.** `forge tail` smoke test —
   open + first-line read on a synthetic
   `.forge/log/<feature>.jsonl`.
-- [ ] **O4.** Corrupted-cache `forge rebuild-state` proof —
+  **As landed (Task 1.4.15):** `ReadOnlyHandlerSuite` gains a test that
+  writes a real `Action` NDJSON line to a synthetic feature log, reads
+  it back via `TailCommand.existing`, and asserts the first line
+  decodes as an `Action` — proving the operator sees genuine NDJSON,
+  not arbitrary text (complements the existing read/missing/exit-code
+  tail tests).
+- [x] **O4.** Corrupted-cache `forge rebuild-state` proof —
   one test in `forge-app` deliberately mutates
   `<feature>.json`'s bytes mid-key, asserts
   `RebuildError.CacheCorrupt`, calls `rebuild-state`,
   asserts recovery to log-canonical Feature.
-- [ ] **O5.** Conditional watch items walked:
+  **As landed (Task 1.4.15):** added `RebuildError.CacheCorrupt(featureId,
+  detail)` and a strict-read seam `StateCache.loadStrict` (default impl
+  lifts `load`; `FileStateCache` overrides to surface the undecodable
+  case at the byte level). `load` / `verifyAgainstLog` keep their lenient
+  self-heal semantics unchanged; `loadStrict` is the report-don't-heal
+  variant. `RebuildStateCommand` probes the prior cache with it
+  (best-effort) so the success message names the corruption. The
+  forge-app test truncates a valid cache mid-key, asserts
+  `loadStrict → Left(CacheCorrupt)`, runs `rebuild-state` to exit 0,
+  and asserts the cache is recovered to the log-canonical `Drafting`;
+  a forge-core `FileStateCacheSuite` row pins `loadStrict`'s three
+  outcomes next to its siblings. (`RebuildState.run` itself never
+  returns `CacheCorrupt` — it reads the manifest + log, not the cache —
+  but `renderError`/`SpecRepl.rebuildMessage` gained the arm to keep
+  the matches total.)
+- [x] **O5.** Conditional watch items walked:
   - **S2-3** (ActionLog write durability) — measure under
     orchestrator load; if no perf cliff, document the
     `APPEND + SYNC` default as v1.3 baseline. If cliff
@@ -1760,52 +2001,119 @@ The MVP-gate enablers — Forge is unusable without these.
   - **S3-4** (`PRWatcher` rate-limit cliff) — only adjust
     threshold if 3-consecutive feels wrong under lived
     `forge run` cadence.
+  **As walked (Task 1.4.15):** all four roll into v1.3 as documented
+  defaults — none triggered a code change. No cost cliff surfaced
+  (Slice 1.4b ships no throughput-benchmark harness; the first
+  lived-cadence run is the Task 1.4.16 MVP gate). Notably **S2-9** is
+  moot as wired — the landed `Orchestrator` rebuilds via
+  `RebuildState.run` only at startup and persists via `cache.save` per
+  transition; `verifyAgainstLog` is not on the loop at all. Full
+  disposition (per item + the Task 1.4.16 re-trigger) recorded in
+  `roadmap.md` §7.2.3 and in the S2-3 / S2-9 / S3-4 `design-rationale.md`
+  entries; S3-2's lives in the §7.2.3 bullet.
 
-### Task 1.4.16 — MVP-gate run
+### Task 1.4.10b — §8 CI-readiness wiring (Task 1.4.10 follow-up)  ✅ landed 2026-05-30
+
+Surfaced by the **Task 1.4.16 pre-flight**: the §8 CI-readiness policy
+(`CiConfig`, `CiPolicy`, `BranchManager.requiredChecksOverlay`,
+`FsmEvent.CheckDiscoveryComplete`) was specified but **never wired into the
+orchestrator** in Task 1.4.10. The decoder always emits
+`requiredChecks.required = Vector.empty`, the FSM's `ciOutcome` correctly reads
+that as `Pending` (CI2), and no check-discovery timeout was wired — so **any
+piece PR stalled in `PieceAwaitingCi` forever**, blocking the MVP run regardless
+of target. Closed as its own PR before Task 1.4.16 (user decision 2026-05-30).
+Filed as design-rationale **CI8**.
+
+- [x] **CW1.** Pure `io.forge.app.orchestrator.CiReadiness` (`evaluate(policy,
+  ci, overlay, snapshot, state, elapsed) → CiDecision`) owning the §8 policy —
+  `None` → degenerate all-success stamp; `BranchProtectionThenObserved` → union
+  overlay (`overlay.required ++ config.ci.requiredChecksOverlay`), observed
+  fallback, discovery-timeout (rule 1), `minimumExpectedChecks` (rule 3),
+  missing-required (rule 2), and the `stableGreenPolls` consecutive-green
+  debounce. The FSM stays `CiPolicy`-agnostic (per `F9CiReadinessOrderingSuite`).
+  `CiReadinessSuite` (forge-app) covers every branch; `elapsed` is passed
+  explicitly so the timeout rules need no clock.
+- [x] **CW2.** Additive `FsmEvent.CiReadinessBlocked(piece, prNumber, reason)` +
+  a `pieceAwaitingCiTransitions` handler → `NHI(reason,
+  ResumeAfterHumanPush(p, prNumber))`. Ephemeral event → no Replay change. New
+  `ResumeHintCoverageSuite` + `F9CiReadinessOrderingSuite` rows; first producer
+  of `NHI(ResumeAfterHumanPush)` (resume side already existed).
+- [x] **CW3.** `SideEffects.requiredChecksOverlay(feature)` delegating to
+  `BranchManager` (base = `manifest.baseBranch`, epoch =
+  `branchProtectionCacheEpoch`); `RealSideEffects` impl + `RealSideEffectsSuite`
+  delegation test.
+- [x] **CW4.** `Orchestrator` wiring: `pieceCiWatcherIO` runs the gate as a
+  self-contained sub-loop with a per-visit `CiGate` ref (monotonic
+  discovery-window anchor + `CiDiscoveryState` green count; resets on re-entry by
+  construction). `KeepPolling` → continue the stream; `Forward(rollup)` → stamp
+  `required` + `PrSnapshotUpdated`; `Blocked` → `CiReadinessBlocked`. Emits the
+  `ci.skipped` (None) and `harness.protection_unauthorized`
+  (`OverlaySource.Unauthorized`) audit drafts.
+- [x] **CW5.** Reworked `OrchestratorTestKit.ciReadySnapshot` to observed-only
+  (the real decoder never populates `required`); added
+  `FakeSideEffects.requiredChecksOverlay` + a `testConfig` with
+  `stableGreenPolls = 1` (the §18 default of 2 would deadlock a single-snapshot
+  e2e — the watcher is the sole source in `PieceAwaitingCi`); added a §8-no-checks
+  NHI e2e. Build green: `forge-core` + `forge-app` (326) + `forge-it` compile;
+  `scalafmtCheckAll` clean.
+- [x] **CW6.** **§9 base-freshness-on-readiness deferred** to a follow-up
+  (designed-for; re-uses this task's `ResumeAfterHumanPush` plumbing). Recorded
+  in **CI8**.
+
+### Task 1.4.16 — MVP-gate run  ✅ COMPLETE (2026-05-31)
 
 The Phase-1 exit gate. Drive one small, contained,
 low-variance feature through Forge from `forge new` to
 merged-`FeatureDone`.
 
-- [ ] **P1.** Pick the MVP target. Roadmap §2.4 explicitly
-  excludes "have Forge build its own Slice 5 (TUI)".
-  Candidates per §2.4 closing:
-  - A small `forge-git` helper (e.g. a `branchExists`
-    abstraction for shared use across BranchManager
-    callers).
-  - A narrow `forge-app` reporting/replay feature
-    (e.g. `forge replay <feature>` reading the action
-    log and printing a human summary).
-  - One of the v1.3 spec-text corrections (S2-6, S2-7,
-    S2-10, S3-6, S3-7, S3-8) with the matching code
-    test.
-  Recommend the v1.3 spec-text correction route — it
-  exercises every reviewer + driver phase against
-  small, well-bounded scope (text + one test). File
-  the choice in this checklist before Task 1.4.16 begins.
-- [ ] **P2.** Drive end-to-end:
+> **✅ COMPLETE — reached `FeatureDone` 2026-05-31. Findings in
+> [`docs/slice-4/mvp-friction.md`](slice-4/mvp-friction.md); evidence in
+> [`docs/slice-4/mvp-run/image-creds-dedup/`](slice-4/mvp-run/image-creds-dedup/).**
+> Per the user's call, the run was driven against an **external test repo**
+> (`llm4s/szork`) rather than self-hosting on this repo — cleaner first run,
+> and it exercised the §8 CI gate against real GitHub Actions + branch
+> protection. Target feature: **`image-creds-dedup`** (de-duplicate szork's
+> image-credential check). As the first real end-to-end run of `forge-app`, it
+> surfaced **13 integration gaps** (the gate's purpose) — every one a genuine
+> bug or tuning issue fakes could not catch. Twelve are fixed (on branch
+> `run-enablement-asset-bootstrap`; gap #1 = Task 1.4.10b on `main`); gap #7
+> (designSessionId durability) is deferred to Phase 2. The **full §11 lifecycle
+> ran end-to-end**: spec → design review → design PR #9 (merged) → `DesignReady`
+> → implement → piece PR #10 → §8 CI gate (fail → fix-up ×2 → green) → code
+> review (approve) → `PieceAwaitingMerge` → (merge) → `Refining` →
+> **`FeatureDone`**. Both the §8 gate's CI-fail→fix-up path and its green→review
+> path are validated live. Full table + commits in the friction doc.
+
+- [x] **P1.** MVP target **filed: `image-creds-dedup` in `llm4s/szork`**
+  (de-duplicate the image-credential feature-flag check into one
+  `SzorkConfig.imageCredsAvailable` helper + a unit test). Chosen over the
+  in-repo candidates (forge-git helper / spec-text correction) with the
+  maintainer (2026-05-30): an external test repo keeps experimental PRs off
+  this repo's history and gives the §8 CI gate a real GitHub-Actions surface
+  (szork has a `backend` + `frontend` CI workflow). Single-piece, low-variance,
+  exercises every reviewer + driver phase.
+- [x] **P2.** Drove end-to-end (2026-05-31, `image-creds-dedup` in `llm4s/szork`):
   - `forge new "<title>"`.
   - `forge spec <feature>` — interactive REPL until
-    `/done`.
+    `/done` (human-driven).
   - `forge run <feature>` — headless from
-    `DesignReady` through to `FeatureDone` (manually
-    merging design PR + each piece PR via `gh pr
+    `DesignReady` through to `FeatureDone` (operator
+    merged design PR #9 + piece PR #10 via `gh pr
     merge` between phases per v1 rule "piece PRs
-    merged by the human").
-- [ ] **P3.** Capture the run as evidence. Per AGENTS.md's
-  "commit completed work before review" memory, the
-  `.forge/log/<feature>.jsonl` for this run is committed
-  under `docs/slice-4/mvp-run/<feature>/` (sanitised —
-  no API keys, no `pwd` leakage). Include a short
-  prose summary of what worked, what didn't, what
-  surfaced as friction.
-- [ ] **P4.** **Friction items surface as Phase 2 input,
-  not Slice 1.4 follow-ups.** Phase 2 is where prompt
-  iteration + TUI live; Slice 1.4 is "Forge ships its own
-  next slice", not "Forge ships its own slice
-  beautifully". Document friction in
-  `docs/slice-4/mvp-friction.md` for Phase 2 to
-  triage.
+    merged by the human"). The §8 CI gate ran live against
+    szork's `backend` + `frontend` required checks (fail →
+    fix-up ×2 → green).
+- [x] **P3.** Run captured as evidence under
+  [`docs/slice-4/mvp-run/image-creds-dedup/`](slice-4/mvp-run/image-creds-dedup/):
+  the `action-log.jsonl` (25 entries, `Drafting` → `FeatureDone`), the merged
+  `design.md`, the `manifest.json`, and a `README.md` walking the validated
+  lifecycle. No API keys / pwd leakage.
+- [x] **P4.** Friction documented in
+  [`docs/slice-4/mvp-friction.md`](slice-4/mvp-friction.md) — 13 gaps (12
+  fixed, 1 deferred), tuning findings (S4-5 settle/cost caps, third-party-bot
+  feedback), operational notes, and Phase-2 / v1.3 carry-forwards. Per §17
+  slice-4, friction items are **Phase 2 input**, not Slice 1.4 follow-ups —
+  except the gaps that fully blocked the run, fixed in-flight to reach the gate.
 
 ### Task 1.4.17 — Slice 1.4 close-out + Phase 1 exit
 
@@ -2591,6 +2899,351 @@ ticks off only after Task 1.4.17 lands.
   added as config keys — that's a §18 extension for `forge-design-1.3.md`,
   not a silent field; reviewer model/cap stay at the Task 1.4.7 v1
   values in the reviewer-call wiring until then.
+- 2026-05-29 — **Task 1.4.10 landed — the `Orchestrator` loop +
+  `Main` wiring (J1–J5 closed).** Shipped across five sub-increments
+  (a/b → c → d1 → d2a → d2b → d2c) so each landed reviewably; the
+  J-boxes flip now that the closing increment (**d2c**) is in.
+  **J1/J2** (loop engine): the effectful `Orchestrator` interleaves
+  the pure `Fsm.transition` core with three sub-phases — state-entry
+  hooks, the `EventSources.select` source race, and post-settle
+  synthesis (`PostSettleSynthesis`) — behind the `SideEffects` seam,
+  with the source-driven `currentDriverSession` lifecycle and
+  `RestartRecovery` routing in-flight sessions to NHI on restart.
+  **J3** (`ConnectorFactory` + `OrchestratorBuilder`): one `Connector`
+  per `Mode`, shared across every driver call + reviewer one-shot;
+  the builder assembles the real git/gh/branch-manager, `RealPRWatcher`,
+  `RetryingReviewerCall(RealReviewerCall)`, the `File*` triad,
+  `FileDocSync`, `DefaultChangeCollector`. **J4**: the atomic-persist
+  order (`saveManifest` → action-log append → state-cache save) is the
+  **S2-5** writer invariant. **J5**: the scripted-fake e2e suites
+  (`OrchestratorE2EHappyPathSuite` / `…CrashRecoverySuite` /
+  `…SourceSelectionSuite` / `…PostSettleSynthesisSuite` /
+  `…RestartSuite`). **d2c specifically:** (i) `RetryingReviewerCall`
+  — §7.6 / §11.2-step-9 process-failure retry decorator (**S4-5**
+  mechanism; model/cap §18 tuning stays deferred to a v1.3 revision);
+  (ii) `PollBaselineStore` + `Orchestrator.watcherIO` persistence of
+  the PRWatcher cursor to `ForgePaths.pollBaselineFile` (**S4-1**
+  closed); (iii) `Main` wiring — `forge run <feature>` builds the
+  real orchestrator inside the lock `Resource`, drives to a terminal
+  state, and renders it via `TerminalReport` (FeatureDone/Abandoned/
+  NHI + the `forge resume`/`spec`/`abandon` recovery line per
+  `ResumeHint`; the §2.5 six-path polish stays Task 1.4.15);
+  `forge new <feature>` preflights, cuts the design branch, and seeds
+  a `Drafting` manifest. `forge spec` REPL + `status`/`tail`/
+  `reconcile` stay Task 1.4.13 shells (scope confirmed with the
+  maintainer). The full real-CLI feature drive is deferred to the
+  Task 1.4.16 MVP gate; d2c closes with an opt-in `forge-it`
+  `OrchestratorWiringSmokeSuite` (`FORGE_IT_RUN_WIRING_SMOKE=1`) that
+  exercises the real `AssetInstaller` → `ConnectorFactory` →
+  `OrchestratorBuilder` path in a throwaway `~/.forge` (no GitHub /
+  CLI needed). Carry-forward updated: **S4-1** closed; **S4-5**
+  mechanism-half closed (tuning deferred); **C14** (Codex resume
+  role-framing) still open → Task 1.4.14; **S2-8** / **S3-5** reviewer
+  SettleTimeout mapping wired orchestrator-side (option a) → verified
+  at Task 1.4.12; **S4-3** stays a watch item. Build green: `forge-core`
+  368, `forge-agents` 196, `forge-git` 188, `forge-specs` 132,
+  `forge-app` 230; `sbt test` + `sbt scalafmtCheckAll` clean; `forge-it`
+  compiles.
+- 2026-05-29 — **Task 1.4.11 landed — S2-5 writer-side atomic-merge
+  test closed.** `OrchestratorAtomicMergeSuite` (`forge-app` test
+  scope) drives the real `Orchestrator` loop to `PieceAwaitingMerge`,
+  injects a crash on the `audit.piece_merged` action-log append, and
+  pins the §11.5-step-1 writer order directly: (1) the manifest is
+  already persisted `merged`, (2) the `fsm.transition` + audit batch
+  never landed (`appendAll` is all-or-nothing), and (3) — the
+  assertion the existing e2e crash-recovery suite did **not** make —
+  the state cache *lags behind* the manifest, still holding the
+  pre-transition `PieceAwaitingMerge` state (since `cache.save` is the
+  third write). A direct `RebuildState.run` restart recovers via
+  reconcile case (c) to `Refining`. **S2-5** flipped to CLOSED in
+  `design-rationale.md`; roadmap §7.2.2 + §2.4 entries updated. Build
+  green: `forge-app` 231 (+1), other module counts unchanged;
+  `sbt scalafmtCheckAll` clean.
+- 2026-05-29 — **Task 1.4.12 landed — S2-8 / S3-5 reviewer/refine
+  `SettleTimeout` closure.** Per B3's option (a), `Fsm.transition`
+  now handles all 7 `SessionPhase` variants: the three reviewer/refine
+  timeouts route from `DesignReviewing` → `NHI(ReopenDesign(currentDesignPr))`,
+  `PieceAwaitingReview` → `NHI(RunAnotherFixup(p, pr))`, and `Refining`
+  → `NHI(RunAnotherFixup(p, pr))` (the last clears the stale
+  `currentPieceSessionId` per §6.1). Each hint mirrors its phase's
+  existing recovery rule, so no new `ResumeHint` variant was introduced.
+  The orchestrator-side `ReviewerOutcome.Timeout` → `FsmEvent.SettleTimeout`
+  mapping was already in place from Task 1.4.10
+  (`designReviewEvent`/`prReviewEvent`/`refineEvent`), so L1 was purely
+  the FSM half. Three new `ResumeHintCoverageSuite` rows pin the hints
+  (L2 N/A — option (b) not taken). **S2-8** and **S3-5** flipped to
+  CLOSED in `design-rationale.md`; roadmap §7.2.2 + §7.2.4 entries
+  updated. Build green: `forge-core` 371 (+3), other module counts
+  unchanged; `sbt scalafmtCheckAll` clean.
+- 2026-05-29 — **Task 1.4.13 increment 1 — the read-only trio
+  (`status` M4 / `rebuild-state` M9 / `tail` M11).** Wired the three
+  §15 read-only handlers, which need no orchestrator / connector /
+  lock: `StatusReport` (cache + manifest + last-log-line render, plus
+  a no-feature overview across `.forge/specs/`), `RebuildStateCommand`
+  (the `RebuildState.run` pipeline with in-flight-session reporting and
+  per-`RebuildError` messages), and `TailCommand` (dump-then-follow the
+  feature log at a 1s poll). Added `CliParser.requireFeature` /
+  `optionalFeature` public helpers — phase 2 collapses every read-only
+  command to `ForgeCommand.ReadOnly(kind)` (the feature is not in the
+  `forge-git` ADT), so the handlers parse their own feature from the
+  `rest` tokens on `ReadOnlyContext`; a missing/invalid feature surfaces
+  as exit 64. `MainSuite`'s read-only routing row flipped from the
+  `70` not-implemented shell to exit 0. New `ReadOnlyHandlerSuite` (15
+  cases). Ticked M1/M3 (landed Task 1.4.10-d2c) and M10 (landed
+  Task 1.4.9) as already-shipped. **Still open in Task 1.4.13:** M2
+  (`spec` REPL), M5 (`resume`), M6 (`reconcile` — note the M6-vs-§5.4
+  reconcile-direction scope to settle against Task 1.4.15), M7
+  (`refresh-cache`), M8 (`abandon`), and M12's remaining handler/IT
+  coverage. Build green: `forge-app` 246 (+15), other module counts
+  unchanged (`forge-core` 371, `forge-git` 188, `forge-agents` 196,
+  `forge-specs` 132); `sbt clean compile test` + `sbt scalafmtCheckAll`
+  clean.
+- 2026-05-30 — **Task 1.4.13 increment 2 — the UserCommand pair
+  (`resume` M5 / `abandon` M8).** Wired the two operator commands that
+  inject a `UserCommand` into the FSM. Added one shared
+  `Orchestrator.applyUserCommand(featureId, derive)` (+ a
+  `private[orchestrator] applyUserCommandTo(feature0, derive)` test
+  seam mirroring `drive`): rebuild state → apply the derived command
+  as a **one-shot `Fsm.transition` before any entry hook** → persist
+  via the J4 manifest→log→cache pipeline → drive to a loop-terminal
+  state. Returns a `CommandOutcome.{Driven, Rejected}` so an
+  unapplicable command (resume when not in NHI, abandon when already
+  terminal, or an FSM no-op) reports exit 1 without mutating. The
+  CLI-flag→hint mapping lives in the handlers: `ResumeFeature` reads
+  the authoritative `ResumeHint` (with its `prNumber`) off the
+  persisted NHI state and validates the flag + piece against it
+  (`matchHint`, naming the correct recovery on mismatch via the
+  now-public `TerminalReport.recovery`); `AbandonFeature` supplies a
+  generic reason (no `--reason` flag in v1). `TerminalReport.render`
+  gained a `command` label param (default `"run"`) so resume/abandon
+  reuse it with the right prefix. `forge resume` **drives forward**
+  (recovery complement to `forge run`). New `OrchestratorUserCommandSuite`
+  (4) + `UserCommandHandlerSuite` (9). **Still open in Task 1.4.13:**
+  M2 (`spec` REPL), M6 (`reconcile`), M7 (`refresh-cache`), and M12's
+  remaining handler/IT coverage. Build green: `forge-app` 259 (+13),
+  other counts unchanged (`forge-core` 371, `forge-git` 188,
+  `forge-agents` 196, `forge-specs` 132); `sbt clean compile test` +
+  `sbt scalafmtCheckAll` clean; `forge-it` compiles.
+- 2026-05-30 — **Task 1.4.13 increment 3 — the `forge spec` REPL
+  (M2).** Landed `io.forge.app.command.SpecRepl`, the one stateful
+  interactive command, as a **standalone handler** rather than an
+  orchestrator-loop source: a session's `events` is a single-consumer
+  fs2 `Channel`, so the J2 `InteractiveSpec` "SessionMonitor + REPL
+  race" can't work as drawn — the REPL is the sole consumer and the
+  orchestrator's `EventSource.Repl` stays `IO.never` (headless never
+  enters spec). The loop pulls `session.events` one event at a time and
+  reacts at `Result` boundaries: a `Result` after `AskUserQuestion`
+  prompts for that question (→ `answerQuestion`); a plain `Result`
+  prompts for the next message or `/done` (→ `send`). Persist is at
+  `/done` only — `SessionSpawned` then `UserCommand.Done`, with the
+  driver-owned `manifest.json` **reloaded** (Forge writes log + cache,
+  never the manifest, to avoid clobbering the decomposition); an
+  interrupted session leaves `Drafting` and re-runs fresh. The `spec`
+  handler shell is replaced; `Handlers.spec` now calls
+  `SpecRepl.execute`. New deviations filed in §4: **S4-6** (standalone
+  REPL / Repl source deferral), **S4-7** (no InteractiveSpec-resume),
+  **S4-8** (step-7 coherence skipped on `/done`). New `SpecReplSuite`
+  (13 — `runLoop` via a scripted session+console, `finalizeDone`
+  against real `File*` stores proving the reload-not-clobber +
+  `DesignReviewing(1)` landing, the `classifyStart` gate and answer
+  helpers). **Still open in Task 1.4.13:** M6 (`reconcile` — gated on
+  Task 1.4.15 reverse-parse), M7 (`refresh-cache`), and M12's remaining
+  handler/IT coverage. Build green: `forge-app` 272 (+13), other counts
+  unchanged (`forge-core` 188 unit, `forge-git`, `forge-agents` 196,
+  `forge-specs`); `sbt test` + `sbt scalafmtCheckAll` clean; `forge-it`
+  compiles.
+- 2026-05-30 — **Task 1.4.13 increment 4 — `forge refresh-cache`
+  (M7).** Wired the manual branch-protection cache-invalidation command.
+  Added `UserCommand.RefreshCache` + a cross-cutting `Fsm` handler that
+  returns the same `FsmState` with `branchProtectionCacheEpoch + 1` and
+  no drafts — it mirrors `handleResume`'s epoch bump but **without** the
+  lifecycle state change, keeping `Fsm.transition` pure and total.
+  `RefreshCacheFeature` (mirroring `AbandonFeature`) drives the bump
+  through the shared `UserCommandDriver` → `Orchestrator.applyUserCommand`
+  apply→persist pipeline; `deriveRefreshCache` rejects terminal
+  `FeatureDone`/`Abandoned` and allows every other state. The
+  `applyUserCommandTo` no-op backstop was widened from "`state` unchanged
+  + no drafts" to "whole `Feature` unchanged + no drafts" so an
+  epoch-only bump is driven (behaviour-preserving for resume/abandon).
+  §15: the epoch bump is the only mutation. New tests: `RefreshCache`
+  epoch+state assertion in `FsmReviewFixesSuite`, the pure
+  `deriveRefreshCache` cases in `UserCommandHandlerSuite`, and the
+  apply→persist + terminal-reject cases in
+  `OrchestratorUserCommandSuite`. Build green: `forge-core` 372 (+1),
+  `forge-app` 278 (+6), other counts unchanged (`forge-git` 188,
+  `forge-agents` 196, `forge-specs` 132);
+  `sbt scalafmtCheckAll` / `compile` / `test` clean. **Still open in Task
+  1.4.13:** M6 (`reconcile` — gated on Task 1.4.15), and M12's remaining
+  IT coverage.
+- 2026-05-30 — **Task 1.4.14 — C14 Codex resume role-framing closure
+  (option ii, widen the trait).** User chose (ii) over (i) at scope-set:
+  keeping connector-specific framing inside the connector preserves the
+  §7.1 seam, and the call-site churn the slice-1 C14 note feared is one
+  production site now the orchestrator is real. Filed
+  [`forge-design-1.3.md`](forge-design-1.3.md) (N1) — a full standalone
+  copy of 1.2 per the §23 rule with the §7.1 trait
+  (`resumeStreamingSpec(sessionId, systemPrompt, message)`), §7.10(a)
+  (Codex re-prepends on resume; Claude ignores), §11.2-step-12 /
+  §11.3-step-2 call sites, §6.2 step 3, the verification appendix, the
+  summary table, and §23 / §24 conventions all folded. Widened the trait
+  + both connectors (N3): `ClaudeConnector` no-ops the path (`--resume`
+  restores the prompt; resume argv still omits `--system-prompt-file`),
+  `CodexConnector` re-prepends via `CodexPrompt.withSystemBlock` mirroring
+  `runStreamingSpec`; sole production call site
+  `RealSideEffects.resumeDesign` passes `promptPath("specify")`; the four
+  test fakes updated. Closed **C14** in `design-rationale.md` and the
+  roadmap §7.2.1 / §7.2.2 / §2.4 carry-forward bullets (N4). Regression
+  (N5): `CodexConnectorSuite` resume asserts the system block reaches the
+  combined prompt (fake-CLI echo), `ClaudeConnectorSuite` resume passes a
+  non-existent path to prove Claude never reads it, `RealSideEffectsSuite`
+  pins the call site passing `specify.<cli>.md`; the Task 1.4.7
+  `ReviewerRegressionSuite` stays the real-CLI bar. N2 (the option-(i)
+  branch) is N/A. Build green: `forge-app` 279 (+1), `forge-agents` 196
+  (resume tests modified in place, count unchanged), other counts
+  unchanged (`forge-core` 372, `forge-git` 188, `forge-specs` 132);
+  `sbt test` + `sbt scalafmtCheckAll` clean; `forge-it` compiles.
+- 2026-05-30 — **Task 1.4.13 increment 5 — `forge reconcile` (M6),
+  the last substantive M-item.** Imports operator edits made in
+  `decomposition.md`'s §5.3 editable regions back into
+  `manifest.json`. New pure `io.forge.specs.Reconcile` parses the
+  `forge:order-start/-end` order region (piece order + per-piece
+  `forge:editable-summary` text, the de-indent being the exact inverse
+  of the template's 3-space summary indent) and diffs it against the
+  manifest into a `ManifestPatch` (`EditPiece(summary)` per changed
+  piece + a `ReorderPieces` when the order changed). `DocSync` gained
+  `renderManifest(manifest)` (promoted from the existing private
+  helper) so the handler can render a *candidate* manifest. The
+  algorithm leans on DocSync's idempotence: render canonical → if it
+  equals the on-disk file there are no edits; otherwise parse, build
+  the patch, apply it, re-render the candidate, and require the
+  candidate to match the on-disk file byte-for-byte — that match is
+  the proof every on-disk diff was a reconcilable editable-region
+  edit. Anything else (a touched piece id/title, status badge, or
+  surrounding prose) leaves a residual and the handler refuses with
+  the offending line hunks (§5.4). `ReconcileCommand` is interactive
+  y/N (§5.4, user decision 2026-05-30) over the shared `ReplConsole`
+  seam; on `y` it applies the validated patch straight through
+  `SpecStore.saveManifest` (atomic) with **no FSM transition** — see
+  **S4-9**. Merged-piece edits and §5.5 merged-prefix violations are
+  caught by `ManifestPatch.validate` and refuse; an add/remove of
+  pieces (non-permutation) refuses with a friendlier targeted message.
+  Tests: `ReconcileSuite` (forge-specs, 9 — parse round-trip is the
+  inverse of render, buildPatch cases, structural refusals, hunks) +
+  `ReconcileCommandSuite` (forge-app, 9 — no-change, summary-edit
+  y/N/EOF, reorder, out-of-region refuse, merged-piece refuse, missing
+  markers, missing-file re-render). Build green: `forge-specs` 141
+  (+9), `forge-app` 288 (+9), other counts unchanged (`forge-core`
+  372, `forge-agents` 196, `forge-git` 188); `sbt test` +
+  `sbt scalafmtCheckAll` clean; `forge-it` compiles. New carry-forward
+  **S4-9** (reconcile is manifest-only, no FSM/log audit action) and
+  **S4-10** (the §5.4 cross-command reconcile-preflight gate is not
+  yet wired) filed in §4. **M6 ticked; M12 reconcile coverage
+  ticked.** Task 1.4.13's remaining work is the section close
+  (Task 1.4.17 / MVP gate).
+- 2026-05-30 — **Task 1.4.15 — targeted §2.5 polish (O1–O5), all
+  five ticked.** The MVP-gate enablers. **O1:** `TerminalReport.recovery`
+  upgraded to a one-paragraph operator description per `ResumeHint`
+  (situation + manual step + exact command); `TerminalReportSuite`
+  gains a data-driven totality row asserting every variant yields a
+  non-empty, `forge `-command-bearing paragraph (the FSM-side
+  production stays pinned by forge-core `ResumeHintCoverageSuite`).
+  **O2:** new `StatusReportGoldenSuite` golden-renders
+  `StatusReport.renderFeature` across all 19 FSM states + a no-cache
+  row to checked-in goldens under
+  `src/test/resources/golden/status/`, mirroring the forge-specs
+  `TemplateRenderSuite` `FORGE_UPDATE_GOLDEN` idiom (missing golden =
+  failure, never a silent write). **O3:** `ReadOnlyHandlerSuite` gains
+  a tail smoke test proving a synthetic log's first line decodes as a
+  real `Action` (genuine NDJSON). **O4:** added
+  `RebuildError.CacheCorrupt` + the strict-read seam
+  `StateCache.loadStrict` (default lifts `load`; `FileStateCache`
+  overrides). `load` / `verifyAgainstLog` keep lenient self-heal
+  semantics; `loadStrict` is the report-don't-heal variant that
+  `RebuildStateCommand` probes (best-effort) so the success message
+  names prior corruption. The forge-app proof truncates a valid cache
+  mid-key → `loadStrict` → `Left(CacheCorrupt)` → `rebuild-state`
+  recovers to log-canonical `Drafting`; a forge-core
+  `FileStateCacheSuite` row pins `loadStrict`'s three outcomes.
+  (`RebuildState.run` never returns `CacheCorrupt` — reads manifest +
+  log, not the cache; `renderError` / `SpecRepl.rebuildMessage` gained
+  the arm to stay total.) **O5:** all four conditional watch items
+  (**S2-3** / **S2-9** / **S3-2** / **S3-4**) walked and rolled into
+  v1.3 as documented defaults — none triggered a code change; no cost
+  cliff surfaced (no throughput-benchmark harness yet; first
+  lived-cadence run is the Task 1.4.16 MVP gate, the re-trigger).
+  S2-9 is moot as wired (`verifyAgainstLog` is not on the orchestrator
+  loop — startup uses `RebuildState.run`, steady-state uses
+  `cache.save`). Disposition recorded in `roadmap.md` §7.2.3 + the
+  S2-3 / S2-9 / S3-4 `design-rationale.md` entries. Build green:
+  `forge-core` 375 (+3), `forge-app` 312 (+24), `forge-specs` 141,
+  `forge-git` 188, `forge-agents` 196 (one pre-existing fake-CLI
+  flake in `ClaudeConnectorSuite`, deterministically 37/37 in
+  isolation, unrelated to this change); `sbt scalafmtCheckAll` clean.
+  Task 1.4.15 closed; 1.4b's remaining work is Task 1.4.16 (MVP gate)
+  → Task 1.4.17 (section close + Phase 1 exit).
+- 2026-05-30 — **Task 1.4.10b — §8 CI-readiness wiring (Task 1.4.10
+  follow-up), all six CW items ticked.** Surfaced by the Task 1.4.16
+  pre-flight: the §8 CI-readiness policy was specified but never wired
+  into the orchestrator, so the decoder's always-empty `required` set
+  left every piece PR stalled in `PieceAwaitingCi` forever (no
+  check-discovery timeout to escape) — a hard blocker for the MVP run
+  regardless of target. Closed as its own PR before Task 1.4.16 (user
+  decision). New pure `CiReadiness.evaluate` owns the §8 policy (None
+  degenerate-stamp; union overlay; discovery-timeout / min-checks /
+  missing-required NHI rules; `stableGreenPolls` debounce) and
+  populates the snapshot's `required` set, which the orchestrator
+  stamps before forwarding `PrSnapshotUpdated` — keeping the FSM
+  `CiPolicy`-agnostic (per `F9CiReadinessOrderingSuite`). The gate runs
+  as a self-contained sub-loop in `Orchestrator.pieceCiWatcherIO` with
+  a per-visit `CiGate` ref (monotonic discovery anchor + green count,
+  resets on re-entry by construction). The §8 discovery-failure NHI
+  flows through a new additive `FsmEvent.CiReadinessBlocked` →
+  `NHI(ResumeAfterHumanPush)` (ephemeral → no Replay change; first
+  producer of that hint). `SideEffects.requiredChecksOverlay` delegates
+  to `BranchManager`; `ci.skipped` / `harness.protection_unauthorized`
+  audit drafts emitted. The e2e `ciReadySnapshot` was reworked to
+  observed-only (the real decoder never populates `required`) with a
+  `testConfig` `stableGreenPolls = 1` (the §18 default 2 would deadlock
+  a single-snapshot e2e); a §8-no-checks NHI e2e added. **§9
+  base-freshness-on-readiness deferred** to a follow-up (re-uses this
+  task's `ResumeAfterHumanPush` plumbing). Decision + deferral filed as
+  design-rationale **CI8**. Build green: `forge-core` 377 (+2),
+  `forge-app` 326 (+14), `forge-specs` / `forge-git` / `forge-agents`
+  unchanged; `forge-it` compiles; `sbt scalafmtCheckAll` clean.
+- 2026-05-30 — **Task 1.4.16 MVP-gate run started** against external
+  test repo `llm4s/szork` (feature `image-creds-dedup`), real GitHub
+  Actions CI + branch protection. First real end-to-end `forge-app`
+  run; surfaced **8 integration gaps** — full table, fixes, commits,
+  tuning findings, and operational notes in
+  [`docs/slice-4/mvp-friction.md`](slice-4/mvp-friction.md). Run reached
+  spec → design review → design PR #9 (merged) → `DesignReady` →
+  implement (correct code produced). Gaps 1–6 fixed in-flight (gap 1 =
+  Task 1.4.10b on `main`; 2–6 on branch `run-enablement-asset-bootstrap`:
+  asset bootstrap `d38a378`, driver permission flags `c4de01f`, specify
+  prompt schema `c4887b3`, `git add -f` `75492bb`, empty-conclusion
+  decode `a78244c`). Gap 7 (designSessionId not in the action log →
+  §11.3 resume fails after rebuild) deferred. Gap 8 (NHI
+  `ResolveLocalImplementationChanges` / `ApplyPlanningUpdate` have no
+  working `forge run` resume) + the implement-prompt build-self-verify
+  settle-cap breach (S4-5) being addressed to let the run complete.
+- 2026-05-31 — **Task 1.4.16 MVP-gate run ✅ COMPLETE — reached
+  `FeatureDone`.** The full §11 lifecycle ran end-to-end against
+  `llm4s/szork`: spec → design review → design PR #9 (merged) →
+  `DesignReady` → implement → piece PR #10 → **§8 CI gate** (CI-fail →
+  fix-up ×2 → green, validated live on both paths) → code review (approve) →
+  `PieceAwaitingMerge` → (operator merge) → `Refining` → **`FeatureDone`**.
+  Both szork PRs merged to `main`; the driven implementation is correct
+  (`imageCredsAvailable` helper + `ImageProviderCredsSpec`). The run
+  surfaced **13 integration gaps** total (up from 8 at run-start); gaps
+  10–13 fixed in-flight on `run-enablement-asset-bootstrap` — sub-agent
+  cost blow-up (disallow `Task` + lean prompts, `323c0a4`), host pre-commit
+  hook (`--no-verify`, `0f1c57e`), blind fix-up (write `failures.md` from
+  `gh pr checks`, `48e6ded`), reviewer-starved-by-watcher race (watcher
+  emits only on human override, `ed62bb7`). Gap 7 (designSessionId
+  durability) deferred to Phase 2. P2/P3/P4 ticked; evidence under
+  [`docs/slice-4/mvp-run/image-creds-dedup/`](slice-4/mvp-run/image-creds-dedup/),
+  full findings in [`docs/slice-4/mvp-friction.md`](slice-4/mvp-friction.md).
+  **Slice 1.4 is now feature-complete; Task 1.4.17 (close-out) remains.**
 
 ## 4. Carry-forward (inherited + new)
 
@@ -2604,25 +3257,31 @@ explicitly to v1.3 / Phase 2 with a durable home in
 
 - **C14** — Codex resume system-prompt prepending. Two
   halves: the spec-text decision (v1.3 §7.10(a)) and
-  the orchestrator implementation. **Resolves in Task 1.4.14.**
+  the orchestrator implementation. **✅ CLOSED in Task 1.4.14
+  (2026-05-30), option (ii) — trait widened to carry
+  `systemPromptPath`; both halves shipped coupled.**
 - **C15** — Native schema regression suite (originally
   Slice 1.1's PR-D in design-2.1.md, deferred per C15;
   now resolved as **Task 1.4.7 here**).
   Resolves once all 6 method × connector pairs meet the
   ≥19/20 bar.
 - **S2-5** — Writer-side atomic-merge ordering test.
-  **Resolves in Task 1.4.11** with a focused fault-injection
-  test against the orchestrator's manifest-write
-  ordering.
+  **✅ Closed in Task 1.4.11 (2026-05-29)** — `OrchestratorAtomicMergeSuite`
+  is the focused fault-injection test against the orchestrator's
+  manifest-write ordering (manifest first, then the action-log
+  batch, then the state cache; the cache lags at the pre-transition
+  state on a merge-window crash, and `RebuildState.run` recovers to
+  `Refining`).
 - **S2-8** — `Fsm.transition` doesn't handle
-  `SettleTimeout` for reviewer/refine phases. **Resolves
-  in Task 1.4.12** via whichever path Task 1.4.2's B3 chose
-  (explicit FSM handlers vs orchestrator-side
-  conversion).
+  `SettleTimeout` for reviewer/refine phases. **✅ Closed in
+  Task 1.4.12 (2026-05-29)** via B3's option (a): explicit
+  `Fsm.transition` handlers for the three reviewer/refine phases,
+  each routing to a phase-appropriate `NHI` hint, with matching
+  `ResumeHintCoverageSuite` rows.
 - **S3-5** — `SessionMonitor` carve-out matches **S2-8**
-  on the SessionMonitor side. Closes alongside
-  **S2-8** in Task 1.4.12 (1.4a Task 1.4.2's reviewer wrappers ship
-  the wall-clock emission path).
+  on the SessionMonitor side. **✅ Closed alongside **S2-8** in
+  Task 1.4.12 (2026-05-29)** — the `SessionMonitor` driver-phase
+  carve-out stands; the FSM-side gap it mirrored is closed.
 
 ### Inherited from Slices 1–3, conditional / watch items
 
@@ -2692,8 +3351,12 @@ expected-vs-actual.
   accessor. v1.3 impact: §6 `Feature` may want a typed
   projection `pollBaselines: Map[PrNumber, PollBaseline]`
   (rebuilt from the file via `RebuildState.run`); §11.0
-  precondition list grows by one file. Filed at Task 1.4.10
-  close in `design-rationale.md`.
+  precondition list grows by one file. **Implemented +
+  closed at Task 1.4.10-d2c** (`io.forge.app.orchestrator.PollBaselineStore`
+  + `Orchestrator.watcherIO`; `PollBaselineStoreSuite` +
+  `OrchestratorPollBaselinePersistenceSuite`); the
+  `design-rationale.md` S4-1 entry carries the
+  implementation note.
 - **S4-2 — `forge replay` cut in favour of `forge tail`.**
   Surfaced at plan-review pre-Task 1.4.1. Slice 1.3 Task 1.3.3's
   `ForgeCommand.ReadOnlyKind` carried `Replay` as a
@@ -2799,7 +3462,112 @@ expected-vs-actual.
   unescaped-`"`-in-summary schema mode (rare, normaliser cannot
   repair, within 1/20 tolerance — possible future hardening).
   Watch item through 1.4b; no v1.2 spec edit beyond §18 reviewer
-  keys.
+  keys. **Update (Task 1.4.10-d2c):** the *retry-mechanism* half is
+  now implemented — `RetryingReviewerCall` re-issues on
+  `ReviewerProcessFailure` up to `config.<cli>.reviewProcessRetries`
+  / `refineProcessRetries` (the counts already exist on
+  `ClaudeConfig` / `CodexConfig`), wired by `OrchestratorBuilder`.
+  The *model + wall-clock cap* knobs remain deferred (a §18
+  extension for `forge-design-1.3.md`); see the `design-rationale.md`
+  S4-5 entry. Final disposition at Task 1.4.17 / gated on Task 1.4.16
+  MVP-run data.
+- **S4-6 — `forge spec` is a standalone REPL; `EventSource.Repl`
+  stays `IO.never` (was D-spec-1).** Surfaced landing Task 1.4.13
+  incr 3. The J2 source table (§Task 1.4.10) draws `InteractiveSpec`
+  as racing `SessionMonitor + REPL`, but a session's `events` is a
+  single-consumer fs2 `Channel` (`StreamingDriver.buildSession`), so
+  the monitor and the REPL would steal events from each other. v1
+  resolves this by making `forge spec` (`io.forge.app.command.SpecRepl`)
+  its own handler that is the **sole** consumer of the event stream;
+  the orchestrator's `EventSource.Repl` source remains `IO.never`,
+  which is sound because headless `forge run` never enters the spec
+  phase (`InteractiveSpec` is reachable only via `forge spec`). v1.3
+  impact: the J2 table's `InteractiveSpec` row should be re-drawn as
+  "REPL-only (handler-owned), not an orchestrator race," and the
+  step-7 coherence post-check relocated accordingly (see **S4-8**).
+  Reconcile at Task 1.4.17.
+- **S4-7 — Interrupted `forge spec` restarts fresh (no
+  InteractiveSpec resume) (was D-spec-2).** Surfaced landing
+  Task 1.4.13 incr 3. v1 `SpecRepl` persists **only at `/done`**, so an
+  interrupted session (Ctrl-D / driver crash) leaves the feature in
+  `Drafting` and a re-run starts a new spec session — there is no
+  persisted `InteractiveSpec` to resume the same CLI conversation.
+  Consequence: the J2 restart-recovery row mapping `InteractiveSpec →
+  NHI(AbortOrAbandon)` is theoretical in v1 (never persisted from this
+  path), and `forge spec`'s `classifyStart` refuses a stray
+  `InteractiveSpec` rather than resuming it. Resuming the conversation
+  across an interruption (persist `SessionSpawned` early +
+  `resumeStreamingSpec`) is a post-v1 refinement. Reconcile at
+  Task 1.4.17.
+- **S4-8 — §11.1 step-7 coherence post-check skipped on the `/done`
+  path (was D-spec-3).** Surfaced landing Task 1.4.13 incr 3. The
+  orchestrator runs the step-7 design/manifest/piece/decomposition
+  coherence post-check on an auto-`Settled(Spec, Clean)`; the
+  human-driven `/done` path emits `UserCommand.Done` and **skips** it
+  (the operator is the coherence gate). The driver-owned `manifest.json`
+  is reloaded at `/done` (not written back) so Forge never clobbers the
+  decomposition. Folding a coherence check (with the "≤2 corrective
+  rounds" the post-settle table envisages) into the interactive `/done`
+  is deferred — likely a §11.1 note in `forge-design-1.3.md`.
+  Reconcile at Task 1.4.17.
+- **S4-9 — `forge reconcile` applies the manifest patch directly, no
+  FSM/log audit action.** Surfaced landing Task 1.4.13 incr 5. §5.4
+  says reconcile applies imported edits "as a `PlanningUpdate` (§14)",
+  but the FSM `PlanningUpdate` state (§14.3) accepts a patch by
+  *advancing to the next piece* — that is the refinery's mid-feature
+  flow, and is wrong for an operator planning-edit that must be
+  orthogonal to the lifecycle state (the feature may be `DesignReady`,
+  mid-implementation, anything). v1 `ReconcileCommand` therefore
+  applies the validated `ManifestPatch` straight through
+  `SpecStore.saveManifest` (atomic, §11.5 step 1) and leaves the FSM
+  state untouched (user decision 2026-05-30, choosing the smaller
+  contract-conformant edit over a new `UserCommand.Reconcile` + FSM
+  handler). `manifest.json` is the committed source of truth (§4) so
+  the state cache rebuilds from the fresh manifest on the next
+  `forge run` / `rebuild-state`, and `forge status` reads the manifest
+  authoritatively for piece data — no cache write needed. Consequence:
+  a reconcile produces **no action-log entry**, so the §19 audit trail
+  doesn't record it (the manifest's own git history is the record).
+  v1.3 impact: §5.4's "as a `PlanningUpdate` (§14)" wording should be
+  re-read as "as a `ManifestPatch` (the §14 vocabulary)", not "via the
+  FSM `PlanningUpdate` *state*"; if an audit-log entry for reconcile is
+  wanted, it needs a non-FSM `planning.reconciled` action or a
+  state-preserving `UserCommand.Reconcile`. Reconcile at Task 1.4.17.
+- **S4-10 — the §5.4 cross-command reconcile-preflight gate is not yet
+  wired.** Surfaced landing Task 1.4.13 incr 5. §5.4 / the §15 table
+  ("`forge run` | Yes | Manifest reconcile passes") say that on *every*
+  command except read-only ones and `forge reconcile` itself, Forge
+  re-renders `decomposition.md` and refuses if the on-disk file has
+  drifted — directing the operator to `forge reconcile` (editable-only
+  edits) or to edit `manifest.json` directly (out-of-region edits).
+  Task 1.4.13 ships the `forge reconcile` *command* (which contains the
+  render-and-diff logic, now reusable), but the **preflight gate on the
+  other state-changing commands** (`new` / `spec` / `run` / `resume` /
+  `refresh-cache` / `abandon`) is not wired into `Main`'s boot or the
+  orchestrator preconditions. v1 risk is low (Forge owns
+  `decomposition.md` between operator sessions, so unimported drift is
+  the operator's own un-reconciled edit), but a `forge run` that
+  silently ignores pending editable-region edits is a §5.4 gap.
+  Wiring it is a thin reuse of `Reconcile.parse` + `DocSync.renderManifest`
+  at the §11.0 precondition layer. Reconcile at Task 1.4.17 (decide:
+  wire in 1.4b polish vs defer to Phase 2).
+- **S4-11 — run observability is not captured (the MVP gate proved Forge
+  works but can't measure itself).** Surfaced post-Task-1.4.16 reviewing the
+  szork run. The action log holds `fsm.transition` + timestamps only, and the
+  timestamps conflate Forge-working / waiting-on-human / operator-relaunch time.
+  Token counts + per-turn cost flow through the orchestrator
+  (`ClaudeEventParser` → `AgentEvent.CostUpdate`, consumed by
+  `RealSessionMonitor` for the cost cap) but are **discarded** afterwards: the
+  §19 `cost.update` action is fully specified and replayable
+  (`Replay.applyCostUpdate` `Replay.scala:333`, `CostTotals` on `Feature`) yet
+  **no app-layer code ever writes it** (the szork run's log has zero cost
+  entries — the cost-projection subsystem is unfed). Per-phase duration
+  (`AgentEvent.Result.durationMs`) is parsed and dropped; `num_turns` is not
+  modelled; driver-session transcripts are not captured (only reviewers have the
+  opt-in `FORGE_REVIEWER_RAW_DUMP_DIR`). **Disposition: deferred to Phase 2 as
+  Slice 2.0 (roadmap §3.1, "instrument before optimise") — six tiered items.**
+  Resolved as a roadmap slice, not in 1.4; Task 1.4.17 records the deferral.
+  Design-rationale **B6** carries the "spec'd-but-unwired" note.
 
 ## 5. Cross-references
 

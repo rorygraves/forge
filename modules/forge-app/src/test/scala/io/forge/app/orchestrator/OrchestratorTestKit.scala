@@ -15,6 +15,7 @@ import io.forge.agents.{
   RefineResult,
   ReviewVerdict
 }
+import io.forge.app.config.ForgeConfig
 import io.forge.app.monitor.{MonitorOutcome, SessionMonitor}
 import io.forge.app.reviewer.{ReviewerCall, ReviewerLimits, ReviewerOutcome}
 import io.forge.core.*
@@ -24,6 +25,7 @@ import io.forge.core.log.{Action, ActionDraft, ActionLog}
 import io.forge.core.manifest.{Manifest, ManifestStore, Piece, PieceStatus}
 import io.forge.core.pr.{CheckConclusion, CheckResult, CheckRollup, CheckState, PrSnapshot, PrState}
 import io.forge.core.state.{RebuildError, StateCache, VerifyResult}
+import io.forge.git.branch.protection.{OverlaySource, RequiredChecksOverlay}
 import io.forge.git.watcher.{DecodedSnapshot, PRWatcher, PollBaseline, PollResult}
 
 import java.time.Instant
@@ -38,6 +40,11 @@ object OrchestratorTestKit:
   val MergeCommit: Sha = Sha("b" * 40)
   val MergedAt: Instant = Instant.parse("2026-05-29T12:00:00Z")
   val HeadSha: Sha = Sha("c" * 40)
+
+  /** §8: the e2e config drives the CI gate to forward on the first green poll (`stableGreenPolls = 1`); the §18 default
+    * of 2 would block a single-`ciReadySnapshot` test since the watcher is the only source in `PieceAwaitingCi`.
+    */
+  val testConfig: ForgeConfig = ForgeConfig.Default.copy(ci = ForgeConfig.Default.ci.copy(stableGreenPolls = 1))
 
   // --- manifest / feature builders ---
 
@@ -77,6 +84,11 @@ object OrchestratorTestKit:
   def openSnapshot(pr: PrNumber): PrSnapshot =
     PrSnapshot(pr, PrState.Open, None, None, CheckRollup(Vector.empty, Vector.empty), None, Vector.empty, Some(true))
 
+  /** A realistic ready snapshot: the watcher/decoder only ever populates `observed` (never `required`). The §8 gate in
+    * the orchestrator promotes the observed check into `required`. Pairing this with `testConfig`'s
+    * `stableGreenPolls=1` forwards on the first green poll (default 2 would block a single-snapshot test — the watcher
+    * is the sole source in `PieceAwaitingCi`).
+    */
   def ciReadySnapshot(pr: PrNumber): PrSnapshot =
     PrSnapshot(
       number = pr,
@@ -84,7 +96,7 @@ object OrchestratorTestKit:
       mergedAt = None,
       mergeCommit = None,
       requiredChecks =
-        CheckRollup(Vector(CheckResult("ci", CheckState.Completed, Some(CheckConclusion.Success))), Vector.empty),
+        CheckRollup(Vector.empty, Vector(CheckResult("ci", CheckState.Completed, Some(CheckConclusion.Success)))),
       reviewDecision = None,
       unseenComments = Vector.empty,
       mergeable = Some(true)
@@ -209,6 +221,8 @@ object OrchestratorTestKit:
       IO.pure(Right(FsmEvent.Settled(SessionPhase.DesignRevision, SettleOutcome.Clean)))
     override def commitDesignAndOpenPr(feature: Feature): IO[Either[String, FsmEvent]] =
       IO.pure(Right(FsmEvent.DesignPrSnapshotUpdated(openSnapshot(designPr))))
+    override def requiredChecksOverlay(feature: Feature): IO[Either[String, RequiredChecksOverlay]] =
+      IO.pure(Right(RequiredChecksOverlay(Set.empty, Instant.EPOCH, OverlaySource.Unprotected)))
     override def advancePieceBranch(feature: Feature, piece: PieceId): IO[Either[String, FsmEvent]] =
       IO.pure(Right(FsmEvent.BranchCreated(piece, feature.manifest.pieceBranch(piece), BaseSha)))
     override def classifyCommitOpenPr(feature: Feature, piece: PieceId): IO[Either[String, FsmEvent]] =

@@ -5,13 +5,15 @@ import io.forge.agents.{DesignReview, PrReview, RefineOutcome as AgentRefineOutc
 import io.forge.app.config.ForgeConfig
 import io.forge.app.monitor.{MonitorOutcome, SessionLimits, SessionMonitor}
 import io.forge.app.reviewer.{ReviewerCall, ReviewerLimits, ReviewerOutcome}
-import io.forge.core.{PieceId, PrNumber}
+import io.forge.core.{CiPolicy, PieceId, PrNumber}
 import io.forge.core.cost.CostTotals
-import io.forge.core.fsm.{Feature, Fsm, FsmConfig, FsmEvent, FsmState, SessionPhase, UserCommand}
+import io.forge.core.fsm.{Feature, Fsm, FsmConfig, FsmEvent, FsmState, ResumeHint, SessionPhase, UserCommand}
+import io.forge.core.log.ActionDraft
 import io.forge.core.manifest.{ManifestPatch, ManifestStore}
-import io.forge.core.pr.PrState
+import io.forge.core.pr.{PrState, ReviewDecision}
 import io.forge.core.review.{DesignReviewVerdict, PrReviewVerdict, RefineVerdict}
 import io.forge.core.state.{RebuildState, StateCache}
+import io.forge.git.branch.protection.{OverlaySource, RequiredChecksOverlay}
 import io.forge.git.watcher.{DecodedSnapshot, PRWatcher, PollBaseline, PollResult}
 import io.forge.specs.SpecStore
 
@@ -43,6 +45,13 @@ import scala.util.Try
   * **S2-5** writer-side invariant; the §11.5 crash window (manifest written, log not) is recovered by
   * `RebuildState.reconcile` on the next `run`.
   */
+/** §8 per-`PieceAwaitingCi`-visit CI-gate state, local to one `pieceCiWatcherIO` call: `gateEnteredAt` is the monotonic
+  * stamp of the first poll (the discovery-window anchor), and `disc` carries `CiReadiness`'s consecutive-green count.
+  */
+private final case class CiGate(gateEnteredAt: Option[FiniteDuration], disc: CiDiscoveryState)
+private object CiGate:
+  val initial: CiGate = CiGate(None, CiDiscoveryState.initial)
+
 final class Orchestrator(
     sideEffects: SideEffects,
     monitor: SessionMonitor,
@@ -64,6 +73,15 @@ final class Orchestrator(
     */
   private val reviewerWallClock: FiniteDuration = 3.minutes
 
+  /** §8 CI-readiness policy (§18 `ci.policy`). An unparseable value defaults to the §18 default rather than failing the
+    * run — the config layer (Task 1.4.9) owns validation.
+    */
+  private val ciPolicy: CiPolicy =
+    CiPolicy.fromString(config.ci.policy).getOrElse(CiPolicy.BranchProtectionThenObserved)
+
+  /** S4-1 — cross-restart persistence of the PRWatcher poll cursor (built from `paths`, no constructor change). */
+  private val baselineStore = new PollBaselineStore(paths)
+
   /** Drive `featureId` from its persisted state to a loop-terminal state (`NeedsHumanIntervention` / `FeatureDone` /
     * `Abandoned`), returning the terminal `Feature`.
     */
@@ -73,9 +91,73 @@ final class Orchestrator(
         IO.raiseError(new RuntimeException(s"forge: cannot rebuild state for ${featureId.value}: $err"))
       case Right(rebuilt) =>
         // Restart recovery: route any in-flight driver session to NHI before racing any source.
-        val (feature0, drafts) = RestartRecovery.recover(rebuilt.feature, rebuilt.inFlightSessions, fsmConfig)
-        (if drafts.nonEmpty then persistTransition(feature0, drafts) else IO.unit) >> drive(feature0)
+        val (feature0, drafts0) = RestartRecovery.recover(rebuilt.feature, rebuilt.inFlightSessions, fsmConfig)
+        // §15 / TerminalReport: a few NHI hints are documented to "continue with `forge run`"
+        // (ResolveLocalImplementationChanges, ApplyPlanningUpdate) — there is no `forge resume --flag` for them.
+        // Apply the stored hint's Resume here so `forge run` honours that contract; the flag-gated hints
+        // (after-human-push / commit-human-fix / run-fixup) and the manual ones (ReopenDesign → `forge spec`,
+        // AbortOrAbandon → `forge abandon`) are left for their explicit commands.
+        val (feature1, drafts1) = resumeIfRunRecoverable(feature0)
+        val drafts = drafts0 ++ drafts1
+        (if drafts.nonEmpty then persistTransition(feature1, drafts) else IO.unit) >> drive(feature1)
     }
+
+  /** §15: `forge run` resumes the NHI hints whose [[io.forge.app.command.TerminalReport.recovery]] names `forge run` as
+    * the recovery (the others have explicit `forge resume --flag` / `forge spec` / `forge abandon` paths). Applied once
+    * at startup; if the resumed work re-NHIs, `drive` stops at the new terminal and the next `forge run` retries.
+    */
+  private def resumeIfRunRecoverable(feature: Feature): (Feature, Vector[io.forge.core.log.ActionDraft]) =
+    feature.state match
+      case FsmState.NeedsHumanIntervention(_, hint) if Orchestrator.runRecoverableHint(hint) =>
+        Fsm.transition(feature, FsmEvent.UserCommandReceived(UserCommand.Resume(hint)), fsmConfig)
+      case _ => (feature, Vector.empty)
+
+  /** Apply a single operator `UserCommand` (`forge resume` / `forge abandon`, Task 1.4.13 M5 / M8) against the
+    * persisted feature, then drive to a loop-terminal state.
+    *
+    * The command is applied as a one-shot `Fsm.transition` **before** any entry hook fires, so abandoning a mid-flight
+    * feature records the `Abandoned` transition without first re-spawning its driver, and resuming from
+    * `NeedsHumanIntervention` lands the new active state before the loop's entry hooks run. `deriveCommand` builds the
+    * command from the freshly-rebuilt feature: `forge resume` reads the authoritative [[io.forge.core.fsm.ResumeHint]]
+    * (which carries the PR number) off the persisted NHI state, while `forge abandon` ignores the feature. It may
+    * reject up front with `Left(reason)`.
+    *
+    * Restart recovery is deliberately skipped (unlike [[run]]): a feature in NHI has no live driver session, and
+    * `abandon` overrides any in-flight session unconditionally.
+    */
+  def applyUserCommand(
+      featureId: io.forge.core.FeatureId,
+      deriveCommand: Feature => Either[String, UserCommand]
+  ): IO[Orchestrator.CommandOutcome] =
+    RebuildState.run(featureId, paths, manifestStore, log, cache).flatMap {
+      case Left(err) =>
+        IO.raiseError(new RuntimeException(s"forge: cannot rebuild state for ${featureId.value}: $err"))
+      case Right(rebuilt) => applyUserCommandTo(rebuilt.feature, deriveCommand)
+    }
+
+  /** The persist-and-drive half of [[applyUserCommand]], split out so the e2e suites can drive it from a constructed
+    * `Feature` (same rationale as [[drive]]) rather than seeding a full action-log history. A command the FSM does not
+    * act on at all (the whole `Feature` is unchanged AND no drafts) is surfaced as a
+    * [[Orchestrator.CommandOutcome.Rejected]] rather than silently driving an unchanged feature.
+    *
+    * The no-op test compares the **whole** feature, not just `state`: `forge refresh-cache`
+    * (`UserCommand.RefreshCache`, M7) bumps `branchProtectionCacheEpoch` without a lifecycle transition or any drafts,
+    * so a `state`-only check would wrongly reject it as a no-op. resume/abandon always change `state` or emit drafts,
+    * so this is behaviour-preserving for them.
+    */
+  private[orchestrator] def applyUserCommandTo(
+      feature0: Feature,
+      deriveCommand: Feature => Either[String, UserCommand]
+  ): IO[Orchestrator.CommandOutcome] =
+    deriveCommand(feature0) match
+      case Left(reason) => IO.pure(Orchestrator.CommandOutcome.Rejected(feature0.state, reason))
+      case Right(cmd) =>
+        val (f1, drafts) = Fsm.transition(feature0, FsmEvent.UserCommandReceived(cmd), fsmConfig)
+        if f1 == feature0 && drafts.isEmpty then
+          IO.pure(
+            Orchestrator.CommandOutcome.Rejected(feature0.state, s"command had no effect in state ${feature0.state}")
+          )
+        else persistTransition(f1, drafts) >> drive(f1).map(Orchestrator.CommandOutcome.Driven.apply)
 
   /** Drive a feature from the given state to a loop-terminal state. Exposed for the J5 e2e suites, which construct the
     * starting `Feature` directly rather than seeding a full action-log history through `run`.
@@ -251,36 +333,141 @@ final class Orchestrator(
       case EventSource.UserQa => userInput.map(RaceResult.FromUser.apply)
 
   private def watcherIO(feature: Feature, pr: PrNumber): IO[RaceResult] =
-    // -d1 keeps the poll baseline in-memory per race; -d2 persists it to `ForgePaths.pollBaselineFile` for
-    // cross-restart cursor continuity (the accessor already exists, S4-1).
-    Ref.of[IO, PollBaseline](PollBaseline.empty).flatMap { baselineRef =>
-      watcher
-        .watch(pr, baselineRef)
-        .evalMap(pollResultToEvent(feature, _))
-        .unNone
-        .head
-        .compile
-        .lastOrError
-        .map(RaceResult.FromWatcher.apply)
+    // §8: PieceAwaitingCi runs the CI-readiness gate (overlay promotion + discovery window + stableGreenPolls); the
+    // other watcher states consume one poll snapshot and hand it straight to the FSM.
+    feature.state match
+      case s: FsmState.PieceAwaitingCi => pieceCiWatcherIO(feature, s.p, pr)
+      case _ => plainWatcherIO(feature, pr)
+
+  private def plainWatcherIO(feature: Feature, pr: PrNumber): IO[RaceResult] =
+    // S4-1: seed the cursor from the persisted baseline file so a restart mid-gate resumes where the last poll left
+    // off, and persist `decoded.nextBaseline` after each Snapshot poll (the watcher's `stepOnce` sets the ref before
+    // emitting, so `baselineRef.get` here reflects the just-decoded cursor).
+    baselineStore.load(feature.id, pr).flatMap { seed =>
+      Ref.of[IO, PollBaseline](seed).flatMap { baselineRef =>
+        watcher
+          .watch(pr, baselineRef)
+          .evalTap {
+            case _: PollResult.Snapshot => baselineRef.get.flatMap(baselineStore.save(feature.id, pr, _))
+            case _ => IO.unit
+          }
+          .evalMap(pollResultToEvent(feature, _))
+          .unNone
+          .head
+          .compile
+          .lastOrError
+          .map(RaceResult.FromWatcher.apply)
+      }
     }
+
+  /** §8 CI-readiness gate for a piece PR. Self-contained sub-loop: the gate clock + consecutive-green count live in one
+    * `Ref[CiGate]` **local to this call**, so they reset by construction on every re-entry to `PieceAwaitingCi` (e.g.
+    * after a fix-up re-push). The count MUST stay local — a `loop`-threaded ref could carry a stale green count across
+    * a fix-up and declare premature readiness. Elapsed time uses `IO.monotonic` (deterministic under `TestControl`).
+    * The overlay is fetched once per gate visit (it is cache-first inside `BranchManager`).
+    */
+  private def pieceCiWatcherIO(feature: Feature, piece: PieceId, pr: PrNumber): IO[RaceResult] =
+    sideEffects.requiredChecksOverlay(feature).flatMap {
+      case Left(reason) =>
+        IO.pure(RaceResult.FromWatcher(FsmEvent.HarnessError(s"required-checks overlay failed: $reason")))
+      case Right(overlay) =>
+        val auditUnauthorized =
+          if overlay.source == OverlaySource.Unauthorized then
+            log.append(feature.id, protectionUnauthorizedDraft(feature, piece, pr)).void
+          else IO.unit
+        for
+          _ <- auditUnauthorized
+          seed <- baselineStore.load(feature.id, pr)
+          baselineRef <- Ref.of[IO, PollBaseline](seed)
+          gateRef <- Ref.of[IO, CiGate](CiGate.initial)
+          ev <- watcher
+            .watch(pr, baselineRef)
+            .evalTap {
+              case _: PollResult.Snapshot => baselineRef.get.flatMap(baselineStore.save(feature.id, pr, _))
+              case _ => IO.unit
+            }
+            .evalMap(ciPollToEvent(feature, piece, pr, overlay, gateRef, _))
+            .unNone
+            .head
+            .compile
+            .lastOrError
+        yield RaceResult.FromWatcher(ev)
+    }
+
+  private def ciPollToEvent(
+      feature: Feature,
+      piece: PieceId,
+      pr: PrNumber,
+      overlay: RequiredChecksOverlay,
+      gateRef: Ref[IO, CiGate],
+      result: PollResult
+  ): IO[Option[FsmEvent]] =
+    result match
+      case PollResult.RateLimited(_) => IO.pure(None) // the watch stream absorbs back-off (S3-4)
+      case PollResult.Failed(err) => IO.pure(Some(FsmEvent.HarnessError(s"PR poll failed: $err")))
+      case PollResult.Snapshot(decoded) =>
+        IO.monotonic.flatMap { now =>
+          gateRef.get.flatMap { gate =>
+            val enteredAt = gate.gateEnteredAt.getOrElse(now)
+            val elapsed = now - enteredAt
+            CiReadiness.evaluate(ciPolicy, config.ci, overlay, decoded.snapshot, gate.disc, elapsed) match
+              case CiDecision.KeepPolling(next) =>
+                gateRef.set(CiGate(Some(enteredAt), next)).as(None)
+              case CiDecision.Forward(rollup) =>
+                val auditSkipped =
+                  if ciPolicy == CiPolicy.None then log.append(feature.id, ciSkippedDraft(feature, piece, pr)).void
+                  else IO.unit
+                auditSkipped.as(Some(FsmEvent.PrSnapshotUpdated(piece, decoded.snapshot.copy(requiredChecks = rollup))))
+              case CiDecision.Blocked(reason) =>
+                IO.pure(Some(FsmEvent.CiReadinessBlocked(piece, pr, reason)))
+          }
+        }
+
+  private def ciSkippedDraft(feature: Feature, piece: PieceId, pr: PrNumber): ActionDraft =
+    ActionDraft(
+      feature.id,
+      Some(piece),
+      actor = None,
+      role = None,
+      kind = "ci.skipped",
+      payload = ujson.Obj("prNumber" -> ujson.Num(pr.value.toDouble), "policy" -> ujson.Str("none"))
+    )
+
+  private def protectionUnauthorizedDraft(feature: Feature, piece: PieceId, pr: PrNumber): ActionDraft =
+    ActionDraft(
+      feature.id,
+      Some(piece),
+      actor = None,
+      role = None,
+      kind = "harness.protection_unauthorized",
+      payload = ujson.Obj(
+        "prNumber" -> ujson.Num(pr.value.toDouble),
+        "base" -> ujson.Str(feature.manifest.baseBranch.value)
+      )
+    )
 
   private def pollResultToEvent(feature: Feature, result: PollResult): IO[Option[FsmEvent]] =
     result match
-      case PollResult.Snapshot(decoded) => watcherEventFor(feature.state, decoded).map(Some(_))
+      case PollResult.Snapshot(decoded) => watcherEventFor(feature.state, decoded)
       case PollResult.RateLimited(_) => IO.pure(None) // the watch stream absorbs back-off (S3-4)
       case PollResult.Failed(err) => IO.pure(Some(FsmEvent.HarnessError(s"PR poll failed: $err")))
 
-  private def watcherEventFor(state: FsmState, decoded: DecodedSnapshot): IO[FsmEvent] =
+  // PieceAwaitingCi is handled by pieceCiWatcherIO (the §8 gate), never by this generic path. Returns None to keep
+  // polling (so a no-op poll doesn't win the source race), Some(event) to drive a transition.
+  private def watcherEventFor(state: FsmState, decoded: DecodedSnapshot): IO[Option[FsmEvent]] =
     val snap = decoded.snapshot
     state match
-      case _: FsmState.DesignAwaitingMerge => IO.pure(FsmEvent.DesignPrSnapshotUpdated(snap))
-      case s: FsmState.PieceAwaitingCi => IO.pure(FsmEvent.PrSnapshotUpdated(s.p, snap))
-      case s: FsmState.PieceAwaitingReview => IO.pure(FsmEvent.PrSnapshotUpdated(s.p, snap))
+      case _: FsmState.DesignAwaitingMerge => IO.pure(Some(FsmEvent.DesignPrSnapshotUpdated(snap)))
+      case s: FsmState.PieceAwaitingReview =>
+        // gap #13: in PieceAwaitingReview the reviewer one-shot races this watcher. A no-op snapshot must NOT win
+        // (it would cancel the in-flight reviewer every poll → the verdict never arrives). Only emit when the human
+        // actually overrode (CHANGES_REQUESTED / unseen comment); otherwise keep polling and let the reviewer finish.
+        IO.pure(Orchestrator.pieceReviewWatcherEvent(s.p, snap))
       case s: FsmState.PieceAwaitingMerge =>
         (snap.state, snap.mergeCommit, snap.mergedAt) match
           case (PrState.Merged, Some(mc), Some(ma)) =>
-            IO.realTimeInstant.map(now => FsmEvent.Merged(s.p, s.prNumber, mc, ma, now))
-          case _ => IO.pure(FsmEvent.PrSnapshotUpdated(s.p, snap))
+            IO.realTimeInstant.map(now => Some(FsmEvent.Merged(s.p, s.prNumber, mc, ma, now)))
+          case _ => IO.pure(Some(FsmEvent.PrSnapshotUpdated(s.p, snap)))
       case other =>
         IO.raiseError(new IllegalStateException(s"PRWatcher source selected for non-watcher state $other"))
 
@@ -479,6 +666,41 @@ final class Orchestrator(
   private def isLoopTerminal(state: FsmState): Boolean = state match
     case _: FsmState.NeedsHumanIntervention | FsmState.FeatureDone | _: FsmState.Abandoned => true
     case _ => false
+
+object Orchestrator:
+  /** The `NeedsHumanIntervention` hints whose `TerminalReport.recovery` directs the operator to `forge run` (they have
+    * no `forge resume --flag`): the implement driver left local changes to resolve, or a refinery planning update is
+    * approved. `forge run` applies their `Resume` at startup (see `resumeIfRunRecoverable`). The flag-gated hints
+    * (`ResumeAfterHumanPush` / `CommitAndPushHumanFix` / `RunAnotherFixup`) and the manual ones (`ReopenDesign` →
+    * `forge spec`, `AbortOrAbandon` → `forge abandon`) are deliberately excluded.
+    */
+  def runRecoverableHint(hint: ResumeHint): Boolean = hint match
+    case _: ResumeHint.ResolveLocalImplementationChanges => true
+    case _: ResumeHint.ApplyPlanningUpdate => true
+    case _ => false
+
+  /** §11.5 — a human override on a piece PR: a `CHANGES_REQUESTED` review decision or any unseen (non-bot) comment.
+    * Forge's own reviewer verdict does not flow through the watcher; it arrives via the reviewer source.
+    */
+  def isHumanOverride(snap: io.forge.core.pr.PrSnapshot): Boolean =
+    snap.reviewDecision.contains(ReviewDecision.ChangesRequested) || snap.unseenComments.nonEmpty
+
+  /** gap #13: the PieceAwaitingReview watcher emits ONLY on a human override, so a no-op poll cannot win the source
+    * race and cancel the in-flight reviewer one-shot (which is the primary verdict source). `None` ⇒ keep polling.
+    */
+  def pieceReviewWatcherEvent(p: PieceId, snap: io.forge.core.pr.PrSnapshot): Option[FsmEvent] =
+    Option.when(isHumanOverride(snap))(FsmEvent.PrSnapshotUpdated(p, snap))
+
+  /** Result of [[Orchestrator.applyUserCommand]] (Task 1.4.13 M5 / M8). */
+  enum CommandOutcome:
+    /** The command applied; the feature was then driven to this loop-terminal state. */
+    case Driven(terminal: Feature)
+
+    /** The command did not apply in the current state; nothing was mutated. `reason` is operator-facing — e.g. a `forge
+      * resume` flag that names a different hint than the one the `NeedsHumanIntervention` carries, or a `forge abandon`
+      * against an already-terminal feature.
+      */
+    case Rejected(currentState: FsmState, reason: String)
 
 /** Loop-local tag for which source produced the racing event — drives the source-driven session-clear rule. */
 private enum RaceResult:

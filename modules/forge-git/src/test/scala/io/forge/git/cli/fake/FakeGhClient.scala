@@ -25,7 +25,8 @@ final class FakeGhClient private (
     prCreateFn: (String, String, BranchName, BranchName) => IO[Either[GhError, PrNumber]],
     prUpdateBranchFn: PrNumber => IO[Either[GhError, Unit]],
     prDiffFn: PrNumber => IO[Either[GhError, String]],
-    apiBranchProtectionFn: BranchName => IO[Either[GhError, Option[ujson.Value]]]
+    apiBranchProtectionFn: BranchName => IO[Either[GhError, Option[ujson.Value]]],
+    prChecksFn: PrNumber => IO[Either[GhError, String]]
 ) extends GhClient:
 
   override def prView(pr: PrNumber, fields: Vector[String]): IO[Either[GhError, ujson.Value]] = prViewFn(pr)
@@ -44,6 +45,8 @@ final class FakeGhClient private (
   override def apiBranchProtection(base: BranchName): IO[Either[GhError, Option[ujson.Value]]] =
     apiBranchProtectionFn(base)
 
+  override def prChecks(pr: PrNumber): IO[Either[GhError, String]] = prChecksFn(pr)
+
 object FakeGhClient:
 
   private def notConfigured[A](method: String): IO[Either[GhError, A]] =
@@ -57,7 +60,8 @@ object FakeGhClient:
         notConfigured("prUpdateBranch"),
       private val prDiffFn: PrNumber => IO[Either[GhError, String]] = (_: PrNumber) => notConfigured("prDiff"),
       private val apiBranchProtectionFn: BranchName => IO[Either[GhError, Option[ujson.Value]]] = (_: BranchName) =>
-        notConfigured("apiBranchProtection")
+        notConfigured("apiBranchProtection"),
+      private val prChecksFn: PrNumber => IO[Either[GhError, String]] = (_: PrNumber) => notConfigured("prChecks")
   ):
     def prView(fn: PrNumber => IO[Either[GhError, ujson.Value]]): Builder = copy(prViewFn = fn)
     def prView(response: Either[GhError, ujson.Value]): Builder = prView(_ => IO.pure(response))
@@ -93,7 +97,10 @@ object FakeGhClient:
     def apiBranchProtection(response: Either[GhError, Option[ujson.Value]]): Builder =
       apiBranchProtection(_ => IO.pure(response))
 
+    def prChecks(fn: PrNumber => IO[Either[GhError, String]]): Builder = copy(prChecksFn = fn)
+    def prChecks(report: String): Builder = prChecks(_ => IO.pure(Right(report)))
+
     def build: FakeGhClient =
-      new FakeGhClient(prViewFn, prCreateFn, prUpdateBranchFn, prDiffFn, apiBranchProtectionFn)
+      new FakeGhClient(prViewFn, prCreateFn, prUpdateBranchFn, prDiffFn, apiBranchProtectionFn, prChecksFn)
 
   def builder: Builder = Builder()

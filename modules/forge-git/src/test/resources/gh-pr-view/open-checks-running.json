@@ -11,7 +11,7 @@
       "__typename": "CheckRun",
       "name": "build",
       "status": "IN_PROGRESS",
-      "conclusion": null
+      "conclusion": ""
     },
     {
       "__typename": "CheckRun",

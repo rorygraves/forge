@@ -72,6 +72,10 @@ final case class ClaudeConfig(
     permissionMode: String = "acceptEdits",
     allowedTools: Vector[String] =
       Vector("Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebFetch", "AskUserQuestion"),
+    // `Task` is the sub-agent spawner. A focused single-piece driver should NOT fan out into exploration/verification
+    // sub-agents — they re-scan the whole repo and ignore the driver prompt's constraints (e.g. they run the heavy
+    // build), which is what blew the implement turn to ~$10 / 20 min on the first MVP run (S4-5 finding).
+    disallowedTools: Vector[String] = Vector("Task"),
     isolationFlag: String = "auto",
     reviewProcessRetries: Int = 2,
     refineProcessRetries: Int = 2

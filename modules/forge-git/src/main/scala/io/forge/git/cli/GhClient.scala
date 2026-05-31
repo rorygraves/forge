@@ -41,3 +41,10 @@ trait GhClient:
     * available via the `GhError` envelope when the caller cares.
     */
   def apiBranchProtection(base: BranchName): IO[Either[GhError, Option[ujson.Value]]]
+
+  /** `gh pr checks <pr>` — the human-readable check table (one row per check: name, state, elapsed, link). The fix-up
+    * flow (§11.6) writes it into `pieces/<p>.failures.md` so the fix-up driver knows which CI checks failed instead of
+    * running blind. Returns the raw text. NOTE: `gh pr checks` exits non-zero when checks are failing/pending — exactly
+    * when Forge calls it — so the implementation captures stdout regardless of exit code (not a `GhError`).
+    */
+  def prChecks(pr: PrNumber): IO[Either[GhError, String]]
