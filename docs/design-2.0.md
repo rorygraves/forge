@@ -479,9 +479,29 @@ rather than refining prose, per the CLAUDE.md "run code earlier" rule.
   spec spawn now emits 2 drafts) + a new `FeatureFoldEventsSuite` producer→consumer
   rebuild regression. The **broader** piece-spawn / resume log-durability stays a
   carry-forward (roadmap §3.5 — pieces re-spawn fresh each turn, so it bites far
-  less). `forge-core` 392, `forge-app` 358 green. **Re-validation continues** on a
-  fresh run with the fixed code (the existing `readme-quickstart` log predates the
-  fix, so it must be re-driven).
+  less). `forge-core` 392, `forge-app` 358 green.
+- 2026-05-31 — **Slice 2.0 ✅ CLOSED (Task 2.0.7 complete).** All three tiers
+  landed and reviewed; spec reconciled into `forge-design-1.4.md`; §4
+  carry-forward placed in durable homes (roadmap §3.5 + design-rationale); the
+  roadmap §3.1 checkboxes are ticked. **Live re-validation — decision: wrap up on
+  evidence.** A fresh implement-turn run with the fixed code would need szork git
+  cleanup + another interactive spec + a design-PR merge; the operator chose to
+  close on the evidence gathered rather than churn the external repo further. What
+  the live run *did* prove: `forge new` / `forge spec` / `/done` / design-review /
+  design-PR all record correctly; `forge stats` graceful degradation on a
+  pre-instrumentation log; and — most valuably — it **found and fixed gap #7** (a
+  real `forge run` dead-end). The one unexercised link is the live
+  `cost.update` / `session.complete` write from a real implement turn; it is
+  covered by `OrchestratorCostUpdateWriterSuite` + `StatsReportSuite` + the
+  `forge stats` graceful-degradation check, and recorded as a **watch item** (run
+  it opportunistically on the next real feature). **Secondary finding (filed, not
+  fixed):** the `NeedsHumanIntervention(ReopenDesign)` operator hint says "re-open
+  with `forge spec`", but `SpecRepl.classifyStart` *refuses* `forge spec` from any
+  NHI state — the hint is unactionable; recovery from a design-phase NHI needs
+  `forge abandon` + restart. A standalone bug for a later slice (roadmap §3.5
+  neighbourhood). The stuck `readme-quickstart` feature + its design PR #13 (a
+  legitimate README Scala-version fix) are left on szork for the operator to merge
+  or abandon.
 
 ## 4. Carry-forward (inherited + new)
 
