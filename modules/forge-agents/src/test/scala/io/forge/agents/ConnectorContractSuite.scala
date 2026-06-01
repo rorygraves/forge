@@ -33,6 +33,8 @@ class ConnectorContractSuite extends munit.FunSuite:
       IO.pure(NoopSession)
     def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] = IO.pure(NoopSession)
     def runFixup(prompt: FixupPrompt): IO[AgentSession] = IO.pure(NoopSession)
+    def resumeHeadlessDriver(sessionId: String, systemPromptPath: os.Path, message: String): IO[AgentSession] =
+      IO.pure(NoopSession)
     def reviewDesign(input: DesignReviewInput): IO[DesignReview] = notImplemented
     def reviewPr(input: PrReviewInput): IO[PrReview] = notImplemented
     def refine(input: RefineInput): IO[RefineResult] = notImplemented

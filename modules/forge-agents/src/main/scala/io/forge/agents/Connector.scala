@@ -51,6 +51,28 @@ trait Connector:
   /** Headless fix-up; a fresh session, no resume from prior implementation. */
   def runFixup(prompt: FixupPrompt): IO[AgentSession]
 
+  /** Resume a previously-interrupted **headless** implement/fix-up driver session by its CLI session id, with a
+    * continuation `message`, returning a fresh one-shot [[AgentSession]]. The driver-side analogue of
+    * [[resumeStreamingSpec]]: same `(sessionId, systemPromptPath, message)` shape, but for the one-shot `-p` / `exec`
+    * headless drivers ([[runHeadlessImplementation]] / [[runFixup]]) rather than the streaming spec phase.
+    * Phase-agnostic — the orchestrator knows whether it is resuming an implement- or fix-up-phase NHI; the connector
+    * only needs the id.
+    *
+    * **D3 (driver-respawn-avoidance, design-3.5 D3-1).** A resume from an implement/fix-up `NeedsHumanIntervention`
+    * (mid-exploration crash) continues the *existing* driver session via the CLI's resume (`claude --resume <sid>` /
+    * `codex exec resume <thread-id>`) rather than re-spawning it from scratch and re-paying the full exploration (~\$10
+    * / 2.18M tokens in the szork run). The D3-0 spike (design-rationale **C19**) proved both pinned CLIs restore
+    * conversation context across process death; this is the clean tested seam built on that finding. **Dead code until
+    * D3-3** wires the orchestrator gate (a worktree-safety classifier decides when resume is safe).
+    *
+    * `systemPromptPath` is the same driver system-prompt file passed to the original headless spawn, carried for the
+    * same §7.10(a) reason as [[resumeStreamingSpec]]: `ClaudeConnector` ignores it (the CLI restores the system prompt
+    * server-side on resume); `CodexConnector` re-prepends it via [[CodexPrompt.withSystemBlock]] because each `codex
+    * exec resume` is a fresh, stateless invocation. §6.1 invariant on the pinned CLIs: the returned session's
+    * `sessionId` equals the input id.
+    */
+  def resumeHeadlessDriver(sessionId: String, systemPromptPath: os.Path, message: String): IO[AgentSession]
+
   /** Which mechanism this connector uses for driver questions (§7.2/§7.3). */
   def questionMechanism: QuestionMechanism
 

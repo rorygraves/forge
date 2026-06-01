@@ -44,6 +44,8 @@ final class FakeReviewerConnector(
     IO.pure(NoopSession)
   override def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] = IO.pure(NoopSession)
   override def runFixup(prompt: FixupPrompt): IO[AgentSession] = IO.pure(NoopSession)
+  override def resumeHeadlessDriver(sessionId: String, systemPromptPath: os.Path, message: String): IO[AgentSession] =
+    IO.pure(NoopSession)
 
   override def reviewDesign(input: DesignReviewInput): IO[DesignReview] =
     designReviewIO.onCancel(cancelled.set(true))

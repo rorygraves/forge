@@ -104,7 +104,7 @@ decides which connectors get D3-1 and which fall back to fresh spawn.
   on-disk diff" rather than session resume) before D3-1 starts — surface
   that via `AskUserQuestion`, do not silently pivot.
 
-### [ ] D3-1 — Headless driver resume connector seam (forge-agents)
+### [x] D3-1 — Headless driver resume connector seam (forge-agents) ✅ **2026-06-01 (real-CLI run GREEN; C19#1 resolved)**
 
 Add resume variants of the headless implement/fix-up driver methods (a
 `resume: Option[String]` arg threading `--resume <sessionId>` for Claude /
@@ -237,6 +237,33 @@ is attributed cost data to tune against.
   git-repo/trust requirement; absolute-path prompting) filed as
   **design-rationale C19** and folded into D3-1's deliverables. **Next: D3-1**
   (headless driver resume connector seam, both connectors).
+
+- 2026-06-01 — **D3-1 closed ✅ — seam landed + real-CLI IT GREEN; C19#1 resolved.** The
+  `DriverResumeSeamSuite` ran `FORGE_IT_RUN_RESUME_SEAM=1` against real `claude` (2.1.159) + `codex` (0.133.0): both
+  tests pass. **Claude** `resumeHeadlessDriver` recalled the planted codeword and the resumed turn **wrote the file**
+  (15.6s). **Codex** `resumeHeadlessDriver` resumed the same `thread_id` and the resumed turn **wrote the file despite
+  `execResumeArgv` passing no `--sandbox`** (24.5s) — confirming Codex resolves the sandbox from the sticky thread
+  settings on resume (the original `exec` ran under `workspace-write`). This **resolves design-rationale C19 watch item
+  (1)**: a resumed Codex implement/fix-up turn can edit files, so no sandbox-on-resume workaround is needed; watch items
+  (2) git-repo/trust and (3) absolute-path prompting were already satisfied (the suite git-inits the workdir and uses
+  absolute paths). **Next: D3-2** (worktree-safety classifier) — D3-1/D3-2 both feed D3-3.
+
+- 2026-06-01 — **D3-1 seam + unit/IT harness landed; real-CLI run pending.** Added
+  `Connector.resumeHeadlessDriver(sessionId, systemPromptPath, message): IO[AgentSession]` — the headless driver-side
+  analogue of `resumeStreamingSpec`, phase-agnostic (one method serves both implement- and fix-up-phase resume; the
+  orchestrator tracks which). `ClaudeConnector` routes through the existing `spawnHeadless` plumbing with a new
+  `ClaudeConnector.headlessResumeArgv` (`-p <message> … --resume <sid>`, **no** `--system-prompt-file` — server-side
+  restore, mirroring `resumeStreamingSpecArgv`); `CodexConnector` re-prepends the §7.10(a) system block (C14) and reuses
+  the existing `execResumeArgv` (no session-scoped flags per §7.10(c)). This promotes the D3-0 spike's inline resume
+  argv into a first-class method. Both pinned CLIs get the seam (C19 GO). **Dead code until D3-3.** Tests: a Claude
+  `headlessResumeArgv` argv unit test + a Codex `resumeHeadlessDriver` fake-CLI E2E (thread-id echo + §7.10(a) reprepend)
+  in `forge-agents`, the four `Connector` test-fakes updated for the widened trait, and a paired opt-in `forge-it`
+  `DriverResumeSeamSuite` (gated `FORGE_IT_RUN_RESUME_SEAM=1`) that drives the **real** method end to end — codeword
+  recall + a resumed turn that **writes a file** on each connector. The Codex write-on-resume test directly resolves
+  **C19 watch item (1)** (resume passes no `--sandbox`; does a resumed turn still write?). Unit suites green
+  (`forge-agents` 205, `forge-app` 364). The box stays `[ ]` (D3-0 rhythm) until the real-CLI IT run confirms write-on-
+  resume; on confirmation, tick D3-1 + fold the C19 resolution into design-rationale, then **D3-2** (worktree-safety
+  classifier).
 
 ## 6. Cross-references
 

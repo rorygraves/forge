@@ -330,6 +330,32 @@ class CodexConnectorSuite extends munit.FunSuite:
     assert(result.left.exists(_.getMessage.contains("thr-actual")), clue = result)
     assert(result.left.exists(_.getMessage.contains("thr-expected-different")), clue = result)
 
+  test("resumeHeadlessDriver (D3-1): exec resume <thread-id>, re-prepends §7.10(a) system block, headless one-shot"):
+    // The headless driver-side analogue of resumeStreamingSpec — `codex exec resume` is stateless (C14), so the
+    // original driver framing is re-prepended via CodexPrompt.withSystemBlock and the fake (echoing the last positional
+    // arg, the combined prompt) must surface both the system block and the continuation message. Drain-first is safe:
+    // the headless one-shot exits on its own after the turn.
+    val tid = "thr-driver-resume"
+    val fake = fakeCodex(tid)
+    val systemPrompt =
+      os.temp(contents = "Act as the implement driver.", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val connector = CodexConnector(
+      binary = fake.toString,
+      model = model,
+      priceTable = emptyPrices,
+      sessionSettings = defaultSettings
+    )
+    val (returnedSid, events) = connector
+      .resumeHeadlessDriver(tid, systemPrompt, "continue where you left off")
+      .flatMap(session => session.events.compile.toVector.map((session.sessionId, _)).guarantee(session.close()))
+      .unsafeRunSync()
+    assertEquals(returnedSid, tid, "headless resume should report the resumed thread id (§6.1)")
+    assertEquals(events.headOption, Some(AgentEvent.Init(tid)))
+    val texts = events.collect { case AgentEvent.AssistantText(t, _) => t }
+    assert(texts.exists(_.contains("Act as the implement driver.")), clue = texts) // system block reached Codex
+    assert(texts.exists(_.contains("continue where you left off")), clue = texts) // continuation message too
+    assert(events.last.isInstanceOf[AgentEvent.Result], clue = events)
+
   test("in-session send() / answerQuestion: resume turn with mismatched thread_id raises §6.1 continuity error"):
     // Two-phase fake: the first invocation emits "thr-first" (the captured session id); a counter file in /tmp
     // causes the second invocation to emit "thr-second" (a different id). Without the mismatch check the resume

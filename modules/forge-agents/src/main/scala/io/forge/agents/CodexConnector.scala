@@ -118,6 +118,31 @@ final class CodexConnector(
   def runFixup(prompt: FixupPrompt): IO[AgentSession] =
     spawnHeadless(prompt.systemPromptPath, prompt.body, label = "fixup").widen
 
+  /** D3-1 (design-3.5) — resume a headless implement/fix-up driver by its `thread_id` with a continuation `message`.
+    * Like the streaming [[resumeStreamingSpec]], each `codex exec resume` is a fresh, stateless subprocess (C14): the
+    * original driver framing is re-prepended via [[CodexPrompt.withSystemBlock]], and the argv is built by
+    * [[CodexConnector.execResumeArgv]], which per §7.10(c) carries **no** session-scoped flags (`--sandbox`,
+    * `--output-schema`, `--add-dir`, `-C`) — those are sticky on the resumed thread. **C19 watch item (1):** the
+    * resumed turn must still be able to *write* files even though no `--sandbox` flag is re-supplied; the original
+    * `exec` ran under `workspace-write`, and Codex resolves the sandbox from the sticky thread settings on resume. The
+    * forge-it `DriverResumeSeamSuite` exercises a resumed turn that edits a file to keep that behaviour pinned against
+    * real Codex.
+    */
+  def resumeHeadlessDriver(sessionId: String, systemPromptPath: os.Path, message: String): IO[AgentSession] =
+    (IO.delay(CodexPrompt.withSystemBlock(systemPromptPath, message)), RawDumpSink.driver(name, "driver-resume"))
+      .flatMapN: (combined, rawLineSink) =>
+        val argv = CodexConnector.execResumeArgv(binary, sessionId, combined)
+        val parser = new CodexEventParser(priceTable, model)
+        // Same Codex-reads-stdin-until-EOF behaviour as `spawnHeadless` — close stdin so the resumed exec proceeds.
+        StreamingDriver
+          .fromSubprocess(
+            Subprocess.spawn(argv, cwd = cwd, env = extraEnv).evalTap(_.closeStdin),
+            parser.parse,
+            initTimeout,
+            rawLineSink = rawLineSink
+          )
+          .widen
+
   // --- reviewer methods ----
 
   def reviewDesign(input: DesignReviewInput): IO[DesignReview] =

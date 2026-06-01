@@ -263,6 +263,8 @@ class RealSideEffectsSuite extends munit.FunSuite:
     def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] =
       IO.raiseError(new NotImplementedError)
     def runFixup(prompt: FixupPrompt): IO[AgentSession] = IO.pure(RealSideEffectsSuite.NoopStreaming)
+    def resumeHeadlessDriver(sessionId: String, systemPromptPath: os.Path, message: String): IO[AgentSession] =
+      IO.pure(RealSideEffectsSuite.NoopStreaming)
     def questionMechanism: QuestionMechanism = QuestionMechanism.Native
     def reviewDesign(input: DesignReviewInput): IO[DesignReview] = IO.raiseError(new NotImplementedError)
     def reviewPr(input: PrReviewInput): IO[PrReview] = IO.raiseError(new NotImplementedError)

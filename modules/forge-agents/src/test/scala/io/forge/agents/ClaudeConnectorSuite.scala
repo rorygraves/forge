@@ -48,6 +48,24 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     assert(argv.containsSlice(List("--input-format", "stream-json")), clue = argv)
     assert(argv.containsSlice(List("--output-format", "stream-json")), clue = argv)
 
+  test("headlessResumeArgv (D3-1): -p message, --resume <sid>, omits --system-prompt-file and --input-format"):
+    // The headless one-shot analogue of resumeStreamingSpecArgv: continuation message on argv (-p, so the CLI exits on
+    // its own), --resume to continue the prior session, NO --system-prompt-file (restored server-side on resume), and —
+    // like headlessArgv — NO --input-format stream-json (would block the CLI waiting on stdin that never arrives).
+    val argv = ClaudeConnector.headlessResumeArgv("claude", "sess-123", "continue where you left off")
+    assert(argv.containsSlice(List("-p", "continue where you left off")), clue = argv)
+    assert(argv.containsSlice(List("--resume", "sess-123")), clue = argv)
+    assert(!argv.contains("--system-prompt-file"), clue = argv)
+    assert(argv.containsSlice(List("--output-format", "stream-json")), clue = argv)
+    assert(!argv.containsSlice(List("--input-format", "stream-json")), clue = argv)
+    assert(argv.containsSlice(List("--setting-sources", "project,local")), clue = argv)
+    // Driver permission flags carry through so a resumed turn can still write/edit/run (C19 — both connectors resume).
+    val withPerms =
+      ClaudeConnector.headlessResumeArgv("claude", "sess-123", "go", "acceptEdits", Vector("Edit"), Vector("Task"))
+    assert(withPerms.containsSlice(List("--permission-mode", "acceptEdits")), clue = withPerms)
+    assert(withPerms.containsSlice(List("--allowedTools", "Edit")), clue = withPerms)
+    assert(withPerms.containsSlice(List("--disallowedTools", "Task")), clue = withPerms)
+
   test("driver argv carries --permission-mode + --allowedTools so headless sessions can write/edit/run"):
     // §7.1: driver sessions (spec/implement/fix-up) run headless with no interactive approver, so their tools must be
     // pre-authorised or every Write/Edit/Bash is denied. The default (mode "default" + empty allowlist) emits nothing

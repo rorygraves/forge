@@ -112,6 +112,27 @@ final class ClaudeConnector(
       label = "fixup"
     ).widen
 
+  /** D3-1 (design-3.5) — resume a headless implement/fix-up driver by its session id with a continuation `message`.
+    * Routes through the same one-shot [[spawnHeadless]] plumbing as `runHeadlessImplementation` / `runFixup`, but with
+    * the [[ClaudeConnector.headlessResumeArgv]] shape: `-p <message> … --resume <sessionId>` and **no**
+    * `--system-prompt-file` (the CLI restores the original spawn's system prompt server-side on resume — symmetric with
+    * [[resumeStreamingSpec]], which ignores `systemPromptPath` for the same reason). §6.1: the resumed process re-emits
+    * the same session id on its `init` event, so the returned session reports the input id.
+    */
+  def resumeHeadlessDriver(sessionId: String, systemPromptPath: os.Path, message: String): IO[AgentSession] =
+    val _ = systemPromptPath
+    spawnHeadless(
+      ClaudeConnector.headlessResumeArgv(
+        binary,
+        sessionId,
+        message,
+        driverPermissionMode,
+        driverAllowedTools,
+        driverDisallowedTools
+      ),
+      label = "driver-resume"
+    ).widen
+
   // --- reviewer methods ----
 
   def reviewDesign(input: DesignReviewInput): IO[DesignReview] =
@@ -311,6 +332,24 @@ object ClaudeConnector:
   ): List[String] =
     (binary :: "-p" :: prompt :: IsolationFlags) ++ OutputFlags ++
       List("--system-prompt-file", systemPromptPath.toString) ++
+      driverPermissionFlags(permissionMode, allowedTools, disallowedTools)
+
+  /** argv for a headless driver **resume** (`-p <message> … --resume <sid>`). The headless one-shot analogue of
+    * [[resumeStreamingSpecArgv]]: `-p` so the CLI takes the continuation message on argv and exits on its own (NO
+    * `--input-format stream-json`, like [[headlessArgv]]), `--resume <sid>` to continue the prior session, and — like
+    * [[resumeStreamingSpecArgv]] — **no** `--system-prompt-file` (resume restores the original spawn's system prompt
+    * server-side). The same driver permission flags as a fresh headless spawn, so a resumed turn can still
+    * write/edit/run (D3-1 / design-3.5; this is the argv the D3-0 spike built inline — design-rationale **C19**).
+    */
+  def headlessResumeArgv(
+      binary: String,
+      sessionId: String,
+      message: String,
+      permissionMode: String = "default",
+      allowedTools: Vector[String] = Vector.empty,
+      disallowedTools: Vector[String] = Vector.empty
+  ): List[String] =
+    (binary :: "-p" :: message :: IsolationFlags) ++ OutputFlags ++ List("--resume", sessionId) ++
       driverPermissionFlags(permissionMode, allowedTools, disallowedTools)
 
   /** argv for reviewer one-shots: `claude -p '<prompt>' --output-format json --json-schema '<schema>'

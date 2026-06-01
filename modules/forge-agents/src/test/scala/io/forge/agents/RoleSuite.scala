@@ -27,6 +27,8 @@ class RoleSuite extends munit.FunSuite:
       IO.pure(Sess)
     def runHeadlessImplementation(prompt: ImplementationPrompt): IO[AgentSession] = IO.pure(Sess)
     def runFixup(prompt: FixupPrompt): IO[AgentSession] = IO.pure(Sess)
+    def resumeHeadlessDriver(sessionId: String, systemPromptPath: os.Path, message: String): IO[AgentSession] =
+      IO.pure(Sess)
     def reviewDesign(input: DesignReviewInput): IO[DesignReview] = notImplemented
     def reviewPr(input: PrReviewInput): IO[PrReview] = notImplemented
     def refine(input: RefineInput): IO[RefineResult] = notImplemented
