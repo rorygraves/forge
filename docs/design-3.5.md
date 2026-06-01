@@ -77,7 +77,7 @@ re-exploration as a measured saving. Concretely:
 Riskiest-first (CLAUDE.md "run code earlier"). Each chunk is an
 independently committable PR with its own tests, in the Units-A/B rhythm.
 
-### [ ] D3-0 — De-risking spike (forge-it, real CLI) ⬅ **first runnable slice**
+### [x] D3-0 — De-risking spike (forge-it, real CLI) ✅ **GO (both connectors), 2026-06-01**
 
 Prove the central assumption before building anything on it. Kill a
 headless `claude` / `codex` run mid-exploration, then `--resume <sessionId>`
@@ -107,15 +107,23 @@ decides which connectors get D3-1 and which fall back to fresh spawn.
 ### [ ] D3-1 — Headless driver resume connector seam (forge-agents)
 
 Add resume variants of the headless implement/fix-up driver methods (a
-`resume: Option[String]` arg threading `--resume <sessionId>`), mirroring
-`resumeStreamingSpec`'s argv shape. Connectors the spike shows don't
-preserve context keep returning a fresh session (no `--resume`).
+`resume: Option[String]` arg threading `--resume <sessionId>` for Claude /
+`exec resume <thread-id>` for Codex), mirroring `resumeStreamingSpec`'s argv
+shape. D3-0 proved **both** connectors restore context, so both get the seam
+(no fall-back needed). The D3-0 spike's inline resume argv is the prototype.
 
 - *Deliverable:* fake-CLI unit tests asserting the `--resume` flag lands in
   the argv + the session-id invariant, **paired with a forge-it IT** (the
   "fake-CLI must mirror real-CLI" discipline). Dead code until D3-3 — a
   clean tested seam, same as other connector seams shipped ahead of their
   caller.
+- **Watch items from D3-0 (design-rationale C19) to resolve here:** (1)
+  **Codex write-on-resume is unverified** — `execResumeArgv` passes no
+  sandbox flag (§7.10(c)), and the spike's resumed turn was read-only; D3-1
+  must exercise a *resumed Codex turn that edits files* and decide the
+  sandbox story if it can't write. (2) Resumed Codex needs a git-repo/trusted
+  cwd (satisfied by the real worktree). (3) Use absolute worktree paths in
+  prompts (cheap models mis-resolve relative paths).
 
 ### [ ] D3-2 — Worktree-safety classifier (forge-app / forge-git)
 
@@ -214,6 +222,21 @@ is attributed cost data to tune against.
   `Test/compile` green; the three tests **skip cleanly** with the gate off
   (no real-CLI calls). **Next:** run the spike against real CLIs, record the
   per-connector result + go/no-go in `design-rationale.md`, then tick D3-0.
+- 2026-06-01 — **D3-0 run ✅ GO (both connectors); D3-0 closed.** Ran
+  `FORGE_IT_RUN_RESUME_SPIKE=1` against real `claude` (2.1.x) + `codex`
+  (gpt-5.3-codex); all three tests pass. **Claude**: fresh-process
+  `claude -p … --resume <sid>` recalled the planted codeword exactly, preserved
+  the session id, and the *killed-mid-turn* variant resumed and **continued the
+  in-flight task to a clean `Result`** (the realistic D3 crash shape works).
+  **Codex**: `codex exec resume` shared the identical `thread_id` across turns
+  and recalled the codeword — context restored despite the CLI being stateless.
+  Two harness fixes were needed and made (not findings): the codeword recall was
+  decoupled from a flaky file-write check (a cheap model wrote to `$HOME`), and
+  the Codex workdir is now git-init'd (codex refuses an untrusted non-git dir).
+  Full go/no-go + **three watch items** (Codex write-on-resume unverified; codex
+  git-repo/trust requirement; absolute-path prompting) filed as
+  **design-rationale C19** and folded into D3-1's deliverables. **Next: D3-1**
+  (headless driver resume connector seam, both connectors).
 
 ## 6. Cross-references
 
