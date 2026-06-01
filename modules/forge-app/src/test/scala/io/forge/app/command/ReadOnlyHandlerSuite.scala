@@ -164,6 +164,20 @@ class ReadOnlyHandlerSuite extends munit.FunSuite:
     val code = TailCommand.run(new ForgePaths(root), Vector.empty).unsafeRunSync()
     assertEquals(code, ExitCode(64))
 
+  // --- tui (Task 2.1.3) ----------------------------------------------------
+  //
+  // Only the non-launching branches are exercised here: an unknown feature (no manifest → exit 1) and a missing feature
+  // argument (usage → exit 64) both return before `ForgeTui.run` would seize the terminal. The success branch (a real
+  // snapshot → the blocking Elm loop) is covered headlessly by `io.forge.tui.ForgeTuiAppSuite`.
+
+  tempFixture.test("tui on an unknown feature → exit 1 (no manifest)"): root =>
+    val code = TuiCommand.run(new ForgePaths(root), ForgeConfig.Default, Vector(featureId.value)).unsafeRunSync()
+    assertEquals(code, ExitCode(1))
+
+  tempFixture.test("tui with no feature argument → exit 64 (usage)"): root =>
+    val code = TuiCommand.run(new ForgePaths(root), ForgeConfig.Default, Vector.empty).unsafeRunSync()
+    assertEquals(code, ExitCode(64))
+
   // --- rebuild-state -------------------------------------------------------
 
   tempFixture.test("rebuild-state on a seeded manifest + empty log → exit 0 (recovers to Drafting)"): root =>

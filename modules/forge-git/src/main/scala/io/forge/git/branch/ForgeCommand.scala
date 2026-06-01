@@ -60,3 +60,4 @@ object ForgeCommand:
     case Tail extends ReadOnlyKind("tail")
     case RebuildState extends ReadOnlyKind("rebuild-state")
     case Stats extends ReadOnlyKind("stats")
+    case Tui extends ReadOnlyKind("tui")

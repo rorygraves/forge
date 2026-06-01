@@ -15,11 +15,16 @@
 > and map to Slices 1.1/1.2/1.3). This Slice-2.1 plan therefore uses the
 > disambiguated `design-2.1-tui.md`.
 >
-> **Status:** 🟡 open — 2026-06-01. Second slice of Phase 2 (MLP). Task 2.1.1
-> (first runnable slice + the Scala 3.7.1 bump it forced) ✅ landed 2026-06-01;
-> the rest is open. The TUI is the §3.1 "richer view" over data Slice 2.0 already
-> made replayable — so it is built **log-tail-first** over the canonical action
-> log + state cache, with a live event tap deferred (see §0 / Task 2.1.5).
+> **Status:** 🟡 open — 2026-06-01. Second slice of Phase 2 (MLP). **Tier 1 is
+> complete** — Tasks 2.1.1 (runnable slice + the Scala 3.7.1 bump it forced),
+> 2.1.2 (`TuiSnapshot` builder), and 2.1.3 (`forge tui <feature>` command) ✅
+> landed 2026-06-01, plus the exit-gating Task 2.1.4 (scrollable log-tail pane).
+> The slice exit criterion is met; the remaining Tasks (2.1.5 live tap, 2.1.6
+> Q&A, 2.1.7 polish, 2.1.8 close-out) are open, and roadmap §3.2 stays unticked
+> until the section-wide review. The TUI is the §3.1 "richer view" over data
+> Slice 2.0 already made replayable — so it is built **log-tail-first** over the
+> canonical action log + state cache, with a live event tap deferred (see §0 /
+> Task 2.1.5).
 
 ## 0. Exit criterion for Slice 2.1
 
@@ -136,7 +141,7 @@ Landed:
   log-left-unchanged assertion). Green: `forge-tui` 23 tests; full unit suite + the
   `StatusReport` goldens pass; scalafmt clean; `forge-it` compiles.
 
-### Task 2.1.3 — `forge tui <feature>` command
+### Task 2.1.3 — `forge tui <feature>` command  ✅ 2026-06-01
 
 Wire a read-only `forge tui <feature>` into `io.forge.app.command` (alongside
 `status` / `tail` / `stats`): resolve paths + config, build an initial snapshot
@@ -145,6 +150,37 @@ log. **Read-only per §15** — never acquires `ProcessLock`, never writes; mirr
 `StatusReport`'s "reads cache directly, never `RebuildState`" stance so it is safe
 to run against an in-flight `forge run`. Register the command in `CommandRouter` +
 `ForgeCommand`.
+
+Landed:
+
+- `ForgeTui.scala` — the app's snapshot is now **refreshed by polling**. A new
+  `Msg.Refreshed(snapshot)` replaces the rendered snapshot (leaving `scrollBack`
+  untouched, so a follow-tail viewport keeps tracking the newest lines while a
+  parked one stays anchored); the 1s `Sub.Every` `Msg.Tick` now fires a
+  `Cmd.FCmd` over a `reload: () => Future[Option[TuiSnapshot]]` thunk (the
+  idiomatic termflow effect — `update` stays pure, the async re-fold lands as a
+  follow-up `Msg`). A `None` reload is a no-op (keeps the last good frame). New
+  `run(initial, reload)` entry alongside the static `run(snapshot)`; the default
+  `App` reload is a no-op so existing static callers/tests are unaffected.
+- `TuiCommand.scala` (new) — `forge tui <feature>`: `requireFeature`, then build
+  the initial snapshot and a `reload` thunk both from `TuiSnapshotBuilder.load`
+  (the §15 read-only fold — cache-direct, log-in-place, no lock), and run the app
+  on the blocking pool. Unknown feature → exit 1 (mirrors `StatusReport`'s
+  not-found); missing feature arg → exit 64. The per-tick `IO → Future` bridge
+  uses the global CE runtime.
+- Wiring: `ReadOnlyKind.Tui` (`forge-git`), `Cli` phase1/phase2 + the
+  `NoCommand` help line, `CommandRouter.readOnly`, the `tui` handler object, and
+  the `Main` command-surface docstring.
+- Tests: 3 new `ForgeTuiAppSuite` cases (Tick re-folds; `None` keeps the
+  snapshot; scroll preserved across a refresh) → `forge-tui` 33; 2 new
+  `ReadOnlyHandlerSuite` cases (unknown-feature exit 1, no-arg exit 64) +
+  `CliParserSuite` extended to cover `tui`. Full unit suite + `StatusReport`
+  goldens green; scalafmt clean; `forge-it` compiles.
+
+This **closes the Tier-1 gate** (a runnable read-only status+active dashboard
+wired to `forge tui`); with Task 2.1.4 (log-tail pane) already landed, the
+slice's exit criterion is met pending the section-wide code review (roadmap §3.2
+stays unticked until then).
 
 ### Tier 2 — make it answerable
 
@@ -216,6 +252,18 @@ demands token-level liveness, else rolls forward. 2.1.8 closes.
 
 ## 3. Status log
 
+- **2026-06-01 — Task 2.1.3 landed (`forge tui <feature>` command) — Tier-1 gate
+  closed.** Added the read-only `forge tui` command: a new `TuiCommand` builds an
+  initial `TuiSnapshot` and a `reload` thunk (both from the §15 read-only
+  `TuiSnapshotBuilder.load`) and runs `ForgeTui` on the blocking pool. `ForgeTui`
+  gained polling: `Msg.Tick` now fires a `Cmd.FCmd` over the `reload` thunk and
+  the re-folded snapshot lands as a new `Msg.Refreshed` (keeping `update` pure and
+  `scrollBack` anchored to the tail). Wired `ReadOnlyKind.Tui` through
+  `Cli`/`CommandRouter`/`Handlers`; `Main` routes it generically (no per-kind
+  branch). 5 new tests (3 `forge-tui` refresh, 2 `ReadOnlyHandler` exit-code) +
+  `CliParserSuite` extended; `forge-tui` 33, full unit suite green, scalafmt
+  clean, `forge-it` compiles. With 2.1.4 already in, the slice exit criterion is
+  met; roadmap §3.2 stays unticked pending the section-wide review.
 - **2026-06-01 — Task 2.1.4 landed (scrollable log pane).** Added a `scrollBack`
   field to `ForgeTui.Model` (lines-above-the-tail; `0` = follow-tail) plus
   `ArrowUp`/`ArrowDown`/`PageUp`/`PageDown` handling, a clamped-at-render viewport

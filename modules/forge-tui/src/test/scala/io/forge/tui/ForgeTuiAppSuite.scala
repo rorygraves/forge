@@ -5,6 +5,8 @@ import termflow.tui.KeyDecoder.InputKey
 import termflow.tui.TuiPrelude.PromptLine
 import termflow.testkit.{GoldenFrame, TuiTestDriver}
 
+import scala.concurrent.Future
+
 /** Slice 2.1 first-runnable-slice coverage: drives [[ForgeTui.App]] through the headless `TuiTestDriver` (no real
   * terminal) and asserts the rendered frame and the Elm transitions.
   *
@@ -148,3 +150,42 @@ class ForgeTuiAppSuite extends munit.FunSuite:
     d.send(ForgeTui.Msg.Key(InputKey.PageUp))
     assert(!d.exited)
     assertEquals(d.model.lastKey, Some(InputKey.PageUp.toString))
+
+  // ── Task 2.1.3 — periodic snapshot reload ─────────────────────────────────────────────────────────────────────────
+  //
+  // `forge tui` re-folds the committed log on each tick via a `reload` thunk. The TuiTestDriver requires the FCmd's
+  // Future to be already completed, so the tests feed `Future.successful(...)`.
+
+  private def reloadingDriver(
+      initial: TuiSnapshot,
+      reload: () => Future[Option[TuiSnapshot]]
+  ): TuiTestDriver[ForgeTui.Model, ForgeTui.Msg] =
+    val d = TuiTestDriver(new ForgeTui.App(initial, reload), width = 80, height = 20)
+    d.init()
+    d
+
+  test("Tick re-folds the snapshot via the reload thunk"):
+    val refreshed = sample.copy(stateLabel = "implementing piece p4", activeLines = Vector("> next piece…"))
+    val d = reloadingDriver(sample, () => Future.successful(Some(refreshed)))
+    assert(text(d).contains("state:  implementing piece p3"), text(d))
+    d.send(ForgeTui.Msg.Tick)
+    assertEquals(d.model.snapshot, refreshed)
+    assertEquals(d.model.ticks, 1L)
+    assert(text(d).contains("state:  implementing piece p4"), text(d))
+
+  test("a reload returning None leaves the current snapshot in place"):
+    val d = reloadingDriver(sample, () => Future.successful(None))
+    d.send(ForgeTui.Msg.Tick)
+    assertEquals(d.model.snapshot, sample)
+    assertEquals(d.model.ticks, 1L)
+    assert(!d.exited)
+
+  test("a reload preserves the scroll position across a refresh"):
+    // Park the viewport one line back, then a refresh that appends a line keeps the same scrollBack.
+    val grown = scrollable.copy(activeLines = scrollable.activeLines :+ "line 21")
+    val d = reloadingDriver(scrollable, () => Future.successful(Some(grown)))
+    d.send(ForgeTui.Msg.Key(InputKey.ArrowUp))
+    assertEquals(d.model.scrollBack, 1)
+    d.send(ForgeTui.Msg.Tick)
+    assertEquals(d.model.snapshot, grown)
+    assertEquals(d.model.scrollBack, 1)

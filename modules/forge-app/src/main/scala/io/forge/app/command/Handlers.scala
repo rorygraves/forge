@@ -295,6 +295,10 @@ object stats:
   def run(ctx: ReadOnlyContext): IO[ExitCode] =
     StatsReport.run(ctx.paths, ctx.args)
 
+object tui:
+  def run(ctx: ReadOnlyContext): IO[ExitCode] =
+    TuiCommand.run(ctx.paths, ctx.config, ctx.args)
+
 // --- unlock --force (§13 — fully implemented) -------------------------------------
 
 object unlock:
