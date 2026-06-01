@@ -46,7 +46,7 @@ class CodexStreamingSpecSuite extends munit.FunSuite:
     val stream = getClass.getResourceAsStream("/prices.example.json")
     require(stream != null, "prices.example.json missing from classpath")
     try
-      val raw = scala.io.Source.fromInputStream(stream)("UTF-8").mkString
+      val raw = scala.io.Source.fromInputStream(stream)(using scala.io.Codec("UTF-8")).mkString
       upickle.default.read[PriceTable](raw)
     finally stream.close()
 

@@ -10,11 +10,12 @@ import io.forge.core.paths.ForgePaths
 /** Task 1.4.10-d2c — opt-in **construction smoke** for the production `forge run` wiring in a real filesystem.
   *
   * Proves the real install → build path end-to-end: [[AssetInstaller]] copies the shipped reviewer + driver assets into
-  * a throwaway `~/.forge`, then [[OrchestratorBuilder]] assembles a fully-real [[io.forge.app.orchestrator.Orchestrator]]
-  * for both `Mode`s (so [[io.forge.app.orchestrator.ConnectorFactory]] resolves the just-installed asset paths and the
-  * Codex branch loads its price table). It deliberately does **not** drive a feature through real `claude` / `codex` /
-  * `git` / `gh` — that is the Task 1.4.16 MVP gate. The terminal-feature drive over a fully-real orchestrator is covered
-  * (CLI-free) by `forge-app`'s `OrchestratorBuilderSuite`; this suite adds the real-`~/.forge` integration delta.
+  * a throwaway `~/.forge`, then [[OrchestratorBuilder]] assembles a fully-real
+  * [[io.forge.app.orchestrator.Orchestrator]] for both `Mode`s (so [[io.forge.app.orchestrator.ConnectorFactory]]
+  * resolves the just-installed asset paths and the Codex branch loads its price table). It deliberately does **not**
+  * drive a feature through real `claude` / `codex` / `git` / `gh` — that is the Task 1.4.16 MVP gate. The
+  * terminal-feature drive over a fully-real orchestrator is covered (CLI-free) by `forge-app`'s
+  * `OrchestratorBuilderSuite`; this suite adds the real-`~/.forge` integration delta.
   *
   * **Opt-in by default** (<60s budget, and to avoid writing a throwaway `~/.forge` on every `forge-it` run): runs only
   * when `FORGE_IT_RUN_WIRING_SMOKE=1`. Needs no GitHub repo and no CLI on PATH — connector subprocesses are acquired

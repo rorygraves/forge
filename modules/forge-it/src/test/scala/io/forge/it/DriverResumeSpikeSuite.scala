@@ -13,27 +13,29 @@ import scala.concurrent.duration.*
   * driver session via `--resume` instead of re-spawning it from scratch** (re-paying the full exploration, ~\$10 in the
   * szork MVP run). Before building the connector seam (D3-1), the orchestrator gate (D3-2/D3-3), or the stats proof
   * (D3-4), one assumption has to hold: **a headless driver turn, interrupted and then resumed from a *fresh process*,
-  * actually continues with its prior context rather than re-exploring.** This is untested today — only the spec phase has
-  * a resume path (`resumeStreamingSpec`, *streaming* mode); the implement/fix-up drivers are one-shot `-p` headless runs
-  * with **no `--resume` capability**, so `claude -p … --resume <sid>` / `codex exec resume … <sid>` for a *driver* turn
-  * is a wire combination Forge has never exercised. This suite captures that wire behaviour directly (per the CLAUDE.md
-  * "capture real external shapes before writing decoders/schemas" rule) so D3-1+ build on measured fact, not assumption.
+  * actually continues with its prior context rather than re-exploring.** This is untested today — only the spec phase
+  * has a resume path (`resumeStreamingSpec`, *streaming* mode); the implement/fix-up drivers are one-shot `-p` headless
+  * runs with **no `--resume` capability**, so `claude -p … --resume <sid>` / `codex exec resume … <sid>` for a *driver*
+  * turn is a wire combination Forge has never exercised. This suite captures that wire behaviour directly (per the
+  * CLAUDE.md "capture real external shapes before writing decoders/schemas" rule) so D3-1+ build on measured fact, not
+  * assumption.
   *
   * **What each test characterises** (and the go/no-go signal it produces):
   *   - `codeword recall`: turn 1 (headless, fresh temp dir) is told a unique codeword and writes a file; the process
-  *     ends; turn 2 resumes the *same session id* from a *new connector instance* and is asked only for the codeword. If
-  *     the resumed turn echoes the codeword, headless `--resume` restored the conversation context → a real resume saves
-  *     the re-exploration. If it does not (or the resume errors), the large half must be reframed (e.g. commit-and-continue
-  *     from the on-disk diff) — surface that via `AskUserQuestion` before D3-1.
+  *     ends; turn 2 resumes the *same session id* from a *new connector instance* and is asked only for the codeword.
+  *     If the resumed turn echoes the codeword, headless `--resume` restored the conversation context → a real resume
+  *     saves the re-exploration. If it does not (or the resume errors), the large half must be reframed (e.g.
+  *     commit-and-continue from the on-disk diff) — surface that via `AskUserQuestion` before D3-1.
   *   - `killed mid-turn`: the realistic D3 crash shape — turn 1 is **killed while still working** (the settle-timeout /
-  *     cost-cap / crash case), then resumed. Looser automated assertion (session id honoured + a clean turn-2 `Result` +
-  *     any partial on-disk edit survives); the captured transcript is the artefact a human reads to judge whether the
+  *     cost-cap / crash case), then resumed. Looser automated assertion (session id honoured + a clean turn-2 `Result`
+  *     + any partial on-disk edit survives); the captured transcript is the artefact a human reads to judge whether the
   *     resume picked up mid-exploration.
   *
   * **The connector matrix is the deliverable.** Claude `--resume` preserves the session id server-side (Slice 0 §6.1);
   * Codex `exec resume` is **stateless** — it re-prepends the system block and passes *no* sandbox/approval flags
-  * (`execResumeArgv`), so whether it restores exploration context (and whether it can still write files on resume) is the
-  * open question this suite answers per connector. Results + a go/no-go call get pinned in `design-rationale.md` (D3-0).
+  * (`execResumeArgv`), so whether it restores exploration context (and whether it can still write files on resume) is
+  * the open question this suite answers per connector. Results + a go/no-go call get pinned in `design-rationale.md`
+  * (D3-0).
   *
   * **Opt-in by default** (CLAUDE.md "default-on test runtime <60s"): two real driver turns per test cost real
   * tokens/minutes, so the whole suite is gated behind `FORGE_IT_RUN_RESUME_SPIKE=1` on top of the usual PATH probe +
@@ -77,7 +79,8 @@ class DriverResumeSpikeSuite extends munit.FunSuite:
   private def loadPriceTable: PriceTable =
     val stream = getClass.getResourceAsStream("/prices.example.json")
     require(stream != null, "prices.example.json missing from classpath")
-    try upickle.default.read[PriceTable](scala.io.Source.fromInputStream(stream)("UTF-8").mkString)
+    try
+      upickle.default.read[PriceTable](scala.io.Source.fromInputStream(stream)(using scala.io.Codec("UTF-8")).mkString)
     finally stream.close()
 
   private def dump(name: String, events: Vector[AgentEvent]): Unit =
@@ -88,8 +91,8 @@ class DriverResumeSpikeSuite extends munit.FunSuite:
   private def assistantText(events: Vector[AgentEvent]): String =
     events.collect { case AgentEvent.AssistantText(t, _) => t }.mkString("\n")
 
-  /** Drain a headless one-shot session to completion (drain-first is safe — `-p` reads no stdin and the CLI exits on its
-    * own; the streaming close-then-drain idiom does not apply here, see [[ClaudeHeadlessSmokeSuite]]).
+  /** Drain a headless one-shot session to completion (drain-first is safe — `-p` reads no stdin and the CLI exits on
+    * its own; the streaming close-then-drain idiom does not apply here, see [[ClaudeHeadlessSmokeSuite]]).
     */
   private def drain(session: AgentSession): IO[(String, Vector[AgentEvent])] =
     for
@@ -111,10 +114,14 @@ class DriverResumeSpikeSuite extends munit.FunSuite:
     )
 
   /** The D3-1-shaped resume argv built inline: `-p <prompt>` headless (so the CLI exits on its own) + `--resume <sid>`,
-    * **no** `--system-prompt-file` (Claude restores it server-side, mirroring `resumeStreamingSpecArgv`). `.attempt` so a
-    * CLI that rejects `-p … --resume` surfaces as a captured finding rather than an opaque suite failure.
+    * **no** `--system-prompt-file` (Claude restores it server-side, mirroring `resumeStreamingSpecArgv`). `.attempt` so
+    * a CLI that rejects `-p … --resume` surfaces as a captured finding rather than an opaque suite failure.
     */
-  private def claudeResume(workdir: os.Path, sid: String, prompt: String): IO[Either[Throwable, (String, Vector[AgentEvent])]] =
+  private def claudeResume(
+      workdir: os.Path,
+      sid: String,
+      prompt: String
+  ): IO[Either[Throwable, (String, Vector[AgentEvent])]] =
     val argv = (claudeOnPath.get.toString :: "-p" :: prompt :: ClaudeConnector.IsolationFlags) ++
       ClaudeConnector.OutputFlags ++ List("--resume", sid) ++
       ClaudeConnector.driverPermissionFlags(claudeDriverMode, claudeAllowed)
@@ -125,7 +132,12 @@ class DriverResumeSpikeSuite extends munit.FunSuite:
 
   // --- Codex resume (`codex exec resume --json <thread-id> <message>`) ----
 
-  private def codexResume(workdir: os.Path, threadId: String, prompt: String, systemPromptPath: os.Path): IO[Either[Throwable, (String, Vector[AgentEvent])]] =
+  private def codexResume(
+      workdir: os.Path,
+      threadId: String,
+      prompt: String,
+      systemPromptPath: os.Path
+  ): IO[Either[Throwable, (String, Vector[AgentEvent])]] =
     // Mirror the connector's resume path: re-prepend the system block (Codex resume is stateless — C14). Note the resume
     // argv passes NO sandbox/approval flags, so file writes on a resumed turn depend on codex's default — a finding this
     // captures.
@@ -170,13 +182,17 @@ class DriverResumeSpikeSuite extends munit.FunSuite:
     * `plan.md` to `$HOME` rather than cwd), so this is logged, not asserted — the decisive signal is codeword recall.
     */
   private def noteFileSurvival(label: String, file: os.Path): Unit =
-    if os.exists(file) && os.read(file).contains(planMarker) then println(s"[D3-0 spike] $label: turn-1 file survived ✓ ($file)")
+    if os.exists(file) && os.read(file).contains(planMarker) then
+      println(s"[D3-0 spike] $label: turn-1 file survived ✓ ($file)")
     else println(s"[D3-0 spike] $label: turn-1 file NOT found at $file (model path-resolution — see transcript)")
 
   // --- Claude tests ----
 
   test("Claude: headless --resume restores conversation context (codeword recall)"):
-    assume(canClaude, "skipped — set FORGE_IT_RUN_RESUME_SPIKE=1 and have `claude` on PATH (not FORGE_IT_SKIP_CLAUDE=1)")
+    assume(
+      canClaude,
+      "skipped — set FORGE_IT_RUN_RESUME_SPIKE=1 and have `claude` on PATH (not FORGE_IT_SKIP_CLAUDE=1)"
+    )
     val workdir = os.temp.dir(prefix = "forge-resume-spike-claude-")
     val sys = systemPromptFile(driverSystem)
     val connector = claudeConnector(workdir)
@@ -203,7 +219,10 @@ class DriverResumeSpikeSuite extends munit.FunSuite:
         )
 
   test("Claude: a turn killed mid-exploration can be resumed to a clean Result (realistic D3 crash shape)"):
-    assume(canClaude, "skipped — set FORGE_IT_RUN_RESUME_SPIKE=1 and have `claude` on PATH (not FORGE_IT_SKIP_CLAUDE=1)")
+    assume(
+      canClaude,
+      "skipped — set FORGE_IT_RUN_RESUME_SPIKE=1 and have `claude` on PATH (not FORGE_IT_SKIP_CLAUDE=1)"
+    )
     val workdir = os.temp.dir(prefix = "forge-resume-spike-claude-kill-")
     val sys = systemPromptFile(driverSystem)
     val connector = claudeConnector(workdir)
@@ -224,7 +243,8 @@ class DriverResumeSpikeSuite extends munit.FunSuite:
     dump("claude-kill-turn1", partial)
     assert(partial.exists(_.isInstanceOf[AgentEvent.Init]), clue = partial)
 
-    val resumed = claudeResume(workdir, sid, "Continue exactly where you left off; when finished reply: done").unsafeRunSync()
+    val resumed =
+      claudeResume(workdir, sid, "Continue exactly where you left off; when finished reply: done").unsafeRunSync()
     resumed match
       case Left(err) =>
         fail(s"resume after mid-turn kill failed: $err")

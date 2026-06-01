@@ -3,7 +3,7 @@ package io.forge.app.orchestrator
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import io.forge.core.*
-import io.forge.core.fsm.{Feature, FsmState, ResumeHint, UserCommand}
+import io.forge.core.fsm.{FsmState, ResumeHint, UserCommand}
 import io.forge.core.log.{Action, ActionDraft, FileActionLog}
 import io.forge.core.manifest.FileManifestStore
 import io.forge.core.paths.ForgePaths

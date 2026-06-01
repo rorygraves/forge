@@ -10,11 +10,11 @@ import scala.concurrent.duration.*
 /** roadmap §3.5 / [`design-3.5.md`] **D3-1 — headless driver resume connector seam** (real-CLI IT).
   *
   * D3-0 (`DriverResumeSpikeSuite`) proved — against real CLIs — that a headless driver turn resumed from a *fresh
-  * process* restores conversation context on **both** connectors, by building the resume argv inline. D3-1 promotes that
-  * inline prototype into a first-class connector method, [[Connector.resumeHeadlessDriver]] (`claude -p … --resume <sid>`
-  * / `codex exec resume <thread-id>`). This suite is the "fake-CLI must mirror real-CLI" pair for the fake-CLI unit tests
-  * in `ClaudeConnectorSuite` / `CodexConnectorSuite`: it drives the **actual method** end to end against the real
-  * binaries so the seam is grounded on measured behaviour, not the unit fakes.
+  * process* restores conversation context on **both** connectors, by building the resume argv inline. D3-1 promotes
+  * that inline prototype into a first-class connector method, [[Connector.resumeHeadlessDriver]] (`claude -p … --resume
+  * <sid>` / `codex exec resume <thread-id>`). This suite is the "fake-CLI must mirror real-CLI" pair for the fake-CLI
+  * unit tests in `ClaudeConnectorSuite` / `CodexConnectorSuite`: it drives the **actual method** end to end against the
+  * real binaries so the seam is grounded on measured behaviour, not the unit fakes.
   *
   * **What it pins** (beyond the spike, which only built argv inline):
   *   - both connectors' `resumeHeadlessDriver` recall a codeword planted in turn 1 → the method restores context;
@@ -55,11 +55,12 @@ class DriverResumeSeamSuite extends munit.FunSuite:
   private def loadPriceTable: PriceTable =
     val stream = getClass.getResourceAsStream("/prices.example.json")
     require(stream != null, "prices.example.json missing from classpath")
-    try upickle.default.read[PriceTable](scala.io.Source.fromInputStream(stream)("UTF-8").mkString)
+    try
+      upickle.default.read[PriceTable](scala.io.Source.fromInputStream(stream)(using scala.io.Codec("UTF-8")).mkString)
     finally stream.close()
 
-  /** Drain a headless one-shot session to completion (drain-first is safe — `-p` / `exec` reads no further stdin and the
-    * CLI exits on its own after the turn).
+  /** Drain a headless one-shot session to completion (drain-first is safe — `-p` / `exec` reads no further stdin and
+    * the CLI exits on its own after the turn).
     */
   private def drain(session: AgentSession): IO[(String, Vector[AgentEvent])] =
     for
@@ -107,7 +108,11 @@ class DriverResumeSeamSuite extends munit.FunSuite:
       .unsafeRunSync()
 
     val (newSid, turn2) = connector
-      .resumeHeadlessDriver(sid, sys, s"Create a file at the absolute path $out whose entire contents are the codeword you remembered. Then reply: done")
+      .resumeHeadlessDriver(
+        sid,
+        sys,
+        s"Create a file at the absolute path $out whose entire contents are the codeword you remembered. Then reply: done"
+      )
       .flatMap(drain)
       .unsafeRunSync()
 
@@ -116,7 +121,10 @@ class DriverResumeSeamSuite extends munit.FunSuite:
       case Some(AgentEvent.Result(success, _)) => assert(success, clue = turn2)
       case other => fail(s"resumed turn did not end in a Result: $other")
     assert(os.exists(out), s"resumed Claude turn did not write $out — write-on-resume failed")
-    assert(os.read(out).contains(codeword), s"resumed turn wrote $out but without the recalled codeword: '${os.read(out)}'")
+    assert(
+      os.read(out).contains(codeword),
+      s"resumed turn wrote $out but without the recalled codeword: '${os.read(out)}'"
+    )
 
   // --- Codex (the decisive write-on-resume check — C19 watch item (1)) ----
 
@@ -149,10 +157,20 @@ class DriverResumeSeamSuite extends munit.FunSuite:
     // Turn 2 resumes via the connector method (execResumeArgv — NO --sandbox). It must still be able to write: the
     // original exec ran under workspace-write and Codex resolves the sandbox from the sticky thread settings on resume.
     val (newThreadId, _) = connector
-      .resumeHeadlessDriver(threadId, sys, s"Create a file at the absolute path $out whose entire contents are the codeword you remembered. Then reply: done")
+      .resumeHeadlessDriver(
+        threadId,
+        sys,
+        s"Create a file at the absolute path $out whose entire contents are the codeword you remembered. Then reply: done"
+      )
       .flatMap(drain)
       .unsafeRunSync()
 
     assertEquals(newThreadId, threadId, "Codex resume should echo the same thread id (§6.1)")
-    assert(os.exists(out), s"resumed Codex turn did NOT write $out → write-on-resume is blocked without --sandbox (C19#1)")
-    assert(os.read(out).contains(codeword), s"resumed Codex turn wrote $out but without the recalled codeword: '${os.read(out)}'")
+    assert(
+      os.exists(out),
+      s"resumed Codex turn did NOT write $out → write-on-resume is blocked without --sandbox (C19#1)"
+    )
+    assert(
+      os.read(out).contains(codeword),
+      s"resumed Codex turn wrote $out but without the recalled codeword: '${os.read(out)}'"
+    )

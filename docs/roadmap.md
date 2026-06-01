@@ -6,7 +6,7 @@
 > §17 of the design); later phases capture direction and have not yet been
 > turned into specs.
 >
-> **Status:** draft v0.12 — 2026-06-01. **Phase 1 (MVP) ✅ COMPLETE — Slices 1.1, 1.2, 1.3, and 1.4 all closed.** Phase 2 (MLP) is open; **Slice 2.0 (run observability, §3.1) ✅ closed 2026-05-31** — all three tiers landed (`cost.update` + `session.complete` writers, `forge stats`, work-vs-wait markers, driver raw-dump, clean resume-from-NHI); the final implement-turn `forge stats` capture against real CLI output is a watch item (the writers + fold are unit-tested). **§3.5 driver-respawn-avoidance (the D3 large half) ✅ closed 2026-06-01** — a restart from a mid-exploration implement/fix-up crash now resumes the existing driver session instead of re-paying the full exploration (gap #10), gated by a worktree-safety classifier; `forge stats` folds the resumed turn as a measured saving. The live contract is now **[`forge-design-1.5.md`](forge-design-1.5.md)** (1.4 → redirect stub), which reconciles both the Slice-2.0 §19 additions and the §3.5 D3 deltas; §3.5's second bullet (§18 reviewer/driver tuning, S4-3/S4-5) stays open. Audit trails: [`design-2.0.md`](design-2.0.md), [`design-3.5.md`](design-3.5.md). Next: Slice 2.1 (TUI, §3.2) or the §3.5 §18 tuning follow-up.
+> **Status:** draft v0.12 — 2026-06-01. **Phase 1 (MVP) ✅ COMPLETE — Slices 1.1, 1.2, 1.3, and 1.4 all closed.** Phase 2 (MLP) is open; **Slice 2.0 (run observability, §3.1) ✅ closed 2026-05-31** — all three tiers landed (`cost.update` + `session.complete` writers, `forge stats`, work-vs-wait markers, driver raw-dump, clean resume-from-NHI); the final implement-turn `forge stats` capture against real CLI output is a watch item (the writers + fold are unit-tested). **§3.5 driver-respawn-avoidance (the D3 large half) ✅ closed 2026-06-01** — a restart from a mid-exploration implement/fix-up crash now resumes the existing driver session instead of re-paying the full exploration (gap #10), gated by a worktree-safety classifier; `forge stats` folds the resumed turn as a measured saving. The live contract is now **[`forge-design-1.5.md`](forge-design-1.5.md)** (1.4 → redirect stub), which reconciles both the Slice-2.0 §19 additions and the §3.5 D3 deltas; §3.5's second bullet (§18 reviewer/driver tuning, S4-3/S4-5) stays open. Audit trails: [`design-2.0.md`](design-2.0.md), [`design-3.5.md`](design-3.5.md). **Slice 2.1 (TUI, §3.2) ✅ opened 2026-06-01** — plan in [`design-2.1-tui.md`](design-2.1-tui.md); Task 2.1.1 (termflow wiring + the repo-wide Scala 3.5.2→3.7.1 bump it forced) landed, whole build green. Next: Slice 2.1 Task 2.1.2 (snapshot builder) → 2.1.3 (`forge tui` command), or the §3.5 §18 tuning follow-up.
 > Slice 1.1 (Task 1.1.1 → Task 1.1.5 in [`design-2.1.md`](design-2.1.md)) ships
 > both connectors against the v1.2 §7.1 streaming-spec trait with
 > real-CLI integration tests in `forge-it`. Slice 1.2 (Task 1.2.1 → Task 1.2.7 in
@@ -464,6 +464,18 @@ from the committed log alone, broken down per phase, via `forge stats`.
 Termflow + Elm architecture. Panes per §3.1: status, active (streaming /
 log tail / Q&A / idle). Subjective; iterate based on what feels wrong
 during real use.
+
+> **🟡 open 2026-06-01.** Per-Task breakdown + audit trail:
+> [`design-2.1-tui.md`](design-2.1-tui.md) (so named to avoid the legacy
+> `design-2.1.md` = Slice 1.1 collision). Built **log-tail-first** over the
+> Slice-2.0 action log (a live `AgentEvent` tap is deferred — see that doc §0/§4).
+> **Task 2.1.1 ✅ landed** — termflow `0.4.0` wired into `forge-tui` with a
+> runnable `TuiApp` skeleton + `TuiTestDriver` coverage. This forced a
+> **repo-wide Scala 3.5.2 → 3.7.1 bump** (termflow ships only for Scala 3.7.x /
+> TASTy 28.7, unreadable by a 3.5.2 compiler); fallout was 1 stale unused import
+> + 7 positional-implicit `Codec` rewrites, whole build green. Open watch item:
+> termflow `0.4.0` is `publishLocal`-only (Central has `0.3.0`) — resolve before
+> §3.4 OSS-readiness.
 
 ### 3.3 Prompt iteration
 

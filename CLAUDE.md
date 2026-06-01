@@ -7,11 +7,14 @@ that first; everything below is Claude-Code-specific.
 
 - **Implementation contract:** [`docs/forge-design-1.5.md`](docs/forge-design-1.5.md). The 1.1, 1.2, 1.3, and 1.4 revisions are kept in-tree only as superseded stubs that point here (full prior text in git history); §-numbers are preserved, so any "v1.4 §N" reference resolves to the same §N in 1.5.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
-- **Active implementation plan:** [`docs/design-2.0.md`](docs/design-2.0.md)
-  (Slice 2.0 — Phase-2 run observability, 🟡 open 2026-05-31). The most
+- **Active implementation plan:** [`docs/design-2.1-tui.md`](docs/design-2.1-tui.md)
+  (Slice 2.1 — Phase-2 TUI, 🟡 open 2026-06-01; Task 2.1.1 — termflow
+  wiring + the Scala 3.5.2→3.7.1 bump it forced — ✅ landed). The most
   recent closed audit trail is
+  [`docs/design-2.0.md`](docs/design-2.0.md) (Slice 2.0 — run
+  observability, ✅ closed 2026-05-31); older trails are
   [`docs/design-1.4.md`](docs/design-1.4.md) (Slice 1.4 — Phase-1 MVP
-  gate, ✅ closed 2026-05-31); older trails are
+  gate, ✅ closed 2026-05-31),
   [`docs/design-2.3.md`](docs/design-2.3.md) (Slice 1.3),
   [`docs/design-2.2.md`](docs/design-2.2.md) (Slice 1.2), and
   [`docs/design-2.1.md`](docs/design-2.1.md) (Slice 1.1). See

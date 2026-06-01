@@ -788,3 +788,15 @@
 **Decision:** If a capability gap surfaces, the response is (a) wait for a CLI version, (b) explicit scope change in the doc, or (c) v1-blocking issue. Slice 0 doesn't pick whichever mode works.
 **Rejected:** Implicit triage where Slice 0 just selects the working mode.
 **In v1.1:** §16.1.
+
+---
+
+## Build & tooling
+
+### BT1. Scala 3.7.1 floor adopted for the TUI (termflow), bumped from 3.5.2
+**Decision:** Bump `ThisBuild / scalaVersion` 3.5.2 → 3.7.1 repo-wide as part of Slice 2.1 (TUI), Task 2.1.1.
+**Origin:** termflow (the §3.3-mandated TUI library) is published only for Scala 3.7.x — both `0.3.0` and `0.4.0` carry TASTy version 28.7, which a 3.5.2 compiler (reads TASTy ≤ 28.5) cannot load. There is no 3.5.x-compatible termflow build, so consuming termflow at all required the bump. Confirmed with the operator before making the repo-wide change ("ask before scope-expanding"); surfaced immediately by standing up a real `TuiApp` first ("run code earlier") rather than after a design-doc pass.
+**Rejected:** (a) pinning an older termflow — none is published for 3.5.x; (b) staying on 3.5.2 and hand-rolling a TUI — re-implements the library §3.3 already chose; (c) a separate 3.7.x sub-build for `forge-tui` only — cross-version TASTy still can't link `forge-app dependsOn forge-tui`.
+**Fallout:** main compiled clean under 3.7.1; only 1 newly-flagged unused import (`forge-app` test) + 7 positional-implicit `Codec` call sites in `forge-it` (rewritten to `(using scala.io.Codec(...))`). All 1342 unit tests green, `forge-it` compiles, scalafmt clean.
+**Watch item:** termflow `0.4.0` (the API forge is written against) is `publishLocal`-only; Maven Central carries `0.3.0`. Before §3.4 OSS-readiness, ship `0.4.0` to Central or pin a Central-published version, else a fresh clone can't resolve the build. Tracked in [`design-2.1-tui.md`](design-2.1-tui.md) §4 T1, closes at Task 2.1.8.
+**In:** `build.sbt`; reconcile the stale §3.3 dependency note into `forge-design-1.6.md` at Slice 2.1 close-out (§4 T2).
