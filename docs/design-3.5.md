@@ -125,7 +125,7 @@ shape. D3-0 proved **both** connectors restore context, so both get the seam
   cwd (satisfied by the real worktree). (3) Use absolute worktree paths in
   prompts (cheap models mis-resolve relative paths).
 
-### [ ] D3-2 — Worktree-safety classifier (forge-app / forge-git)
+### [x] D3-2 — Worktree-safety classifier (forge-git) ✅ **2026-06-01**
 
 A pure classifier over `git status` (+ branch state) →
 `Clean | DriverUncommittedOnly (safe) | UnexpectedDivergence (unsafe)`.
@@ -136,6 +136,16 @@ resume onto; anything else (committed work, operator edits, detached state)
 stays NHI.
 
 - *Deliverable:* unit tests with `FakeGitClient` across the cases.
+- *Landed:* `io.forge.git.worktree.{WorktreeSafety, WorktreeSafetyClassifier}`
+  (forge-git, not forge-app — the classification is a git-domain query over
+  `GitClient`; D3-3 in forge-app supplies the policy of what to do with the
+  verdict). `classify` is pure and table-tested; `classifyWorktree` gathers
+  the three reads (`status` / `currentBranch` / `currentSha`) through a
+  `GitClient` and applies it. Conservative-by-default: branch ≠ expected,
+  HEAD ≠ expected (`Piece.baseSha`), any unmerged row, or an unresolvable
+  `currentBranch` / `currentSha` read all resolve to `UnexpectedDivergence`;
+  only a failed `status` read propagates as `Left`. `WorktreeSafetyClassifierSuite`
+  (14 cases) covers the table + the `FakeGitClient` gather path.
 
 ### [ ] D3-3 — Orchestrator resume-instead-of-respawn (forge-app)
 
@@ -247,6 +257,21 @@ is attributed cost data to tune against.
   (1)**: a resumed Codex implement/fix-up turn can edit files, so no sandbox-on-resume workaround is needed; watch items
   (2) git-repo/trust and (3) absolute-path prompting were already satisfied (the suite git-inits the workdir and uses
   absolute paths). **Next: D3-2** (worktree-safety classifier) — D3-1/D3-2 both feed D3-3.
+
+- 2026-06-01 — **D3-2 closed ✅ — worktree-safety classifier landed (forge-git, pure + unit-tested).**
+  Added `io.forge.git.worktree.{WorktreeSafety, WorktreeSafetyClassifier}`. `WorktreeSafety` is the
+  three-way verdict (`Clean` / `DriverUncommittedOnly` — both `safeToResume` — / `UnexpectedDivergence`);
+  `WorktreeSafetyClassifier.classify` is the pure decision tree over the durable expected state
+  (`expectedBranch` + `expectedHead` = the manifest's `Piece.baseSha`) and the three git reads, and
+  `classifyWorktree` gathers `status` / `currentBranch` / `currentSha` through a `GitClient` and applies it.
+  **Conservative by construction** (it carries the safety burden for default-on D3-3): a different branch,
+  detached HEAD, HEAD beyond `expectedHead` (operator/other commits), any unmerged porcelain row (`U*` / `*U`
+  / `AA` / `DD`), or an unresolvable `currentBranch`/`currentSha` read all resolve to `UnexpectedDivergence`;
+  only a failed `status` read propagates as `Left` (worktree shape genuinely unknown). Landed in **forge-git**
+  rather than forge-app — the classification is a git-domain query; forge-app's D3-3 owns the resume-vs-NHI
+  policy. `WorktreeSafetyClassifierSuite` (14 cases: pure table + `FakeGitClient` gather path) green;
+  forge-git 213 unit tests, full `sbt compile` clean. **Dead code until D3-3.** D3-1 and D3-2 now both feed
+  **D3-3** (orchestrator resume-instead-of-respawn, default-on once the classifier reports safe).
 
 - 2026-06-01 — **D3-1 seam + unit/IT harness landed; real-CLI run pending.** Added
   `Connector.resumeHeadlessDriver(sessionId, systemPromptPath, message): IO[AgentSession]` — the headless driver-side
