@@ -193,7 +193,7 @@ object OrchestratorTestKit:
 
   // --- SideEffects fake: returns the documented success events; launches return fake sessions ---
 
-  final class FakeSideEffects(designPr: PrNumber, prForPiece: PieceId => PrNumber) extends SideEffects:
+  class FakeSideEffects(designPr: PrNumber, prForPiece: PieceId => PrNumber) extends SideEffects:
     private def session(phase: SessionPhase, id: String): ActiveSession = ActiveSession(phase, FakeAgentSession(id))
 
     override def launchSpec(feature: Feature): IO[ActiveSession] = IO.pure(session(SessionPhase.Spec, "spec-1"))

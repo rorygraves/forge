@@ -109,8 +109,43 @@ final class Orchestrator(
         // AbortOrAbandon → `forge abandon`) are left for their explicit commands.
         val (feature1, drafts1) = resumeIfRunRecoverable(feature0)
         val drafts = drafts0 ++ drafts1
-        (if drafts.nonEmpty then persistTransition(feature1, drafts) else IO.unit) >> drive(feature1)
+        val recoverDrafts = if drafts.nonEmpty then persistTransition(feature1, drafts) else IO.unit
+        // Post-settle recovery (roadmap §3.5 Unit B): a piece driver that settled clean but crashed before its
+        // transition persisted is recovered by re-running the idempotent §11 side effect, NOT re-spawned. Mutually
+        // exclusive with the in-flight path above (the same tail spawn is either marked settled or not), so when
+        // `RestartRecovery` routed an in-flight session to NHI this is a no-op.
+        recoverDrafts >> postSettleRecover(feature1, rebuilt.settledButUnadvanced).flatMap(drive)
     }
+
+  /** roadmap §3.5 Unit B — the effectful post-settle recovery step. For a [[RebuildState.SettledSession]] whose driver
+    * phase maps to a recoverable piece-driver effect (`ClassifyCommitOpenPr` / `ClassifyCommitPush`), re-run that
+    * idempotent side effect and apply the synthesized event, advancing the FSM past the settle without re-spawning the
+    * driver (Unit A made `classifyCommitOpenPr` idempotent — it reuses the open PR for the branch; `classifyCommitPush`
+    * is naturally idempotent). A settled-but-unadvanced session for any other phase is impossible (the writer only
+    * marks `Implement` / `Fixup` settles), but is routed conservatively to NHI rather than falling through to the loop
+    * — which would re-spawn the driver, strictly worse than NHI.
+    *
+    * `PostSettleSynthesis.plan` is consulted only for its (state, phase)-keyed effect; the synthesized event comes from
+    * `runSettleEffect` (the real `PrOpened` with the looked-up PR number), exactly as the live settle path does. At
+    * most one settled session exists (single-driver), so `headOption` is total.
+    */
+  private[orchestrator] def postSettleRecover(
+      feature: Feature,
+      settled: Vector[RebuildState.SettledSession]
+  ): IO[Feature] =
+    settled.headOption match
+      case None => IO.pure(feature)
+      case Some(s) =>
+        PostSettleSynthesis.plan(feature.state, MonitorOutcome.Settled(s.phase, SettleOutcome.Clean)).effect match
+          case eff @ (SettleEffect.ClassifyCommitOpenPr | SettleEffect.ClassifyCommitPush) =>
+            runSettleEffect(feature, eff).flatMap(applyAndPersist(feature, _))
+          case _ =>
+            applyAndPersist(
+              feature,
+              FsmEvent.HarnessError(
+                s"post-settle recovery: unexpected settled-but-unadvanced ${s.phase} session in ${feature.state}"
+              )
+            )
 
   /** §15: `forge run` resumes the NHI hints whose [[io.forge.app.command.TerminalReport.recovery]] names `forge run` as
     * the recovery (the others have explicit `forge resume --flag` / `forge spec` / `forge abandon` paths). Applied once
@@ -538,6 +573,36 @@ final class Orchestrator(
       )
     )
 
+  /** roadmap §3.5 Unit B — append the `monitor.outcome` marker for a piece-driver post-settle effect
+    * (`ClassifyCommitOpenPr` / `ClassifyCommitPush`), the discriminator the cold rebuild uses (`RebuildState`'s
+    * `settledButUnadvanced` vs `inFlightSessions`) to route the post-settle crash window to recovery rather than NHI or
+    * a silent driver re-spawn. A no-op for every other effect — the design-phase settles keep the conservative
+    * in-flight → NHI behaviour, so no marker must exist for them (a marker without recovery would re-spawn the design
+    * driver, strictly worse than NHI).
+    */
+  private def recordSettleMarker(feature: Feature, report: MonitorReport, eff: SettleEffect): IO[Unit] =
+    eff match
+      case SettleEffect.ClassifyCommitOpenPr | SettleEffect.ClassifyCommitPush =>
+        log.append(feature.id, monitorOutcomeDraft(feature, report)).void
+      case _ => IO.unit
+
+  /** The §19 `monitor.outcome` audit marker (a no-op `Replay` projection; consumed only by `RebuildState`'s log-tail
+    * settle detection). `piece` matches the spawn it closes so the projections' same-piece-key check lines up.
+    */
+  private def monitorOutcomeDraft(feature: Feature, report: MonitorReport): ActionDraft =
+    ActionDraft(
+      feature.id,
+      pieceOf(feature.state),
+      actor = Some("driver"),
+      role = Some(roleOf(report.phase)),
+      kind = RebuildState.MonitorOutcomeKind,
+      payload = ujson.Obj(
+        "kind" -> ujson.Str("settled"),
+        "phase" -> ujson.Str(report.phase.toString),
+        "settle" -> ujson.Str("clean")
+      )
+    )
+
   private def protectionUnauthorizedDraft(feature: Feature, piece: PieceId, pr: PrNumber): ActionDraft =
     ActionDraft(
       feature.id,
@@ -644,8 +709,15 @@ final class Orchestrator(
                 )
               else persistTransition(cand, auditDrafts ++ drafts).as(cand)
             case eff =>
-              // Driver settled clean: run the §11 side effect FIRST, then apply the synthesized event.
-              runSettleEffect(feature, eff).flatMap(applyAndPersist(feature, _, auditDrafts))
+              // Driver settled clean: run the §11 side effect FIRST, then apply the synthesized event. For the
+              // post-settle-recoverable piece-driver effects, first durably record a `monitor.outcome` marker (roadmap
+              // §3.5 Unit B): a crash anywhere between this settle and the transition persist then routes the cold
+              // rebuild to `RebuildState.settledButUnadvanced` (re-run the idempotent side effect — `run`'s
+              // `postSettleRecover`) instead of re-spawning the driver from scratch (the D3 exploration cost) or
+              // emitting an unactionable NHI. The marker is written as its own append, before the effect, so it is on
+              // disk for the whole window.
+              recordSettleMarker(feature, report, eff) >>
+                runSettleEffect(feature, eff).flatMap(applyAndPersist(feature, _, auditDrafts))
         }
 
       case RaceResult.FromWatcher(event) => applyAndPersist(feature, event)

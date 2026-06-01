@@ -5,20 +5,19 @@ import io.forge.core.fsm.{Feature, Fsm, FsmEvent, FsmFixtures, FsmState, Session
 import io.forge.core.fsm.FsmFixtures.*
 import io.forge.core.log.Action
 
-/** Slice 1.4b Task 1.4.10 / carry-forward **S4-4** — pins the pure [[RebuildState.inFlightSessions]] projection that
-  * the orchestrator's restart recovery consumes.
+/** Slice 1.4b Task 1.4.10 / carry-forward **S4-4** — pins the pure [[RebuildState.inFlightSessions]] /
+  * [[RebuildState.settledButUnadvanced]] projections that the orchestrator's restart + post-settle recovery consume.
   *
-  * The projection answers a single question against a replayed log + the post-reconcile feature: "is a driver session
-  * still in flight at the log tail?" A `<actor>.spawn` / `<actor>.resume` for the current state's driver phase that is
-  * NOT followed by a [[RebuildState.MonitorOutcomeKind]] marker (same piece key) is in flight; a spawn whose monitor
-  * outcome IS logged (the post-settle crash window — e.g. `Settled(Implement, Clean)` is an FSM no-op until `PrOpened`)
-  * is not.
+  * The projections answer a single question against a replayed log + the post-reconcile feature: "what is the driver
+  * session at the log tail doing?" A `<actor>.spawn` / `<actor>.resume` for the current state's driver phase that is
+  * NOT followed by a [[RebuildState.MonitorOutcomeKind]] marker (same piece key) is **in flight** → NHI; a spawn whose
+  * monitor outcome IS logged (the post-settle crash window — e.g. `Settled(Implement, Clean)` is an FSM no-op until
+  * `PrOpened`) is **settled-but-unadvanced** → post-settle recovery. The two are mutually exclusive over the same tail
+  * spawn.
   *
-  * NB (roadmap §3.5 / D3): '''no production code currently writes `monitor.outcome`''', so in a real run every logged
-  * driver spawn in a live-driver state is treated as in-flight → `NeedsHumanIntervention` (the conservative "no
-  * transparent resume" behaviour). The `monitor.outcome`-present cases below exercise the dormant `settledAfter` branch
-  * with a '''synthetic''' marker so the D3 post-settle / respawn-avoidance work can wire the writer against a pinned
-  * projection — they do not assert a behaviour the orchestrator exhibits today.
+  * roadmap §3.5 Unit B: the orchestrator now writes `monitor.outcome` for the piece-driver settles (`Implement` /
+  * `Fixup`), so the `settledButUnadvanced` cases below are the projection the live post-settle recovery consumes; the
+  * design-phase settles do not write the marker, so those tail spawns stay in-flight → NHI by construction.
   */
 class RebuildStateInFlightSuite extends munit.FunSuite:
 
@@ -108,34 +107,91 @@ class RebuildStateInFlightSuite extends munit.FunSuite:
       Vector(RebuildState.InFlightSession(SessionPhase.DesignRevision, "rev-new", None))
     )
 
-  // --- settle marker present → not in flight (post-settle crash window) ---
+  // --- settle marker present → not in flight, but settled-but-unadvanced (post-settle crash window) ---
 
-  test(
-    "PieceImplementing + spawn + monitor outcome → empty (dormant settledAfter branch; synthetic marker — see docstring)"
-  ):
+  test("PieceImplementing + spawn + monitor outcome → not in-flight, settled-but-unadvanced (Implement)"):
     val log = Vector(spawnAction(5, "claude", "impl-sess", Some(P1)), monitorOutcome(6, Some(P1)))
-    assertEquals(RebuildState.inFlightSessions(log, feature(FsmState.PieceImplementing(P1))), Vector.empty)
+    val state = FsmState.PieceImplementing(P1)
+    assertEquals(RebuildState.inFlightSessions(log, feature(state)), Vector.empty)
+    assertEquals(
+      RebuildState.settledButUnadvanced(log, feature(state)),
+      Vector(RebuildState.SettledSession(SessionPhase.Implement, "impl-sess", Some(P1)))
+    )
+
+  test("PieceFixingUp + spawn + monitor outcome → settled-but-unadvanced (Fixup)"):
+    val log = Vector(spawnAction(5, "claude", "fix-sess", Some(P1)), monitorOutcome(6, Some(P1)))
+    val state = FsmState.PieceFixingUp(P1, P1Pr, attempt = 1)
+    assertEquals(RebuildState.inFlightSessions(log, feature(state)), Vector.empty)
+    assertEquals(
+      RebuildState.settledButUnadvanced(log, feature(state)),
+      Vector(RebuildState.SettledSession(SessionPhase.Fixup, "fix-sess", Some(P1)))
+    )
 
   test("monitor outcome for a different piece does not close this piece's spawn"):
     val log = Vector(spawnAction(5, "claude", "impl-sess", Some(P1)), monitorOutcome(6, Some(P2)))
+    val state = FsmState.PieceImplementing(P1)
     assertEquals(
-      RebuildState.inFlightSessions(log, feature(FsmState.PieceImplementing(P1))),
+      RebuildState.inFlightSessions(log, feature(state)),
       Vector(RebuildState.InFlightSession(SessionPhase.Implement, "impl-sess", Some(P1)))
     )
+    assertEquals(RebuildState.settledButUnadvanced(log, feature(state)), Vector.empty)
 
-  test("the last spawn wins — a re-spawn after a settled session is the in-flight one"):
+  test("the last spawn wins — a re-spawn after a settled session is the in-flight one (not settled)"):
     val log = Vector(
       spawnAction(5, "claude", "impl-sess-1", Some(P1)),
       monitorOutcome(6, Some(P1)),
       spawnAction(7, "claude", "impl-sess-2", Some(P1))
     )
+    val state = FsmState.PieceImplementing(P1)
     assertEquals(
-      RebuildState.inFlightSessions(log, feature(FsmState.PieceImplementing(P1))),
+      RebuildState.inFlightSessions(log, feature(state)),
       Vector(RebuildState.InFlightSession(SessionPhase.Implement, "impl-sess-2", Some(P1)))
     )
+    assertEquals(RebuildState.settledButUnadvanced(log, feature(state)), Vector.empty)
 
-  test("driver state but no spawn ever logged → empty (state-entry spawn not yet reached)"):
+  test("a re-spawn whose own settle is logged → settled-but-unadvanced on the second session"):
+    val log = Vector(
+      spawnAction(5, "claude", "impl-sess-1", Some(P1)),
+      monitorOutcome(6, Some(P1)),
+      spawnAction(7, "claude", "impl-sess-2", Some(P1)),
+      monitorOutcome(8, Some(P1))
+    )
+    val state = FsmState.PieceImplementing(P1)
+    assertEquals(RebuildState.inFlightSessions(log, feature(state)), Vector.empty)
+    assertEquals(
+      RebuildState.settledButUnadvanced(log, feature(state)),
+      Vector(RebuildState.SettledSession(SessionPhase.Implement, "impl-sess-2", Some(P1)))
+    )
+
+  test("non-driver / no-spawn states carry neither projection"):
+    // a settled marker under a non-driver state (the happy path: state advanced past the settle) projects nothing.
+    val advanced = Vector(spawnAction(5, "claude", "impl-sess", Some(P1)), monitorOutcome(6, Some(P1)))
+    assertEquals(RebuildState.settledButUnadvanced(advanced, feature(FsmState.PieceAwaitingCi(P1, P1Pr))), Vector.empty)
+    assertEquals(RebuildState.settledButUnadvanced(Vector.empty, feature(FsmState.PieceImplementing(P1))), Vector.empty)
     assertEquals(RebuildState.inFlightSessions(Vector.empty, feature(FsmState.PieceImplementing(P1))), Vector.empty)
+
+  // roadmap §3.5 Unit B — producer→consumer link. Feed the *actual* orchestrator-emitted spawn draft (kind
+  // "driver.spawn") plus the orchestrator's `monitor.outcome` marker shape so a future change to either draft's
+  // kind/piece that broke post-settle recovery is caught here, not only by the synthetic-action tests above.
+  test("§3.5: an FSM-emitted spawn followed by a monitor.outcome marker → settled-but-unadvanced"):
+    val seed = feature(FsmState.PieceImplementing(P1))
+    val (_, spawnDrafts) =
+      Fsm.transition(seed, FsmEvent.SessionSpawned("driver", "implement", "impl-sess", piece = Some(P1)))
+    val marker = io.forge.core.log.ActionDraft(
+      feature = FeatureA,
+      piece = Some(P1),
+      actor = Some("driver"),
+      role = Some("implement"),
+      kind = RebuildState.MonitorOutcomeKind,
+      payload =
+        ujson.Obj("kind" -> ujson.Str("settled"), "phase" -> ujson.Str("Implement"), "settle" -> ujson.Str("clean"))
+    )
+    val log = (spawnDrafts :+ marker).zipWithIndex.map { case (d, i) => d.stamp(seq = i.toLong, at = at(i)) }
+    assertEquals(RebuildState.inFlightSessions(log, seed), Vector.empty)
+    assertEquals(
+      RebuildState.settledButUnadvanced(log, seed),
+      Vector(RebuildState.SettledSession(SessionPhase.Implement, "impl-sess", Some(P1)))
+    )
 
   // roadmap §3.5 — producer→consumer link. The FSM now emits the piece `<actor>.spawn` draft (previously absent, so
   // mid-implement crashes silently re-spawned the driver instead of routing to NHI). Feed the *actual* FSM-emitted

@@ -64,8 +64,11 @@ object RebuildState:
                     // state and so carries no in-flight session). The recovery drafts appended above are audit/merge
                     // markers, never spawn/settle, so they never affect this projection.
                     val inFlight = inFlightSessions(actions, reconciled.feature)
+                    val settled = settledButUnadvanced(actions, reconciled.feature)
                     appendIfNeeded *>
-                      cache.save(featureId, reconciled.feature).as(Right(RebuildResult(reconciled.feature, inFlight)))
+                      cache
+                        .save(featureId, reconciled.feature)
+                        .as(Right(RebuildResult(reconciled.feature, inFlight, settled)))
           }
     }
 
@@ -83,27 +86,51 @@ object RebuildState:
       piece: Option[PieceId] // None for design phases; Some(p) for implement / fix-up
   )
 
-  /** Widened result of [[run]] (Slice 1.2 returned only `Feature`; Slice 1.4b Task 1.4.10 / carry-forward **S4-4** adds
-    * the in-flight projection the orchestrator needs for restart recovery). The canonical `Feature` shape is unchanged
-    * — `inFlightSessions` is a log-tail bookkeeping projection, not a `Feature` field.
-    */
-  final case class RebuildResult(feature: Feature, inFlightSessions: Vector[InFlightSession])
-
-  /** Log kind that would mark a settled `SessionMonitor` `MonitorOutcome` (settled / settle timeout / turn-budget /
-    * budget breach), tagged with the same `piece` as the spawn it closes, so [[inFlightSessions]] could distinguish
-    * "driver still running" (spawn with no following marker → in-flight) from "driver settled, crashed in the
-    * post-settle window" (spawn + marker, FSM state unchanged because e.g. `Settled(Implement, Clean)` is an FSM no-op
-    * until `PrOpened`).
+  /** A driver session the action log shows as **settled but unadvanced** at the tail — a `<actor>.spawn` / `.resume`
+    * for the current state's driver phase that *is* followed by a [[MonitorOutcomeKind]] marker (same piece key), yet
+    * the FSM state has not moved past the settle. This is the §11.5 **post-settle crash window**: the driver settled
+    * clean, the orchestrator durably recorded `monitor.outcome`, but the process died before the post-settle side
+    * effect + transition persisted (e.g. `Settled(Implement, Clean)` is an FSM no-op until `PrOpened` — see roadmap
+    * §3.5 D3 / Unit B).
     *
-    * '''Currently no code writes this kind''' (roadmap §3.5 / D3). With the spawn drafts now produced (§3.5 piece /
-    * resume durability), the deliberate consequence is that '''every''' logged driver spawn in a live-driver state on a
-    * cold rebuild is treated as in-flight → `NeedsHumanIntervention`, including the narrow post-settle window. That is
-    * the conservative "no transparent resume" behaviour (a post-settle restart cannot synthesise the not-yet-persisted
-    * `PrOpened` from state alone; re-entering the loop would silently re-spawn the driver — the re-exploration cost D3
-    * is chartered to avoid). The [[MonitorOutcomeKind]] / `settledAfter` branch below is therefore dormant
-    * infrastructure: it is exercised by `RebuildStateInFlightSuite` with a synthetic marker and stays here so the D3
-    * post-settle / respawn-avoidance work can wire the writer without re-deriving the projection. It remains a no-op at
-    * the [[Replay]] layer (an unknown kind).
+    * Unlike an [[InFlightSession]] (no marker → route to `NeedsHumanIntervention`, the "no transparent resume" stance),
+    * a settled-but-unadvanced session is **recovered** by `Orchestrator.run` re-running the *idempotent* post-settle
+    * side effect (commit + push + reuse-or-open the piece PR), advancing the FSM without re-spawning the driver and
+    * re-paying its exploration cost. The orchestrator's `monitor.outcome` writer only emits the marker for the
+    * piece-driver settles (`Implement` / `Fixup`), so in practice this only ever carries those two phases; the
+    * orchestrator routes any other phase conservatively to NHI.
+    */
+  final case class SettledSession(
+      phase: SessionPhase, // Implement | Fixup in practice (the only phases whose settle writes monitor.outcome)
+      sessionId: String, //   the spawn/resume id from the log tail
+      piece: Option[PieceId] // None for design phases; Some(p) for implement / fix-up
+  )
+
+  /** Widened result of [[run]] (Slice 1.2 returned only `Feature`; Slice 1.4b Task 1.4.10 / carry-forward **S4-4** adds
+    * the in-flight projection the orchestrator needs for restart recovery; roadmap §3.5 Unit B adds the
+    * settled-but-unadvanced projection the orchestrator needs for post-settle recovery). The canonical `Feature` shape
+    * is unchanged — both projections are log-tail bookkeeping, not `Feature` fields. The two are mutually exclusive:
+    * the same log-tail driver spawn is either followed by a `monitor.outcome` marker (settled-but-unadvanced) or it is
+    * not (in-flight).
+    */
+  final case class RebuildResult(
+      feature: Feature,
+      inFlightSessions: Vector[InFlightSession],
+      settledButUnadvanced: Vector[SettledSession]
+  )
+
+  /** Log kind marking a settled `SessionMonitor` `MonitorOutcome`, tagged with the same `piece` as the spawn it closes,
+    * so [[inFlightSessions]] / [[settledButUnadvanced]] can distinguish "driver still running" (spawn with no following
+    * marker → in-flight → NHI) from "driver settled, crashed in the post-settle window" (spawn + marker, FSM state
+    * unchanged because e.g. `Settled(Implement, Clean)` is an FSM no-op until `PrOpened`).
+    *
+    * '''Written by the orchestrator''' for the piece-driver settles only (`Implement` → `classifyCommitOpenPr`, `Fixup`
+    * → `classifyCommitPush`; roadmap §3.5 Unit B). The marker is appended *before* the post-settle side effect runs, so
+    * a crash anywhere in the window between the settle and the transition persist leaves it on disk, and the cold
+    * rebuild routes the piece to [[settledButUnadvanced]] (post-settle recovery) rather than [[InFlightSession]] (NHI)
+    * or a silent driver re-spawn. The design-phase settles (`Spec` / `DesignRevision`) deliberately do **not** write
+    * the marker — their post-settle crash keeps the conservative in-flight → NHI behaviour. It is a no-op at the
+    * [[Replay]] layer (an unknown `kind`).
     */
   val MonitorOutcomeKind: String = "monitor.outcome"
 
@@ -125,21 +152,43 @@ object RebuildState:
     * action with the same piece key follows it (by `seq`).
     */
   def inFlightSessions(actions: Vector[Action], feature: Feature): Vector[InFlightSession] =
-    driverKeyFor(feature.state) match
-      case None => Vector.empty
-      case Some((phase, pieceKey)) =>
-        val spawns = actions.filter(a => isSpawnOrResumeKind(a.kind) && a.piece == pieceKey)
-        spawns.lastOption match
-          case None => Vector.empty
-          case Some(spawn) =>
-            val settledAfter = actions.exists { a =>
-              a.seq > spawn.seq && a.kind == MonitorOutcomeKind && a.piece == pieceKey
-            }
-            if settledAfter then Vector.empty
-            else
-              sessionIdOf(spawn) match
-                case None => Vector.empty
-                case Some(sid) => Vector(InFlightSession(phase, sid, pieceKey))
+    lastDriverSpawn(actions, feature) match
+      case Some(d) if !d.settledAfter => d.sessionId.map(InFlightSession(d.phase, _, d.piece)).toVector
+      case _ => Vector.empty
+
+  /** Pure projection of the driver session (if any) the log shows **settled but unadvanced** at its tail — the
+    * complement of [[inFlightSessions]]: same last driver spawn, but a [[MonitorOutcomeKind]] marker (same piece key)
+    * *does* follow it while the FSM state is still that driver's state. This is the §11.5 post-settle crash window the
+    * orchestrator recovers by re-running the idempotent post-settle side effect (roadmap §3.5 Unit B). See
+    * [[SettledSession]] for the recovery contract. Returns at most one element for the same single-driver reason as
+    * [[inFlightSessions]].
+    */
+  def settledButUnadvanced(actions: Vector[Action], feature: Feature): Vector[SettledSession] =
+    lastDriverSpawn(actions, feature) match
+      case Some(d) if d.settledAfter => d.sessionId.map(SettledSession(d.phase, _, d.piece)).toVector
+      case _ => Vector.empty
+
+  /** The shared decision both projections consult: the current state's driver key (or `None` for a non-driver state),
+    * its last matching spawn/resume, that spawn's session id, and whether a [[MonitorOutcomeKind]] marker follows it.
+    * Keeping the spawn-matching + settle-detection in one place means the two projections can never disagree on which
+    * spawn is "the" tail session (the bug a duplicated filter would invite).
+    */
+  private final case class LastDriverSpawn(
+      phase: SessionPhase,
+      piece: Option[PieceId],
+      sessionId: Option[String],
+      settledAfter: Boolean
+  )
+
+  private def lastDriverSpawn(actions: Vector[Action], feature: Feature): Option[LastDriverSpawn] =
+    driverKeyFor(feature.state).flatMap { case (phase, pieceKey) =>
+      actions.filter(a => isSpawnOrResumeKind(a.kind) && a.piece == pieceKey).lastOption.map { spawn =>
+        val settledAfter = actions.exists { a =>
+          a.seq > spawn.seq && a.kind == MonitorOutcomeKind && a.piece == pieceKey
+        }
+        LastDriverSpawn(phase, pieceKey, sessionIdOf(spawn), settledAfter)
+      }
+    }
 
   /** The `(SessionPhase, piece)` driver key for a state, or `None` if the state has no live driver session. */
   private def driverKeyFor(state: FsmState): Option[(SessionPhase, Option[PieceId])] =

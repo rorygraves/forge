@@ -210,7 +210,7 @@ class ReadOnlyHandlerSuite extends munit.FunSuite:
 
   test("renderSuccess names the prior corruption when a corruptDetail is supplied (O4)") {
     val feature = Feature.initial(featureId, manifest()).copy(state = FsmState.Drafting)
-    val result = RebuildState.RebuildResult(feature, Vector.empty)
+    val result = RebuildState.RebuildResult(feature, Vector.empty, Vector.empty)
     val text = RebuildStateCommand.renderSuccess(featureId, result, Some("JsonReadException: expected key"))
     assert(text.contains("cache was corrupt"), text)
     assert(text.contains("JsonReadException"), text)
@@ -221,11 +221,25 @@ class ReadOnlyHandlerSuite extends munit.FunSuite:
     val feature = Feature.initial(featureId, manifest()).copy(state = FsmState.PieceImplementing(PieceId("p1")))
     val result = RebuildState.RebuildResult(
       feature,
-      Vector(RebuildState.InFlightSession(io.forge.core.fsm.SessionPhase.Implement, "sess-1", Some(PieceId("p1"))))
+      Vector(RebuildState.InFlightSession(io.forge.core.fsm.SessionPhase.Implement, "sess-1", Some(PieceId("p1")))),
+      Vector.empty
     )
     val text = RebuildStateCommand.renderSuccess(featureId, result)
     assert(text.contains("interrupted driver session"), text)
     assert(text.contains("sess-1"), text)
+  }
+
+  test("renderSuccess surfaces settled-but-unadvanced sessions (post-settle recovery, §3.5 Unit B)") {
+    val feature = Feature.initial(featureId, manifest()).copy(state = FsmState.PieceImplementing(PieceId("p1")))
+    val result = RebuildState.RebuildResult(
+      feature,
+      Vector.empty,
+      Vector(RebuildState.SettledSession(io.forge.core.fsm.SessionPhase.Implement, "sess-2", Some(PieceId("p1"))))
+    )
+    val text = RebuildStateCommand.renderSuccess(featureId, result)
+    assert(text.contains("settled-but-unadvanced"), text)
+    assert(text.contains("advance without re-spawning"), text)
+    assert(text.contains("sess-2"), text)
   }
 
   test("renderError maps each RebuildError variant to an operator message") {

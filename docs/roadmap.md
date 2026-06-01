@@ -507,17 +507,17 @@ out-scoped the observability slice (full dispositions in
   `RestartRecovery`'s deliberate "no transparent resume" stance. **Watch item:**
   until it lands, each resume from an implement/fix-up NHI re-pays the driver's
   full exploration; the per-turn cost cap bounds the blast radius.
-  **Includes the `monitor.outcome` writer** (surfaced by the §3.5 piece-spawn
+  **Included the `monitor.outcome` writer** (surfaced by the §3.5 piece-spawn
   durability review, 2026-05-31): `RebuildState.MonitorOutcomeKind` /
-  `inFlightSessions`'s `settledAfter` branch is dormant infrastructure — *no code
-  writes `monitor.outcome`*, so with piece spawns now logged, a cold rebuild in the
+  `inFlightSessions`'s `settledAfter` branch was dormant infrastructure — *no code
+  wrote `monitor.outcome`*, so with piece spawns now logged, a cold rebuild in the
   narrow post-settle window (driver settled clean, crashed before the next
-  transition persists) routes to NHI like any other in-flight spawn. That is the
-  correct conservative behaviour for now (a post-settle restart cannot synthesise
-  the not-yet-persisted `PrOpened` from state alone; the only "recovery" would be a
-  silent driver re-spawn — exactly this item's cost). Wiring the writer so the
-  post-settle window recovers belongs with this respawn-avoidance work; the
-  projection is already pinned by `RebuildStateInFlightSuite` (synthetic marker).
+  transition persists) routed to NHI like any other in-flight spawn — the correct
+  conservative behaviour *until* a recovery existed (a post-settle restart cannot
+  synthesise the not-yet-persisted `PrOpened` from state alone; the only other
+  "recovery" would be a silent driver re-spawn — exactly this item's cost). **Unit
+  B (below) wired the writer + recovery**, so the post-settle window now advances
+  via the idempotent side effect instead of routing to NHI.
   - **Unit A landed 2026-06-01 (idempotency only; box stays open).** Scoping this
     item surfaced that **the driver never commits** — implement/fix-up prompts say
     "Do not commit — Forge will commit after you settle" — so "already-committed
@@ -533,13 +533,33 @@ out-scoped the observability slice (full dispositions in
     `CommitResult.NothingToCommit`, and `git push` is naturally idempotent, so this
     closed the last gap; `classifyCommitPush` needed no change.) `RealGhClient` +
     both `FakeGhClient`s updated; `RealSideEffectsSuite` + `FakeGhClientSuite`
-    extended. **Still open (the rest of this bullet):** *Unit B* — the
-    `monitor.outcome` writer + a "settled-but-unadvanced" rebuild projection + an
-    effectful post-settle recovery step in `Orchestrator.run` (must land
-    atomically — writing the marker without the recovery is strictly worse than
-    today's NHI); and the **D3 large half** — driver-CLI `--resume` for the
-    *mid-exploration* (uncommitted) cost, which still re-pays exploration on every
-    resume (the watch item above stands).
+    extended.
+  - **Unit B landed 2026-06-01 (post-settle window now recovers; box stays open
+    for the D3 large half).** The three pieces landed atomically: (1) the
+    `monitor.outcome` **writer** — `Orchestrator.handleWinner` appends the
+    piece-keyed marker *before* running the recoverable piece-driver post-settle
+    effect (`ClassifyCommitOpenPr` / `ClassifyCommitPush`), and *only* for those
+    (the design-phase settles keep the conservative in-flight → NHI behaviour, so
+    no marker exists for them — a marker without recovery would silently re-spawn
+    the design driver, strictly worse than NHI); (2) the **`settledButUnadvanced`
+    projection** on `RebuildState` (complement of `inFlightSessions` over the same
+    tail spawn — marker present + state still the driver's → settled-but-unadvanced;
+    widened `RebuildResult` with the field; both projections now share one
+    `lastDriverSpawn` decision so they can't disagree); (3) the **effectful
+    post-settle recovery step** `Orchestrator.postSettleRecover`, run in
+    `Orchestrator.run` after restart recovery, which re-runs the *idempotent*
+    (Unit A) side effect and applies the synthesized event — advancing the FSM past
+    the settle **without re-spawning the driver**. Coverage:
+    `RebuildStateInFlightSuite` +7 (the projection + mutual-exclusivity + an
+    FSM-emitted producer→consumer link), `OrchestratorPostSettleRecoverySuite` (the
+    writer scoping + a crash-after-marker e2e that reaches `FeatureDone` with the
+    implement driver launched exactly once — the empty pass-2 monitor would raise on
+    any stray re-spawn), `ReadOnlyHandlerSuite` +1 (the rebuild-state report line).
+    `forge-core` 402, `forge-app` 364 (full unit suite green); `forge-it` compiles.
+    **Still open (the rest of this bullet):** the **D3 large half** — driver-CLI
+    `--resume` for the *mid-exploration* (uncommitted) cost, which still re-pays
+    exploration on every resume (the watch item above stands; Unit B only recovers
+    the *post-settle* window, where the driver had already finished exploring).
 - [x] **`designSessionId` durability** (Task 1.4.16 **gap #7**). ✅ **Fixed
   2026-05-31** during the Slice 2.0 live re-validation, which reproduced it: a
   `forge run` started after `forge spec` dead-ended at

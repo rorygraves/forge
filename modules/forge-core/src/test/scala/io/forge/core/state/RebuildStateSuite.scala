@@ -231,7 +231,7 @@ class RebuildStateSuite extends munit.FunSuite:
 
     val result = RebuildState.run(FeatureA, paths, manifestStore, log, cache).unsafeRunSync()
     result match
-      case Right(RebuildState.RebuildResult(f, inFlight)) =>
+      case Right(RebuildState.RebuildResult(f, inFlight, _)) =>
         assertEquals(f, Feature.initial(FeatureA, manifest))
         assertEquals(inFlight, Vector.empty) // Drafting carries no driver session
       case Left(err) => fail(s"expected Right, got Left($err)")
@@ -265,7 +265,7 @@ class RebuildStateSuite extends munit.FunSuite:
 
     val result = RebuildState.run(FeatureA, paths, manifestStore, log, cache).unsafeRunSync()
     result match
-      case Right(RebuildState.RebuildResult(f, inFlight)) =>
+      case Right(RebuildState.RebuildResult(f, inFlight, _)) =>
         f.state match
           case FsmState.Refining(p, pr, _) =>
             assertEquals(p, P1)

@@ -111,7 +111,7 @@ class OrchestratorAtomicMergeSuite extends munit.FunSuite:
       yield (out, tail)).unsafeRunSync()
 
       rebuilt match
-        case Right(RebuildState.RebuildResult(f, inFlight)) =>
+        case Right(RebuildState.RebuildResult(f, inFlight, _)) =>
           f.state match
             case FsmState.Refining(p, pr, _) =>
               assertEquals(p, p1)

@@ -55,15 +55,31 @@ object RebuildStateCommand:
       case None => "rebuilt state cache"
     val base =
       s"forge rebuild-state ${id.value}: $verb — state is ${StatusReport.stateLabel(result.feature.state)}."
-    if result.inFlightSessions.isEmpty then base
-    else
-      val sessions = result.inFlightSessions
-        .map(s => s"    - ${s.phase}${s.piece.map(p => s" (piece ${p.value})").getOrElse("")} session ${s.sessionId}")
-        .mkString("\n")
-      s"""$base
-         |  ${result.inFlightSessions.size} interrupted driver session(s) detected (a prior run died mid-session):
-         |$sessions
-         |  Re-run `forge run ${id.value}`; it will surface these as needs-human-intervention with a resume hint.""".stripMargin
+    val inFlightNote =
+      if result.inFlightSessions.isEmpty then None
+      else
+        val sessions = result.inFlightSessions
+          .map(s => s"    - ${s.phase}${s.piece.map(p => s" (piece ${p.value})").getOrElse("")} session ${s.sessionId}")
+          .mkString("\n")
+        Some(
+          s"""  ${result.inFlightSessions.size} interrupted driver session(s) detected (a prior run died mid-session):
+             |$sessions
+             |  Re-run `forge run ${id.value}`; it will surface these as needs-human-intervention with a resume hint.""".stripMargin
+        )
+    // roadmap §3.5 Unit B — a driver that settled clean but crashed before its transition persisted is recovered
+    // automatically on the next `forge run` (re-runs the idempotent commit/push/open-PR), not surfaced as NHI.
+    val settledNote =
+      if result.settledButUnadvanced.isEmpty then None
+      else
+        val sessions = result.settledButUnadvanced
+          .map(s => s"    - ${s.phase}${s.piece.map(p => s" (piece ${p.value})").getOrElse("")} session ${s.sessionId}")
+          .mkString("\n")
+        Some(
+          s"""  ${result.settledButUnadvanced.size} settled-but-unadvanced driver session(s) detected (post-settle crash):
+             |$sessions
+             |  Re-run `forge run ${id.value}`; it will re-run the post-settle step and advance without re-spawning.""".stripMargin
+        )
+    (Vector(base) ++ inFlightNote ++ settledNote).mkString("\n")
 
   private[command] def renderError(id: FeatureId, err: RebuildError): String = err match
     case RebuildError.ManifestLoadFailed(_, cause) =>
