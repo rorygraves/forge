@@ -5,16 +5,15 @@ import io.forge.core.cost.CostTotals
 import io.forge.core.fsm.*
 import io.forge.core.fsm.FsmFixtures.*
 
-import java.time.Instant
 import upickle.default.writeJs
 
 /** PR-D D4 — replay onto an initial `Feature` projects state, session ids, cost totals, observed transitions, and
   * observed piece merges per §6.1 / §19. Negative paths surface `ReplayError`.
+  *
+  * The base instant + `at`, and the `<actor>.spawn` / `<actor>.resume` `Action` builders, are shared from
+  * [[FsmFixtures]] so the §19 spawn/resume payload schema has a single definition (roadmap §3.5).
   */
 class FeatureFoldEventsSuite extends munit.FunSuite:
-
-  private val ts0 = Instant.parse("2026-05-26T12:00:00Z")
-  private def at(n: Int): Instant = ts0.plusSeconds(n.toLong)
 
   // --- fsm.transition projection ---
 
@@ -139,42 +138,7 @@ class FeatureFoldEventsSuite extends munit.FunSuite:
     )
     assertEquals(result.observedTransitions.head.to, refining: FsmState)
 
-  // --- session-id projection ---
-
-  private def spawnAction(
-      seq: Long,
-      actor: String,
-      sessionId: String,
-      piece: Option[PieceId]
-  ): Action =
-    Action(
-      seq = seq,
-      at = at(seq.toInt),
-      feature = FeatureA,
-      piece = piece,
-      actor = Some(actor),
-      role = Some("driver"),
-      kind = s"$actor.spawn",
-      payload = ujson.Obj("sessionId" -> ujson.Str(sessionId), "role" -> ujson.Str("driver"))
-    )
-
-  private def resumeAction(
-      seq: Long,
-      actor: String,
-      oldSid: String,
-      newSid: String,
-      piece: Option[PieceId]
-  ): Action =
-    Action(
-      seq = seq,
-      at = at(seq.toInt),
-      feature = FeatureA,
-      piece = piece,
-      actor = Some(actor),
-      role = Some("driver"),
-      kind = s"$actor.resume",
-      payload = ujson.Obj("oldSessionId" -> ujson.Str(oldSid), "newSessionId" -> ujson.Str(newSid))
-    )
+  // --- session-id projection (spawnAction / resumeAction shared from FsmFixtures) ---
 
   test("foldEvents — claude.spawn with piece=None projects designSessionId"):
     val seed = Feature.initial(FeatureA, FsmFixtures.manifest(Vector(piecePending(P1, 1))))

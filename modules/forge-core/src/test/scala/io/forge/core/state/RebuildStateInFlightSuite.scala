@@ -5,8 +5,6 @@ import io.forge.core.fsm.{Feature, Fsm, FsmEvent, FsmFixtures, FsmState, Session
 import io.forge.core.fsm.FsmFixtures.*
 import io.forge.core.log.Action
 
-import java.time.Instant
-
 /** Slice 1.4b Task 1.4.10 / carry-forward **S4-4** — pins the pure [[RebuildState.inFlightSessions]] projection that
   * the orchestrator's restart recovery consumes.
   *
@@ -24,8 +22,7 @@ import java.time.Instant
   */
 class RebuildStateInFlightSuite extends munit.FunSuite:
 
-  private val ts0 = Instant.parse("2026-05-27T09:00:00Z")
-  private def at(n: Int): Instant = ts0.plusSeconds(n.toLong)
+  // base instant + `at`, and the spawn / resume Action builders, are shared from FsmFixtures (roadmap §3.5).
 
   private def feature(state: FsmState): Feature =
     val manifest = FsmFixtures.manifest(Vector(pieceInProgress(P1, 1, prNumber = Some(P1Pr))))
@@ -48,16 +45,9 @@ class RebuildStateInFlightSuite extends munit.FunSuite:
       payload = payload
     )
 
-  private def spawn(seq: Long, piece: Option[PieceId], sid: String): Action =
-    action(seq, "claude.spawn", piece, ujson.Obj("sessionId" -> ujson.Str(sid), "role" -> ujson.Str("driver")))
-
-  private def resume(seq: Long, piece: Option[PieceId], oldSid: String, newSid: String): Action =
-    action(
-      seq,
-      "claude.resume",
-      piece,
-      ujson.Obj("oldSessionId" -> ujson.Str(oldSid), "newSessionId" -> ujson.Str(newSid))
-    )
+  // spawn / resume use the shared FsmFixtures builders (actor = "claude"):
+  //   spawn(seq, piece, sid)            → spawnAction(seq, "claude", sid, piece)
+  //   resume(seq, piece, oldSid, newSid) → resumeAction(seq, "claude", oldSid, newSid, piece)
 
   private def monitorOutcome(seq: Long, piece: Option[PieceId]): Action =
     action(seq, RebuildState.MonitorOutcomeKind, piece, ujson.Obj("kind" -> ujson.Str("settled")))
@@ -65,7 +55,7 @@ class RebuildStateInFlightSuite extends munit.FunSuite:
   // --- non-driver states carry no in-flight session ---
 
   test("non-driver state → empty (no driver runs in Drafting / PieceAwaitingCi / Refining / terminal)"):
-    val log = Vector(spawn(1, Some(P1), "sess-1"))
+    val log = Vector(spawnAction(1, "claude", "sess-1", Some(P1)))
     for state <- Vector[FsmState](
         FsmState.Drafting,
         FsmState.DesignReady,
@@ -80,35 +70,39 @@ class RebuildStateInFlightSuite extends munit.FunSuite:
   // --- driver states: spawn with no settle marker → in flight ---
 
   test("PieceImplementing + spawn, no monitor outcome → Implement in-flight session"):
-    val log = Vector(spawn(5, Some(P1), "impl-sess"))
+    val log = Vector(spawnAction(5, "claude", "impl-sess", Some(P1)))
     assertEquals(
       RebuildState.inFlightSessions(log, feature(FsmState.PieceImplementing(P1))),
       Vector(RebuildState.InFlightSession(SessionPhase.Implement, "impl-sess", Some(P1)))
     )
 
   test("PieceFixingUp + spawn, no monitor outcome → Fixup in-flight session"):
-    val log = Vector(spawn(5, Some(P1), "fix-sess"))
+    val log = Vector(spawnAction(5, "claude", "fix-sess", Some(P1)))
     assertEquals(
       RebuildState.inFlightSessions(log, feature(FsmState.PieceFixingUp(P1, P1Pr, attempt = 1))),
       Vector(RebuildState.InFlightSession(SessionPhase.Fixup, "fix-sess", Some(P1)))
     )
 
   test("InteractiveSpec + spawn(piece=None), no monitor outcome → Spec in-flight session"):
-    val log = Vector(spawn(2, None, "spec-sess"))
+    val log = Vector(spawnAction(2, "claude", "spec-sess", None))
     assertEquals(
       RebuildState.inFlightSessions(log, feature(FsmState.InteractiveSpec)),
       Vector(RebuildState.InFlightSession(SessionPhase.Spec, "spec-sess", None))
     )
 
   test("DesignReviewing + resume(piece=None) → DesignRevision in-flight session uses newSessionId"):
-    val log = Vector(spawn(1, None, "spec-sess"), monitorOutcome(2, None), resume(3, None, "spec-sess", "rev-sess"))
+    val log = Vector(
+      spawnAction(1, "claude", "spec-sess", None),
+      monitorOutcome(2, None),
+      resumeAction(3, "claude", "spec-sess", "rev-sess", None)
+    )
     assertEquals(
       RebuildState.inFlightSessions(log, feature(FsmState.DesignReviewing(round = 2))),
       Vector(RebuildState.InFlightSession(SessionPhase.DesignRevision, "rev-sess", None))
     )
 
   test("DesignPrFeedback maps to the DesignRevision driver phase"):
-    val log = Vector(resume(7, None, "rev-old", "rev-new"))
+    val log = Vector(resumeAction(7, "claude", "rev-old", "rev-new", None))
     assertEquals(
       RebuildState.inFlightSessions(log, feature(FsmState.DesignPrFeedback(P1Pr, round = 1))),
       Vector(RebuildState.InFlightSession(SessionPhase.DesignRevision, "rev-new", None))
@@ -119,11 +113,11 @@ class RebuildStateInFlightSuite extends munit.FunSuite:
   test(
     "PieceImplementing + spawn + monitor outcome → empty (dormant settledAfter branch; synthetic marker — see docstring)"
   ):
-    val log = Vector(spawn(5, Some(P1), "impl-sess"), monitorOutcome(6, Some(P1)))
+    val log = Vector(spawnAction(5, "claude", "impl-sess", Some(P1)), monitorOutcome(6, Some(P1)))
     assertEquals(RebuildState.inFlightSessions(log, feature(FsmState.PieceImplementing(P1))), Vector.empty)
 
   test("monitor outcome for a different piece does not close this piece's spawn"):
-    val log = Vector(spawn(5, Some(P1), "impl-sess"), monitorOutcome(6, Some(P2)))
+    val log = Vector(spawnAction(5, "claude", "impl-sess", Some(P1)), monitorOutcome(6, Some(P2)))
     assertEquals(
       RebuildState.inFlightSessions(log, feature(FsmState.PieceImplementing(P1))),
       Vector(RebuildState.InFlightSession(SessionPhase.Implement, "impl-sess", Some(P1)))
@@ -131,9 +125,9 @@ class RebuildStateInFlightSuite extends munit.FunSuite:
 
   test("the last spawn wins — a re-spawn after a settled session is the in-flight one"):
     val log = Vector(
-      spawn(5, Some(P1), "impl-sess-1"),
+      spawnAction(5, "claude", "impl-sess-1", Some(P1)),
       monitorOutcome(6, Some(P1)),
-      spawn(7, Some(P1), "impl-sess-2")
+      spawnAction(7, "claude", "impl-sess-2", Some(P1))
     )
     assertEquals(
       RebuildState.inFlightSessions(log, feature(FsmState.PieceImplementing(P1))),

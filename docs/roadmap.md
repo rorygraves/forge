@@ -600,13 +600,22 @@ out-scoped the observability slice (full dispositions in
   Touched `FsmEvent`, `Fsm.applyDesignResume`, `Orchestrator.resumed`, and six
   construction sites in tests (the empty-oldSessionId guard test now passes `None`;
   `FsmEventSuite` gained a `None` round-trip). Full unit suite (1290+) green.
-- [ ] **Centralize FSM test action-builders + base timestamp in `FsmFixtures`**
-  (§3.5 review #6, 2026-05-31). `<actor>.spawn` / `<actor>.resume` `Action`
-  builders are re-declared per suite (`spawnAction`/`resumeAction` in
-  `FeatureFoldEventsSuite` vs `spawn`/`resume` in `RebuildStateInFlightSuite`), as
-  is the base test `Instant` (`ts0` / `Epoch`). If the §19 spawn/resume payload
-  schema changes, each copy must be updated independently. Pull them into
-  `FsmFixtures` (which already holds `MergedAt` / `ObservedAt`). Test-only cleanup.
+- [x] **Centralize FSM test action-builders + base timestamp in `FsmFixtures`**
+  (§3.5 review #6, 2026-05-31). ✅ **Done 2026-06-01.** The `<actor>.spawn` /
+  `<actor>.resume` `Action` builders were re-declared per suite
+  (`spawnAction`/`resumeAction` in `FeatureFoldEventsSuite` vs `spawn`/`resume` in
+  `RebuildStateInFlightSuite`), as was the base test `Instant` (`ts0` / `Epoch`),
+  so a §19 spawn/resume payload-schema change had to be updated in each copy. **Fix:**
+  pulled a single `Epoch` + `at(n)` and the `spawnAction(seq, actor, sessionId, piece)`
+  / `resumeAction(seq, actor, oldSid, newSid, piece)` builders into `FsmFixtures`
+  (alongside `MergedAt` / `ObservedAt`); both suites now import them. The builders
+  are payload-identical to the two prior copies, so the change is behaviour-preserving
+  (both suites assert on projected state / session ids / merges, not wall-clock, so
+  sharing one base instant is safe); the differently-named `FsmResumeMarkerSuite.resume`
+  transition-helper and the local `RebuildStateSuite`/`RebuildStateInFlightSuite`
+  `action` helpers are untouched (no collision — a class-level member shadows a
+  wildcard import cleanly). `forge-core` 399 (full unit suite green); scalafmt clean.
+  Test-only cleanup.
 
 ---
 

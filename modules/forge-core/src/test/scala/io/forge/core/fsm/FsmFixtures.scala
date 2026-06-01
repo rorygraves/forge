@@ -1,6 +1,7 @@
 package io.forge.core.fsm
 
 import io.forge.core.*
+import io.forge.core.log.Action
 import io.forge.core.manifest.{Manifest, Piece, PieceStatus}
 import io.forge.core.pr.{
   CheckConclusion,
@@ -37,6 +38,40 @@ object FsmFixtures:
 
   val MergedAt: Instant = Instant.parse("2026-05-26T12:00:00Z")
   val ObservedAt: Instant = Instant.parse("2026-05-26T12:00:05Z")
+
+  /** Base instant for synthetic action logs. `at(n)` stamps the n-th action. The absolute value is irrelevant to the
+    * projections the replay/rebuild suites assert on (state, session ids, piece merges — not wall-clock), so the suites
+    * share one base rather than each minting its own `ts0` / `Epoch`.
+    */
+  val Epoch: Instant = Instant.parse("2026-05-26T12:00:00Z")
+  def at(n: Int): Instant = Epoch.plusSeconds(n.toLong)
+
+  // --- session-spawn / resume Action builders (§19 `<actor>.spawn` / `<actor>.resume`) ---
+  // Shared so the §19 spawn/resume payload schema has a single definition; if it changes, update here, not per suite.
+
+  def spawnAction(seq: Long, actor: String, sessionId: String, piece: Option[PieceId]): Action =
+    Action(
+      seq = seq,
+      at = at(seq.toInt),
+      feature = FeatureA,
+      piece = piece,
+      actor = Some(actor),
+      role = Some("driver"),
+      kind = s"$actor.spawn",
+      payload = ujson.Obj("sessionId" -> ujson.Str(sessionId), "role" -> ujson.Str("driver"))
+    )
+
+  def resumeAction(seq: Long, actor: String, oldSid: String, newSid: String, piece: Option[PieceId]): Action =
+    Action(
+      seq = seq,
+      at = at(seq.toInt),
+      feature = FeatureA,
+      piece = piece,
+      actor = Some(actor),
+      role = Some("driver"),
+      kind = s"$actor.resume",
+      payload = ujson.Obj("oldSessionId" -> ujson.Str(oldSid), "newSessionId" -> ujson.Str(newSid))
+    )
 
   def piecePending(id: PieceId, order: Int): Piece =
     Piece(
