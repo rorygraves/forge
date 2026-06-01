@@ -1148,8 +1148,8 @@ object Fsm:
     * id durable. Companion to the gap #7 spawn wiring: closes the broader session-id-durability carry-forward (roadmap
     * §3.5) so the `<actor>.resume` kind is *produced*, not only consumed. Replay rejects a resume whose `oldSessionId`
     * was never introduced by a prior `<actor>.spawn`/`.resume` for the same actor (`ReplayError.ResumeWithoutSpawn`);
-    * callers therefore only emit this when `oldSessionId` is a real, previously logged id (see the empty-`oldSid` guard
-    * at the design-resume seams).
+    * callers therefore only emit this when `oldSessionId` is a real, previously logged id (see the `Some`-`oldSid`
+    * guard at the design-resume seams).
     */
   private def sessionResumeDraft(
       feature: Feature,
@@ -1198,24 +1198,25 @@ object Fsm:
 
   /** §11.2 / §11.3 — a design-driver resume projects the new session id (no state change) and emits the §19
     * `<actor>.resume` durability entry so the (possibly new) id survives a cold rebuild (roadmap §3.5). Shared by the
-    * `DesignReviewing` and `DesignPrFeedback` resume seams so the guard cannot drift (review #4). Guarded on a
-    * non-empty `oldSid`: `Replay.applySessionResume` rejects a resume whose `oldSessionId` no prior `<actor>.spawn`
-    * introduced (`ResumeWithoutSpawn`), and the orchestrator passes `oldSessionId = ""` when it would resume without a
-    * known session — which cannot happen in practice (`RealSideEffects.resumeDesign` refuses an empty
-    * `designSessionId`) but would otherwise poison a cold rebuild. On an empty `oldSid` we fall back to the pre-§3.5
-    * behaviour (project in memory, no draft): `designSessionId` is already durable from the gap #7 spec spawn and is
-    * unchanged under the pinned same-id resume, so nothing is lost.
+    * `DesignReviewing` and `DesignPrFeedback` resume seams so the guard cannot drift (review #4). Guarded on a present
+    * `oldSid`: `Replay.applySessionResume` rejects a resume whose `oldSessionId` no prior `<actor>.spawn` introduced
+    * (`ResumeWithoutSpawn`), and the orchestrator passes `oldSessionId = None` when it would resume without a known
+    * session — which cannot happen in practice (`RealSideEffects.resumeDesign` refuses an empty `designSessionId`) but
+    * would otherwise poison a cold rebuild. On a `None` `oldSid` we fall back to the pre-§3.5 behaviour (project in
+    * memory, no draft): `designSessionId` is already durable from the gap #7 spec spawn and is unchanged under the
+    * pinned same-id resume, so nothing is lost.
     */
   private def applyDesignResume(
       feature: Feature,
       actor: String,
       role: String,
-      oldSid: String,
+      oldSid: Option[String],
       newSessionId: String
   ): (Feature, Vector[ActionDraft]) =
     val updated = feature.copy(designSessionId = Some(newSessionId))
-    if oldSid.isEmpty then (updated, Vector.empty)
-    else (updated, Vector(sessionResumeDraft(feature, actor, role, oldSid, newSessionId, piece = None)))
+    oldSid match
+      case None => (updated, Vector.empty)
+      case Some(old) => (updated, Vector(sessionResumeDraft(feature, actor, role, old, newSessionId, piece = None)))
 
   /** Slice 2.0 Task 2.0.6 — the `audit.resume_from_nhi` marker written when a feature resumes from
     * `NeedsHumanIntervention`. It records the resume boundary explicitly (`{ hint, from, to, reason }`) so the

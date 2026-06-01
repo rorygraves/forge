@@ -743,7 +743,7 @@ final class Orchestrator(
     FsmEvent.SessionResumed(
       actor = "driver",
       role = roleOf(as.phase),
-      oldSessionId = oldSessionId.getOrElse(""),
+      oldSessionId = oldSessionId,
       newSessionId = as.session.sessionId,
       piece = piece
     )

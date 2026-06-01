@@ -586,15 +586,20 @@ out-scoped the observability slice (full dispositions in
   `Fsm_11_2_DesignReviewSuite` +1, `SpecReplSuite` +3 (`classifyStart` Reopen,
   non-ReopenDesign NHI still refuses, `finalizeReopen` re-entry + append-only).
   `forge-core` 399, `forge-app` 360 (full unit suite green).
-- [ ] **Model `FsmEvent.SessionResumed.oldSessionId` as `Option[String]`**
-  (§3.5 piece-spawn durability review #2, 2026-05-31). Today it is a `String`, so
-  `Orchestrator.resumed` passes a `""` sentinel for a missing id
-  (`oldSessionId.getOrElse("")`), and `Fsm.applyDesignResume` special-cases that
+- [x] **Model `FsmEvent.SessionResumed.oldSessionId` as `Option[String]`**
+  (§3.5 piece-spawn durability review #2, 2026-05-31). ✅ **Done 2026-06-01.**
+  It was a `String`, so `Orchestrator.resumed` passed a `""` sentinel for a missing
+  id (`oldSessionId.getOrElse("")`), and `Fsm.applyDesignResume` special-cased that
   sentinel (`if oldSid.isEmpty`) to avoid a poison `<actor>.resume` that would fail
-  `Replay.ResumeWithoutSpawn` on a cold rebuild. The deeper fix is an `Option` in
-  the event signature so `None` is the missing case structurally and the FSM guard
-  + sentinel disappear. Small; touches `FsmEvent`, `Orchestrator.resumed`, and the
-  `applyDesignResume` guard.
+  `Replay.ResumeWithoutSpawn` on a cold rebuild. **Fix:** the event field is now
+  `Option[String]` so `None` is the missing case structurally — `Orchestrator.resumed`
+  passes the `Option` straight through (the `getOrElse("")` is gone) and
+  `applyDesignResume` matches `None`/`Some` (the `isEmpty` sentinel check is gone).
+  Behaviour is identical (`None` → project in memory, no durability draft; `Some(id)`
+  → emit `<actor>.resume`); the empty-string sentinel is no longer representable.
+  Touched `FsmEvent`, `Fsm.applyDesignResume`, `Orchestrator.resumed`, and six
+  construction sites in tests (the empty-oldSessionId guard test now passes `None`;
+  `FsmEventSuite` gained a `None` round-trip). Full unit suite (1290+) green.
 - [ ] **Centralize FSM test action-builders + base timestamp in `FsmFixtures`**
   (§3.5 review #6, 2026-05-31). `<actor>.spawn` / `<actor>.resume` `Action`
   builders are re-declared per suite (`spawnAction`/`resumeAction` in

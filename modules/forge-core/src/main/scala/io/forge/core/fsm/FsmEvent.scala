@@ -38,12 +38,14 @@ enum FsmEvent derives ReadWriter:
 
   /** §11.2 step 12 (design revision), §11.3 step 2 (design PR feedback). Under the pinned CLIs (Slice 0 §2),
     * `newSessionId == oldSessionId` is the norm; the two-field shape stays forward-compatible with a future CLI that
-    * mints a new id on resume (§6.1).
+    * mints a new id on resume (§6.1). `oldSessionId` is `None` when the orchestrator would resume without a known prior
+    * id — `None` is the missing case structurally, so the FSM emits no `<actor>.resume` durability draft (which would
+    * fail `Replay.ResumeWithoutSpawn` on a cold rebuild) without needing an empty-string sentinel (roadmap §3.5).
     */
   case SessionResumed(
       actor: String,
       role: String,
-      oldSessionId: String,
+      oldSessionId: Option[String],
       newSessionId: String,
       piece: Option[PieceId]
   )

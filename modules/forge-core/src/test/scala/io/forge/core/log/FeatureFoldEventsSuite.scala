@@ -104,7 +104,7 @@ class FeatureFoldEventsSuite extends munit.FunSuite:
     // so the FSM-emitted resume draft replays cleanly to the new id rather than failing ResumeWithoutSpawn.
     val resumeSeed = featureIn(FsmState.DesignReviewing(round = 2), designSessionId = Some("sess-1"))
     val (_, resumeDrafts) =
-      Fsm.transition(resumeSeed, FsmEvent.SessionResumed("claude", "driver", "sess-1", "sess-2", piece = None))
+      Fsm.transition(resumeSeed, FsmEvent.SessionResumed("claude", "driver", Some("sess-1"), "sess-2", piece = None))
     assertEquals(resumeDrafts.size, 1)
     val foldSeed = Feature.initial(FeatureA, FsmFixtures.manifest(Vector(piecePending(P1, 1))))
     val log = spawnAction(0, "claude", "sess-1", None) +:

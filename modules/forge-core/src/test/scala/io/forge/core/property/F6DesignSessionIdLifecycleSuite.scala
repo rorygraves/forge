@@ -80,7 +80,7 @@ class F6DesignSessionIdLifecycleSuite extends ScalaCheckSuite:
             val sameIdResume = FsmEvent.SessionResumed(
               actor = "claude",
               role = "spec-driver",
-              oldSessionId = sid,
+              oldSessionId = Some(sid),
               newSessionId = sid,
               piece = None
             )

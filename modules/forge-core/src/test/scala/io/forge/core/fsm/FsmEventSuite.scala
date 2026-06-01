@@ -76,7 +76,8 @@ class FsmEventSuite extends munit.FunSuite:
 
   test("FsmEvent — session lifecycle variants round-trip"):
     roundTrip[FsmEvent](FsmEvent.SessionSpawned("claude", "driver", "sess-1", Some(p1)))
-    roundTrip[FsmEvent](FsmEvent.SessionResumed("claude", "driver", "sess-1", "sess-1", Some(p1)))
+    roundTrip[FsmEvent](FsmEvent.SessionResumed("claude", "driver", Some("sess-1"), "sess-1", Some(p1)))
+    roundTrip[FsmEvent](FsmEvent.SessionResumed("claude", "driver", None, "sess-1", piece = None))
     roundTrip[FsmEvent](FsmEvent.Settled(SessionPhase.Spec, SettleOutcome.Clean))
     roundTrip[FsmEvent](FsmEvent.SettleTimeout(SessionPhase.Implement, "wall-clock 1800s"))
     roundTrip[FsmEvent](FsmEvent.TurnBudgetBreached(SessionPhase.Spec, "$2 cap exceeded"))

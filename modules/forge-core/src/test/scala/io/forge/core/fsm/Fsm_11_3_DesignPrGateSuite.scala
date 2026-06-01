@@ -62,7 +62,7 @@ class Fsm_11_3_DesignPrGateSuite extends munit.FunSuite:
     val f = featureIn(FsmState.DesignPrFeedback(DesignPr, round = 1), designSessionId = Some("old"))
     val (out, drafts) = Fsm.transition(
       f,
-      FsmEvent.SessionResumed("codex", "driver", "old", "new", piece = None)
+      FsmEvent.SessionResumed("codex", "driver", Some("old"), "new", piece = None)
     )
     assertEquals(out.state, FsmState.DesignPrFeedback(DesignPr, round = 1))
     assertEquals(out.designSessionId, Some("new"))
