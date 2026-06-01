@@ -6,8 +6,8 @@ import fs2.{Pull, Stream}
 import io.forge.agents.{AgentEvent, Connector, StreamingSession}
 import io.forge.app.config.ForgeConfig
 import io.forge.app.orchestrator.ConnectorFactory
-import io.forge.core.{FeatureId, Question}
-import io.forge.core.fsm.{Feature, Fsm, FsmConfig, FsmEvent, FsmState, UserCommand}
+import io.forge.core.{FeatureId, PrNumber, Question}
+import io.forge.core.fsm.{Feature, Fsm, FsmConfig, FsmEvent, FsmState, ResumeHint, UserCommand}
 import io.forge.core.log.{ActionLog, FileActionLog}
 import io.forge.core.manifest.FileManifestStore
 import io.forge.core.paths.ForgePaths
@@ -64,21 +64,41 @@ object SpecRepl:
           RebuildState.run(featureId, paths, manifestStore, log, cache).flatMap {
             case Left(err) => fail(featureId, rebuildMessage(err))
             case Right(rebuilt) =>
+              def launch(mode: SpecMode): IO[ExitCode] =
+                ConnectorFactory.build(manifest.mode, paths, config).flatMap { connector =>
+                  startSession(
+                    paths,
+                    config,
+                    specStore,
+                    log,
+                    cache,
+                    connector,
+                    rebuilt.feature,
+                    manifest.title,
+                    mode,
+                    io
+                  )
+                }
               classifyStart(rebuilt.feature.state) match
                 case StartDecision.Refuse(message) => fail(featureId, message)
-                case StartDecision.Start =>
-                  ConnectorFactory.build(manifest.mode, paths, config).flatMap { connector =>
-                    startSession(paths, config, specStore, log, cache, connector, rebuilt.feature, manifest.title, io)
-                  }
+                case StartDecision.Start => launch(SpecMode.Fresh)
+                case StartDecision.Reopen(pr, reason) => launch(SpecMode.Reopen(pr, reason))
           }
       }
     }
 
-  /** Pure state gate: `forge spec` only opens against a fresh `Drafting` feature. Every other state names the right
-    * next command so the operator is never told to use a command that would bounce them back here.
+  /** Pure state gate. `forge spec` opens against a fresh `Drafting` feature, **and** re-opens the design loop from a
+    * `NeedsHumanIntervention(ReopenDesign)` (roadmap §3.5): a design-phase NHI hint tells the operator to "re-open the
+    * spec/design loop with `forge spec`", and this is the path that makes that hint actionable (§15: `forge spec` is
+    * sanctioned "on the design branch"). Every other state names the right next command so the operator is never told
+    * to use a command that would bounce them back here.
     */
   def classifyStart(state: FsmState): StartDecision = state match
     case FsmState.Drafting => StartDecision.Start
+    // §11.2/§11.3 design-phase NHI: the design needs another human pass. Re-enter the interactive spec to revise it;
+    // `/done` then applies `Resume(ReopenDesign)` and re-lands in design review (see `finalizeReopen`).
+    case FsmState.NeedsHumanIntervention(reason, ResumeHint.ReopenDesign(pr)) =>
+      StartDecision.Reopen(pr, reason)
     case FsmState.InteractiveSpec =>
       // Not persisted by v1 `forge spec` (we only write at /done), so this is an out-of-band state: a prior tool, or a
       // future increment that resumes the spec session, left it here. Steer the operator to a clean restart.
@@ -100,7 +120,19 @@ object SpecRepl:
 
   enum StartDecision:
     case Start
+
+    /** Re-open the design loop from a `NeedsHumanIntervention(ReopenDesign(prNumber))`; `reason` is the NHI reason, fed
+      * to the spec driver so it knows why the prior design pass stopped.
+      */
+    case Reopen(prNumber: Option[PrNumber], reason: String)
     case Refuse(message: String)
+
+  /** Which spec lifecycle the REPL is driving: a `Fresh` first-time spec (`Drafting`) or a `Reopen` re-entry from a
+    * design-phase `NeedsHumanIntervention(ReopenDesign)`. Selects the spawn message and the `/done` finalize path.
+    */
+  private enum SpecMode:
+    case Fresh
+    case Reopen(prNumber: Option[PrNumber], reason: String)
 
   // --- session lifecycle -----------------------------------------------------
 
@@ -113,15 +145,17 @@ object SpecRepl:
       connector: Connector,
       feature0: Feature,
       title: String,
+      mode: SpecMode,
       io: ReplConsole
   ): IO[ExitCode] =
     val fsmConfig = FsmConfig(config.maxDesignReviewRounds, config.maxFixupRounds)
     specStore.loadDesign(feature0.id).map(briefFrom(_, title)).flatMap { brief =>
-      io.println(intro(feature0.id, connector.name)) >>
-        connector.runStreamingSpec(promptPath(paths, connector.name), specMessage(title, brief)).flatMap { session =>
-          runLoop(session, io)
-            .flatMap(concludeWith(specStore, log, cache, fsmConfig, feature0, session.sessionId, _, io))
-            .guarantee(session.close().attempt.void)
+      io.println(intro(feature0.id, connector.name, mode)) >>
+        connector.runStreamingSpec(promptPath(paths, connector.name), specMessageFor(mode, title, brief)).flatMap {
+          session =>
+            runLoop(session, io)
+              .flatMap(concludeWith(specStore, log, cache, fsmConfig, feature0, session.sessionId, mode, _, io))
+              .guarantee(session.close().attempt.void)
         }
     }
 
@@ -132,12 +166,16 @@ object SpecRepl:
       fsmConfig: FsmConfig,
       feature0: Feature,
       sessionId: String,
+      mode: SpecMode,
       outcome: ReplEnd,
       io: ReplConsole
   ): IO[ExitCode] =
     outcome match
       case ReplEnd.Done =>
-        finalizeDone(specStore, log, cache, fsmConfig, feature0, sessionId).flatMap {
+        val finalized = mode match
+          case SpecMode.Fresh => finalizeDone(specStore, log, cache, fsmConfig, feature0, sessionId)
+          case SpecMode.Reopen(pr, _) => finalizeReopen(specStore, log, cache, fsmConfig, feature0, sessionId, pr)
+        finalized.flatMap {
           case Left(message) => fail(feature0.id, message)
           case Right(_) => io.println(doneMessage(feature0.id)).as(ExitCode.Success)
         }
@@ -177,6 +215,44 @@ object SpecRepl:
             log.appendAll(feature0.id, d1 ++ d2) >> cache.save(feature0.id, done).as(Right(done))
           case unexpected =>
             IO.pure(Left(s"internal: /done did not reach design review (landed in $unexpected)"))
+    }
+
+  /** Record the ReopenDesign re-entry lifecycle once the operator types `/done` (roadmap §3.5). The feature is parked
+    * at `NeedsHumanIntervention(ReopenDesign(prNumber))`; reload the driver-revised manifest, then fold
+    * `Resume(ReopenDesign(prNumber))` (`NHI → DesignReviewing(1)`, emitting the append-only `audit.resume_from_nhi`
+    * marker + the lifecycle transition) **then** `SessionSpawned("driver", "spec", …)` to project the fresh
+    * `designSessionId` durably (the §19 `<actor>.spawn` entry — the same projection that closed gap #7, so a cold
+    * rebuild after the re-entry no longer dead-ends at "missing design session id"). The log is append-only — no
+    * truncation — so `forge stats` reads a coherent timeline across the re-open. The manifest is **not** written back:
+    * the driver owns it through the spec phase (§4), identical to [[finalizeDone]].
+    */
+  private[command] def finalizeReopen(
+      specStore: SpecStore,
+      log: ActionLog,
+      cache: FileStateCache,
+      fsmConfig: FsmConfig,
+      feature0: Feature,
+      sessionId: String,
+      prNumber: Option[PrNumber]
+  ): IO[Either[String, Feature]] =
+    specStore.loadManifest(feature0.id).flatMap {
+      case Left(err) =>
+        IO.pure(Left(s"the spec driver left manifest.json unreadable: ${specErr(err)}"))
+      case Right(diskManifest) =>
+        val base = feature0.copy(manifest = diskManifest)
+        val (resumed, dResume) =
+          Fsm.transition(
+            base,
+            FsmEvent.UserCommandReceived(UserCommand.Resume(ResumeHint.ReopenDesign(prNumber))),
+            fsmConfig
+          )
+        resumed.state match
+          case _: FsmState.DesignReviewing =>
+            val (spawned, dSpawn) =
+              Fsm.transition(resumed, FsmEvent.SessionSpawned("driver", "spec", sessionId, None), fsmConfig)
+            log.appendAll(feature0.id, dResume ++ dSpawn) >> cache.save(feature0.id, spawned).as(Right(spawned))
+          case unexpected =>
+            IO.pure(Left(s"internal: ReopenDesign re-entry did not reach design review (landed in $unexpected)"))
     }
 
   // --- the REPL loop (testable core) -----------------------------------------
@@ -277,9 +353,13 @@ object SpecRepl:
     val default = question.defaultOption.map(d => s"\n(press enter for the default: $d)").getOrElse("")
     header + options + freeText + default
 
-  private def intro(featureId: FeatureId, cli: String): String =
-    s"forge spec ${featureId.value}: starting an interactive spec session (driver: $cli). " +
-      "Describe what you want; type /done when the design is ready."
+  private def intro(featureId: FeatureId, cli: String, mode: SpecMode): String = mode match
+    case SpecMode.Fresh =>
+      s"forge spec ${featureId.value}: starting an interactive spec session (driver: $cli). " +
+        "Describe what you want; type /done when the design is ready."
+    case _: SpecMode.Reopen =>
+      s"forge spec ${featureId.value}: re-opening the design for revision (driver: $cli). " +
+        "Describe the changes the design needs; type /done when the revised design is ready."
 
   private def doneMessage(featureId: FeatureId): String =
     s"forge spec ${featureId.value}: design captured and advanced to review. Next: forge run ${featureId.value}"
@@ -311,12 +391,29 @@ object SpecRepl:
     */
   private def promptPath(paths: ForgePaths, cli: String): os.Path = paths.userPromptsDir / s"specify.$cli.md"
 
+  private def specMessageFor(mode: SpecMode, title: String, brief: String): String = mode match
+    case SpecMode.Fresh => specMessage(title, brief)
+    case SpecMode.Reopen(_, reason) => reopenMessage(title, brief, reason)
+
   private def specMessage(title: String, brief: String): String =
     s"""We are starting a new feature for this repository: $title.
        |
        |$brief
        |
        |Follow your instructions to design the feature and decompose it into pieces.""".stripMargin
+
+  /** Re-open spawn message (roadmap §3.5): the design already exists (loaded into `brief`); the driver revises it to
+    * resolve why the prior pass stopped (`reason`), then re-decomposes. Mirrors [[specMessage]]'s "follow your
+    * instructions" close so the same `specify.<cli>.md` prompt drives both the first pass and the revision.
+    */
+  private def reopenMessage(title: String, brief: String, reason: String): String =
+    s"""We are re-opening the design for an existing feature: $title.
+       |
+       |$brief
+       |
+       |A previous design pass stopped and needs revision (reason: $reason). Review the current design and
+       |decomposition, revise them to resolve the problem, then follow your instructions to finalise the
+       |updated design and decomposition.""".stripMargin
 
 /** The REPL's human-facing I/O seam: line out (stdout) + line in (stdin, `None` on EOF). Abstracted so the loop is
   * unit-testable with a scripted console; [[ReplConsole.real]] is the `Console[IO]`-backed production wiring.

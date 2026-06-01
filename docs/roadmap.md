@@ -559,15 +559,33 @@ out-scoped the observability slice (full dispositions in
   Spec text unchanged (the §19 kinds were already documented as producible). The
   remaining respawn-*avoidance* (skip re-exploration on resume) is the separate D3
   large half, still deferred above.
-- [ ] **`NeedsHumanIntervention(ReopenDesign)` recovery hint is unactionable**
-  (found during the Slice 2.0 live re-validation). The operator message says
-  "re-open the spec/design loop with `forge spec <feature>`", but
-  `SpecRepl.classifyStart` *refuses* `forge spec` from any non-`Drafting` state
-  (an NHI lands in the `case other → Refuse "Run forge run"` arm). So a feature
-  parked at a design-phase NHI has no working recovery except `forge abandon` +
-  restart. Either make `forge spec` accept the `ReopenDesign` re-entry (the
-  design-revision loop §11.3 intends) or change the hint to the actionable
-  command. Small, standalone.
+- [x] **`NeedsHumanIntervention(ReopenDesign)` recovery hint is unactionable**
+  (found during the Slice 2.0 live re-validation). ✅ **Fixed 2026-06-01** —
+  chose the spec-sanctioned option: make `forge spec` accept the `ReopenDesign`
+  re-entry (§15 lists `forge spec` "on the design branch", so the spec already
+  intends it). The *other* option (point the hint at a different command) was
+  rejected on investigation: `Resume(ReopenDesign)` lands in `DesignReviewing(1)`
+  whose orchestrator entry hook re-reviews the **same, unchanged** design PR
+  headlessly, so a `forge run` recovery would loop straight back to NHI for the
+  cases that produce `ReopenDesign` (PR closed-without-merge, "design did not
+  converge", changes-requested) — the human must re-engage interactively.
+  **What landed:** `SpecRepl.classifyStart` now returns a `Reopen` decision for
+  `NeedsHumanIntervention(_, ReopenDesign(pr))`; `forge spec` spawns a fresh
+  interactive spec session (seeded with the existing design + the NHI reason) and
+  on `/done` `finalizeReopen` folds `Resume(ReopenDesign(pr))` (`NHI →
+  DesignReviewing(1)`, emitting the append-only `audit.resume_from_nhi` marker +
+  transition) **then** `SessionSpawned("driver","spec",…)` to project the fresh
+  `designSessionId` durably (a new `DesignReviewing + SessionSpawned(piece=None)`
+  FSM case emits the §19 `<actor>.spawn` entry — the same projection that closed
+  gap #7, so a cold rebuild after the re-entry no longer dead-ends at "missing
+  design session id"; this also repopulates the id for the `ReopenDesign(None)`
+  missing-session-id trigger). The log is append-only (no truncation), so `forge
+  stats` reads a coherent timeline across the re-open, and the manifest is not
+  written back (driver-owned, as in `finalizeDone`). The `TerminalReport`
+  ReopenDesign hint ("re-open … with `forge spec`") is now accurate.
+  `Fsm_11_2_DesignReviewSuite` +1, `SpecReplSuite` +3 (`classifyStart` Reopen,
+  non-ReopenDesign NHI still refuses, `finalizeReopen` re-entry + append-only).
+  `forge-core` 399, `forge-app` 360 (full unit suite green).
 - [ ] **Model `FsmEvent.SessionResumed.oldSessionId` as `Option[String]`**
   (§3.5 piece-spawn durability review #2, 2026-05-31). Today it is a `String`, so
   `Orchestrator.resumed` passes a `""` sentinel for a missing id

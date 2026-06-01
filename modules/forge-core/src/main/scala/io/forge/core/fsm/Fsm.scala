@@ -271,6 +271,17 @@ object Fsm:
       case FsmEvent.SessionResumed(actor, role, oldSid, newSessionId, None) =>
         applyDesignResume(feature, actor, role, oldSid, newSessionId)
 
+      // `forge spec` ReopenDesign re-entry (roadmap §3.5): after Resume(ReopenDesign) lands the feature here, the
+      // operator's fresh interactive spec session projects its new designSessionId. Mirrors the §11.1 Drafting spawn
+      // (project + emit the §19 `<actor>.spawn` durability entry) but stays in DesignReviewing — the round was already
+      // set by the resume. This repopulates `designSessionId` durably, so a cold rebuild after the re-entry no longer
+      // dead-ends at NHI("missing design session id") — the same projection that closed gap #7 on the Drafting spawn.
+      // Reached only via re-entry: the normal design-review flow spawns no driver at round 1 (reviewer source) and
+      // resumes (SessionResumed) at round > 1, so a SessionSpawned(piece = None) cannot otherwise arrive here.
+      case FsmEvent.SessionSpawned(actor, role, sessionId, None) =>
+        val updated = feature.copy(designSessionId = Some(sessionId))
+        (updated, Vector(sessionSpawnDraft(feature, actor, role, sessionId, piece = None)))
+
       case FsmEvent.SettleTimeout(SessionPhase.DesignRevision, _) =>
         toNeedsHumanIntervention(
           feature,

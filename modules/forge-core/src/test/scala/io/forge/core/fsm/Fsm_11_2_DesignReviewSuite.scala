@@ -91,6 +91,22 @@ class Fsm_11_2_DesignReviewSuite extends munit.FunSuite:
     assertEquals(drafts.head.payload("oldSessionId").str, "old")
     assertEquals(drafts.head.payload("newSessionId").str, "new")
 
+  test("DesignReviewing + SessionSpawned(None) → designSessionId projected, state unchanged, <actor>.spawn durability"):
+    // roadmap §3.5: `forge spec` ReopenDesign re-entry — after Resume(ReopenDesign) lands DesignReviewing(1), the fresh
+    // interactive session projects its new designSessionId via SessionSpawned (the correct primitive for a fresh
+    // session: replay needs no prior spawn, unlike <actor>.resume). Repopulates a previously-missing id durably.
+    val f = featureIn(FsmState.DesignReviewing(round = 1), designSessionId = None)
+    val (out, drafts) = Fsm.transition(
+      f,
+      FsmEvent.SessionSpawned("claude", "driver", "fresh-sess", piece = None)
+    )
+    assertEquals(out.state, FsmState.DesignReviewing(round = 1))
+    assertEquals(out.designSessionId, Some("fresh-sess"))
+    assertEquals(drafts.size, 1)
+    assertEquals(drafts.head.kind, "claude.spawn")
+    assertEquals(drafts.head.piece, None)
+    assertEquals(drafts.head.payload("sessionId").str, "fresh-sess")
+
   test("DesignReviewing + SessionResumed with empty oldSessionId → projects but emits no durability draft"):
     // roadmap §3.5 guard: the orchestrator passes oldSessionId = "" only when it would resume without a known session
     // (cannot happen in practice — RealSideEffects.resumeDesign refuses an empty designSessionId). The FSM must NOT

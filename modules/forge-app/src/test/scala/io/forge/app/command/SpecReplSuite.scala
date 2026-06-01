@@ -4,9 +4,9 @@ import cats.effect.{IO, Ref}
 import cats.effect.unsafe.implicits.global
 import fs2.Stream
 import io.forge.agents.{AgentEvent, StreamingSession}
-import io.forge.core.{BranchName, FeatureId, Mode, PieceId, Question, QuestionSeverity}
-import io.forge.core.fsm.{Feature, FsmConfig, FsmState}
-import io.forge.core.log.FileActionLog
+import io.forge.core.{BranchName, FeatureId, Mode, PieceId, PrNumber, Question, QuestionSeverity}
+import io.forge.core.fsm.{Feature, FsmConfig, FsmState, ResumeHint}
+import io.forge.core.log.{ActionDraft, FileActionLog}
 import io.forge.core.manifest.{Manifest, Piece, PieceStatus}
 import io.forge.core.paths.ForgePaths
 import io.forge.core.state.FileStateCache
@@ -37,20 +37,32 @@ class SpecReplSuite extends munit.FunSuite:
   test("classifyStart: Drafting opens the session"):
     assertEquals(SpecRepl.classifyStart(FsmState.Drafting), SpecRepl.StartDecision.Start)
 
-  test("classifyStart: every non-Drafting state refuses with guidance"):
+  test("classifyStart: states past spec (other than a ReopenDesign NHI) refuse with guidance"):
     val refusals = Vector(
       FsmState.InteractiveSpec,
       FsmState.DesignReviewing(1),
       FsmState.DesignReady,
       FsmState.PieceImplementing(p1),
       FsmState.FeatureDone,
-      FsmState.Abandoned("done")
+      FsmState.Abandoned("done"),
+      // an NHI whose hint is *not* ReopenDesign is still refused — re-entry is only for the design-phase NHI.
+      FsmState.NeedsHumanIntervention("no automated recovery", ResumeHint.AbortOrAbandon)
     )
     refusals.foreach { state =>
       SpecRepl.classifyStart(state) match
         case SpecRepl.StartDecision.Refuse(message) => assert(message.nonEmpty, s"empty refusal for $state")
-        case SpecRepl.StartDecision.Start => fail(s"expected Refuse for $state")
+        case other => fail(s"expected Refuse for $state, got $other")
     }
+
+  test("classifyStart: a design-phase NHI(ReopenDesign) opens a re-entry session (roadmap §3.5)"):
+    val pr = Some(PrNumber(7))
+    SpecRepl.classifyStart(
+      FsmState.NeedsHumanIntervention("design did not converge", ResumeHint.ReopenDesign(pr))
+    ) match
+      case SpecRepl.StartDecision.Reopen(prNumber, reason) =>
+        assertEquals(prNumber, pr)
+        assert(reason.contains("did not converge"), reason)
+      case other => fail(s"expected Reopen, got $other")
 
   // --- chooseAnswer / renderQuestion ----------------------------------------
 
@@ -152,6 +164,57 @@ class SpecReplSuite extends munit.FunSuite:
 
     assert(result0.isLeft, s"expected Left, got $result0")
     assertEquals(cache.load(featureId).unsafeRunSync(), None)
+
+  // --- finalizeReopen (roadmap §3.5) -----------------------------------------
+
+  tempFixture.test(
+    "finalizeReopen: re-enters DesignReviewing(1), projects fresh designSessionId, appends without truncating"
+  ): root =>
+    val paths = new ForgePaths(root)
+    val specStore = new FileSpecStore(paths)
+    val cache = new FileStateCache(paths)
+    // The driver revised the design into two pieces on disk during the re-open session.
+    specStore.saveManifest(featureId, manifest(Vector(piece(p1, 1), piece(p2, 2)))).unsafeRunSync()
+    // Feature parked at a design-phase NHI with a missing design session id — the common ReopenDesign trigger; the
+    // re-entry must repopulate designSessionId from a fresh spawn.
+    val parked = Feature
+      .initial(featureId, manifest(Vector.empty))
+      .copy(
+        state = FsmState.NeedsHumanIntervention("design did not converge", ResumeHint.ReopenDesign(None)),
+        designSessionId = None
+      )
+
+    val (prior, out, replayed) = (for
+      log <- FileActionLog(paths)
+      // a pre-existing log line; finalizeReopen must append after it, never truncate it (the §3.5 append-only goal).
+      priorAction <- log.append(
+        featureId,
+        ActionDraft(featureId, None, Some("driver"), Some("spec"), "audit.note", ujson.Obj("seed" -> ujson.Str("x")))
+      )
+      res <- SpecRepl.finalizeReopen(specStore, log, cache, fsmConfig, parked, "fresh-sess", prNumber = None)
+      all <- log.replay(featureId)
+    yield (priorAction, res, all)).unsafeRunSync()
+
+    out match
+      case Right(reopened) =>
+        assertEquals(reopened.state, FsmState.DesignReviewing(1): FsmState)
+        assertEquals(reopened.designSessionId, Some("fresh-sess"))
+        // Manifest reloaded from disk — the driver's two revised pieces, not the empty seed.
+        assertEquals(reopened.manifest.pieces.map(_.id), Vector(p1, p2))
+        // Persisted to the rebuildable cache (state + the repopulated session id).
+        val cached = cache.load(featureId).unsafeRunSync()
+        assertEquals(cached.map(_.state), Some(FsmState.DesignReviewing(1): FsmState))
+        assertEquals(cached.flatMap(_.designSessionId), Some("fresh-sess"))
+        // Append-only: prior line preserved at seq 0, then resume marker + transition + spawn (no truncation).
+        assertEquals(replayed.size, 4)
+        assertEquals(replayed.head.seq, prior.seq)
+        assertEquals(
+          replayed.map(_.kind),
+          Vector("audit.note", "audit.resume_from_nhi", "fsm.transition", "driver.spawn")
+        )
+        // The spawn carries the fresh id, so a cold rebuild re-projects designSessionId (closes the gap #7 class here).
+        assertEquals(replayed.last.payload("sessionId").str, "fresh-sess")
+      case Left(message) => fail(s"expected Right, got Left($message)")
 
   // --- fixtures --------------------------------------------------------------
 
