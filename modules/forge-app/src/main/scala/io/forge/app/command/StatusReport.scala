@@ -4,12 +4,13 @@ import cats.effect.{ExitCode, IO}
 import cats.effect.std.Console
 import io.forge.app.cli.CliParser
 import io.forge.app.config.ForgeConfig
-import io.forge.core.{FeatureId, PieceId}
-import io.forge.core.fsm.{Feature, FsmState}
+import io.forge.core.FeatureId
+import io.forge.core.fsm.Feature
 import io.forge.core.log.Action
-import io.forge.core.manifest.{FileManifestStore, Manifest, PieceStatus}
+import io.forge.core.manifest.{FileManifestStore, Manifest}
 import io.forge.core.paths.ForgePaths
 import io.forge.core.state.FileStateCache
+import io.forge.core.status.StatusFields
 
 import upickle.default as upickle
 
@@ -87,7 +88,7 @@ object StatusReport:
       for
         acc <- accIO
         cached <- cache.load(id)
-      yield acc :+ s"${id.value}: ${cached.map(f => stateLabel(f.state)).getOrElse("no state cache (run forge run)")}"
+      yield acc :+ s"${id.value}: ${cached.map(f => StatusFields.stateLabel(f.state)).getOrElse("no state cache (run forge run)")}"
     }
 
   /** Pure render of a single feature's status block — unit-testable without I/O. */
@@ -98,71 +99,15 @@ object StatusReport:
       config: ForgeConfig
   ): String =
     val state = cached.map(_.state)
-    val stateLine = state.map(stateLabel).getOrElse("no state cache yet — run `forge run` or `forge rebuild-state`")
-    val pieceLine = state.flatMap(pieceOf) match
-      case Some(p) =>
-        val title = manifest.pieces.find(_.id == p).map(pp => s" — ${pp.title}").getOrElse("")
-        s"${p.value}$title"
-      case None => pieceSummary(manifest)
-    val lastLine = lastAction match
-      case Some(a) => s"${a.kind} @ ${a.at}"
-      case None => "— (no actions logged)"
-    val budgetLine = cached match
-      case Some(f) =>
-        f"feature $$${f.cost.feature.toDouble}%.2f / $$${config.maxFeatureCostUsd}%.2f · " +
-          f"piece $$${f.cost.piece.toDouble}%.2f / $$${config.maxPieceCostUsd}%.2f"
-      case None => "— (no cost recorded yet)"
+    val stateLine = state.map(StatusFields.stateLabel).getOrElse(StatusFields.NoStateCacheLabel)
+    val pieceLine = StatusFields.pieceLabel(manifest, state)
+    val lastLine = StatusFields.lastActionLabel(lastAction)
+    val budgetLine = StatusFields.budgetLine(cached.map(_.cost), config.maxFeatureCostUsd, config.maxPieceCostUsd)
     s"""feature ${manifest.featureId.value} — "${manifest.title}"  [${manifest.mode}]
        |  state:   $stateLine
        |  piece:   $pieceLine
        |  last:    $lastLine
        |  budget:  $budgetLine""".stripMargin
-
-  /** Manifest piece-count summary, shown when no single piece is active. */
-  private def pieceSummary(manifest: Manifest): String =
-    if manifest.pieces.isEmpty then "— (no pieces decomposed yet)"
-    else
-      val merged = manifest.pieces.count(_.status == PieceStatus.Merged)
-      val inProgress = manifest.pieces.count(_.status == PieceStatus.InProgress)
-      val pending = manifest.pieces.count(_.status == PieceStatus.Pending)
-      s"— (${manifest.pieces.size} pieces: $merged merged, $inProgress in progress, $pending pending)"
-
-  /** The active piece id a state carries, if any. */
-  private def pieceOf(s: FsmState): Option[PieceId] = s match
-    case FsmState.PieceImplementing(p) => Some(p)
-    case FsmState.PieceAwaitingCi(p, _) => Some(p)
-    case FsmState.PieceAwaitingReview(p, _) => Some(p)
-    case FsmState.PieceCiFailed(p, _, _) => Some(p)
-    case FsmState.PieceReviewFailed(p, _, _) => Some(p)
-    case FsmState.PieceFixingUp(p, _, _) => Some(p)
-    case FsmState.PieceAwaitingMerge(p, _) => Some(p)
-    case FsmState.Refining(p, _, _) => Some(p)
-    case _ => None
-
-  /** A compact human label for each FSM state. */
-  private[command] def stateLabel(s: FsmState): String = s match
-    case FsmState.Drafting => "drafting (spec not started)"
-    case FsmState.InteractiveSpec => "interactive spec in progress"
-    case FsmState.DesignReviewing(round) => s"design review round $round"
-    case FsmState.DesignNeedsHumanInput(round, questions) =>
-      s"design review round $round — awaiting human answers (${questions.size} question(s))"
-    case FsmState.DesignAwaitingMerge(pr) => s"design PR #${pr.value} open — awaiting merge"
-    case FsmState.DesignPrFeedback(pr, round) => s"design PR #${pr.value} feedback round $round"
-    case FsmState.DesignReady => "design merged — ready to implement"
-    case FsmState.PieceImplementing(p) => s"implementing piece ${p.value}"
-    case FsmState.PieceAwaitingCi(p, pr) => s"piece ${p.value} PR #${pr.value} — awaiting CI"
-    case FsmState.PieceAwaitingReview(p, pr) => s"piece ${p.value} PR #${pr.value} — awaiting review/merge"
-    case FsmState.PieceCiFailed(p, pr, attempt) => s"piece ${p.value} PR #${pr.value} — CI failed (attempt $attempt)"
-    case FsmState.PieceReviewFailed(p, pr, attempt) =>
-      s"piece ${p.value} PR #${pr.value} — review requested changes (attempt $attempt)"
-    case FsmState.PieceFixingUp(p, pr, attempt) =>
-      s"piece ${p.value} PR #${pr.value} — fix-up running (attempt $attempt)"
-    case FsmState.PieceAwaitingMerge(p, pr) => s"piece ${p.value} PR #${pr.value} — green, awaiting merge"
-    case FsmState.Refining(p, pr, _) => s"refining after merge of piece ${p.value} (PR #${pr.value})"
-    case FsmState.PlanningUpdate(reason, _) => s"planning update proposed — $reason"
-    case FsmState.NeedsHumanIntervention(reason, _) => s"needs human intervention — $reason"
-    case FsmState.FeatureDone => "✓ complete (all pieces merged and refined)"
-    case FsmState.Abandoned(reason) => s"abandoned — $reason"
 
   /** Decode the last non-blank NDJSON line of the feature log as an [[Action]] without rewriting the file. A malformed
     * tail decodes to `None` (status degrades to "no actions logged" rather than failing).

@@ -87,7 +87,7 @@ Landed:
   (`forge-app` test) + 7 positional-implicit `Codec` rewrites (`forge-it`).
 - Green: 1342 unit tests pass, `forge-it` compiles, scalafmt clean.
 
-### Task 2.1.2 — `TuiSnapshot` builder (fold log + cache → panes)
+### Task 2.1.2 — `TuiSnapshot` builder (fold log + cache → panes)  ✅ 2026-06-01
 
 Build the snapshot the skeleton currently takes by hand. Fold `FileStateCache`
 (fast path) + the last `FileActionLog` actions + `Manifest` into `TuiSnapshot`,
@@ -107,6 +107,34 @@ builder lives in `forge-tui` over `forge-core` types. If `StatusReport`'s render
 helpers are worth sharing verbatim, lift the pure bits into `forge-core` first
 (small, separate change) rather than duplicating — **consistency-sweep this against
 `StatusReport` before declaring done** (CLAUDE.md).
+
+Landed:
+
+- `modules/forge-core/src/main/scala/io/forge/core/status/StatusFields.scala` — the
+  shared pure render helpers (`stateLabel` / `pieceOf` / `pieceLabel` / `pieceSummary`
+  / `lastActionLabel` / `budgetLine` + the `NoStateCacheLabel` fallback) **lifted out
+  of `StatusReport`** (the "lift the pure bits into `forge-core` rather than
+  duplicate" path). `StatusReport.renderFeature` now delegates to them and
+  `RebuildStateCommand` / `summaryLines` use `StatusFields.stateLabel`; the
+  byte-for-byte `StatusReportGoldenSuite` (20 FSM states + no-cache) still passes, so
+  `forge status` and `forge tui` cannot drift.
+- `modules/forge-tui/src/main/scala/io/forge/tui/TuiSnapshotBuilder.scala` — pure
+  `build(manifest, cached, actions, maxFeatureCostUsd, maxPieceCostUsd)` folding
+  committed data into `TuiSnapshot` (status fields via `StatusFields`; a
+  `StatsReport`-style ` · N turn(s)` roll-up appended to the budget line from the
+  `session.complete` count; active-pane lines = committed log tail / question prompts)
+  plus a read-only `load(...)` IO seam (decodes the log **in place** like
+  `StatsReport.readActions`, reads the cache directly, never `replay`/`RebuildState`,
+  never the §13 lock). Task 2.1.3 polls `load`.
+- `TuiSnapshot.scala` — `ActivePane.forState(FsmState)` implements the design's
+  state→pane map. Spec/design *driver* phases (`InteractiveSpec` / `DesignReviewing` /
+  `DesignPrFeedback`) fall to `LogTail` (no live tap until Task 2.1.5); the `Streaming`
+  cases stand in with the committed log tail meanwhile.
+- `build.sbt` — `catsEffect` added to `forge-tui` (the `load` seam returns `IO`).
+- `TuiSnapshotBuilderSuite` — 14 tests (pure fold field mapping, the turn roll-up,
+  the pane map, log-tail cap, Q&A display, and the read-only `load` incl. a
+  log-left-unchanged assertion). Green: `forge-tui` 23 tests; full unit suite + the
+  `StatusReport` goldens pass; scalafmt clean; `forge-it` compiles.
 
 ### Task 2.1.3 — `forge tui <feature>` command
 
@@ -168,6 +196,15 @@ demands token-level liveness, else rolls forward. 2.1.8 closes.
 
 ## 3. Status log
 
+- **2026-06-01 — Task 2.1.2 landed (snapshot builder).** Lifted `StatusReport`'s pure
+  render helpers into `forge-core`'s new `StatusFields` (rather than duplicate them in
+  `forge-tui`), so `forge status` and `forge tui` share one definition; `StatusReport`
+  now delegates and its byte-for-byte golden suite still passes. Added
+  `TuiSnapshotBuilder` (pure `build` fold + read-only `load` IO seam, mirroring
+  `StatusReport`'s §15 in-place decode / cache-direct / no-`replay` stance) and
+  `ActivePane.forState`. Budget line carries a `StatsReport`-style turn roll-up. Added
+  `catsEffect` to `forge-tui`. 14 new tests (`forge-tui` now 23); full unit suite +
+  goldens green; scalafmt clean; `forge-it` compiles.
 - **2026-06-01 — Slice 2.1 opened; Task 2.1.1 landed.** Data-flow decided
   log-tail-first via `AskUserQuestion` (§4 T3); doc filename `design-2.1-tui.md`
   chosen to avoid the legacy `design-2.1.md` collision. Grounded the plan against

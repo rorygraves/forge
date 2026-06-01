@@ -94,7 +94,9 @@ lazy val `forge-tui` = (project in file("modules/forge-tui"))
   .dependsOn(`forge-core`, `forge-agents`)
   .settings(commonSettings)
   .settings(
-    libraryDependencies ++= Seq(termflow, termflowTestkit, osLib, upickle)
+    // catsEffect: the Task 2.1.2 snapshot builder's read-only `load` seam returns `IO` (reads the state cache + decodes
+    // the action log in place). Declared explicitly even though forge-core re-exports it, matching the repo convention.
+    libraryDependencies ++= Seq(termflow, termflowTestkit, osLib, upickle, catsEffect)
   )
 
 lazy val `forge-app` = (project in file("modules/forge-app"))

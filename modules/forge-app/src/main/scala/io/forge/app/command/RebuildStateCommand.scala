@@ -8,6 +8,7 @@ import io.forge.core.log.FileActionLog
 import io.forge.core.manifest.FileManifestStore
 import io.forge.core.paths.ForgePaths
 import io.forge.core.state.{FileStateCache, RebuildError, RebuildState}
+import io.forge.core.status.StatusFields
 
 /** Task 1.4.13 M9 — `forge rebuild-state <feature>`. Re-derives the [[io.forge.core.fsm.Feature]] projection from the
   * committed `manifest.json` + the canonical action log and rewrites the state cache atomically, via
@@ -54,7 +55,7 @@ object RebuildStateCommand:
         s"the on-disk state cache was corrupt ($detail); rebuilt it from the action log"
       case None => "rebuilt state cache"
     val base =
-      s"forge rebuild-state ${id.value}: $verb — state is ${StatusReport.stateLabel(result.feature.state)}."
+      s"forge rebuild-state ${id.value}: $verb — state is ${StatusFields.stateLabel(result.feature.state)}."
     val inFlightNote =
       if result.inFlightSessions.isEmpty then None
       else

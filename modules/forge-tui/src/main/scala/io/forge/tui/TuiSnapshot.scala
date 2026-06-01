@@ -1,5 +1,7 @@
 package io.forge.tui
 
+import io.forge.core.fsm.FsmState
+
 /** The immutable read-model the TUI panes render.
   *
   * Slice 2.1 is **log-tail-first** (see `docs/design-2.1-tui.md`): the snapshot is a pure projection of the canonical
@@ -57,3 +59,31 @@ enum ActivePane:
 
   /** Awaiting CI / merge, or nothing running. */
   case Idle
+
+object ActivePane:
+
+  /** Map an [[FsmState]] to the active pane it drives, per `design-2.1-tui.md` Task 2.1.2:
+    *
+    *   - a live driver session (`PieceImplementing` / `PieceFixingUp` / `Refining`) → [[Streaming]];
+    *   - a human-blocking state (`DesignNeedsHumanInput` / `NeedsHumanIntervention`) → [[Question]];
+    *   - parked on an external system (`PieceAwaitingCi` / `PieceAwaitingReview` / `PieceAwaitingMerge` /
+    *     `DesignAwaitingMerge`) → [[Idle]];
+    *   - everything else (spec/design driver phases, CI/review-failed, planning-update, terminal) → [[LogTail]], the
+    *     default committed-log view.
+    *
+    * The spec/design *driver* phases (`InteractiveSpec` / `DesignReviewing` / `DesignPrFeedback`) deliberately fall to
+    * [[LogTail]] rather than [[Streaming]]: the log-tail-first v1 has no live token tap for them (that is Task 2.1.5),
+    * so the committed log is the truthful view. The [[Streaming]] cases are the ones whose recent log lines best stand
+    * in for live driver output until the tap lands.
+    */
+  def forState(s: FsmState): ActivePane = s match
+    case _: FsmState.PieceImplementing => Streaming
+    case _: FsmState.PieceFixingUp => Streaming
+    case _: FsmState.Refining => Streaming
+    case _: FsmState.DesignNeedsHumanInput => Question
+    case _: FsmState.NeedsHumanIntervention => Question
+    case _: FsmState.PieceAwaitingCi => Idle
+    case _: FsmState.PieceAwaitingReview => Idle
+    case _: FsmState.PieceAwaitingMerge => Idle
+    case _: FsmState.DesignAwaitingMerge => Idle
+    case _ => LogTail

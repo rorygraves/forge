@@ -9,7 +9,9 @@ that first; everything below is Claude-Code-specific.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
 - **Active implementation plan:** [`docs/design-2.1-tui.md`](docs/design-2.1-tui.md)
   (Slice 2.1 — Phase-2 TUI, 🟡 open 2026-06-01; Task 2.1.1 — termflow
-  wiring + the Scala 3.5.2→3.7.1 bump it forced — ✅ landed). The most
+  wiring + the Scala 3.5.2→3.7.1 bump it forced — ✅ landed; Task 2.1.2 —
+  `TuiSnapshot` builder over the new shared `forge-core` `StatusFields` —
+  ✅ landed). The most
   recent closed audit trail is
   [`docs/design-2.0.md`](docs/design-2.0.md) (Slice 2.0 — run
   observability, ✅ closed 2026-05-31); older trails are
