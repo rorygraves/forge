@@ -498,7 +498,10 @@ out-scoped the observability slice (full dispositions in
   (`maxTurnCostUsd = $2.0` vs an actual $9.56 turn). A §18 schema extension, so
   it lands via a `forge-design-1.x.md` revision.
 - [ ] **Driver-respawn-avoidance on resume-from-NHI** (design-2.0 §4 **D3**
-  large half). Slice 2.0 made resume append-only and self-describing
+  large half). **Per-chunk plan: [`design-3.5.md`](design-3.5.md)** (D3-0
+  spike → D3-1 connector resume seam → D3-2 worktree-safety classifier →
+  D3-3 orchestrator resume-instead-of-respawn → D3-4 stats/close-out).
+  Slice 2.0 made resume append-only and self-describing
   (`audit.resume_from_nhi`) but a resume still **re-spawns the implement/fix-up
   driver from scratch**, re-paying the full exploration (~$10 in the szork run).
   A resume that detects already-committed driver work on the piece branch and
