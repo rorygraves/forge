@@ -90,8 +90,8 @@ class ForgeTuiAppSuite extends munit.FunSuite:
 
   // ── Task 2.1.4 — scrollable action-log pane ───────────────────────────────────────────────────────────────────────
   //
-  // 20 log lines ("line 01".."line 20") over an 11-row active viewport (ActiveRows = ActiveLastRow - ActiveFirstRow + 1
-  // = 15 - 5 + 1). The labels are zero-padded so no label is a substring of another (e.g. "line 01" ⊄ "line 10").
+  // 20 log lines ("line 01".."line 20") over a 12-row active viewport at the default 80×20 test size. The labels are
+  // zero-padded so no label is a substring of another (e.g. "line 01" ⊄ "line 10").
 
   private val scrollable = sample.copy(
     activePane = ActivePane.LogTail,
@@ -101,19 +101,19 @@ class ForgeTuiAppSuite extends munit.FunSuite:
   test("active pane follows the tail by default — newest lines shown, oldest hidden"):
     val frame = text(driver(scrollable))
     assert(frame.contains("line 20"), frame) // last line visible
-    assert(frame.contains("line 10"), frame) // top of the 11-row tail window
-    assert(!frame.contains("line 09"), frame) // line 09 is scrolled off the top
+    assert(frame.contains("line 09"), frame) // top of the 12-row tail window
+    assert(!frame.contains("line 08"), frame) // line 08 is scrolled off the top
     assert(!frame.contains("line 01"), frame)
-    assert(frame.contains("[↑9 ↓0]"), frame) // 9 hidden above, 0 below = following the tail
+    assert(frame.contains("[↑8 ↓0]"), frame) // 8 hidden above, 0 below = following the tail
 
   test("ArrowUp scrolls one line back into history"):
     val d = driver(scrollable)
     d.send(ForgeTui.Msg.Key(InputKey.ArrowUp))
     assertEquals(d.model.scrollBack, 1)
     val frame = text(d)
-    assert(frame.contains("line 09"), frame) // revealed at the top
+    assert(frame.contains("line 08"), frame) // revealed at the top
     assert(!frame.contains("line 20"), frame) // newest line scrolled off the bottom
-    assert(frame.contains("[↑8 ↓1]"), frame)
+    assert(frame.contains("[↑7 ↓1]"), frame)
 
   test("ArrowDown does not scroll below the tail"):
     val d = driver(scrollable)
@@ -124,14 +124,14 @@ class ForgeTuiAppSuite extends munit.FunSuite:
   test("PageUp scrolls a full viewport and clamps at the top"):
     val d = driver(scrollable)
     d.send(ForgeTui.Msg.Key(InputKey.PageUp))
-    assertEquals(d.model.scrollBack, 9) // clamped to maxScrollBack = 20 - 11
+    assertEquals(d.model.scrollBack, 8) // clamped to maxScrollBack = 20 - 12
     val frame = text(d)
     assert(frame.contains("line 01"), frame) // oldest line now at the top
-    assert(!frame.contains("line 12"), frame)
-    assert(frame.contains("[↑0 ↓9]"), frame)
+    assert(!frame.contains("line 13"), frame)
+    assert(frame.contains("[↑0 ↓8]"), frame)
     // A further ArrowUp at the top is a no-op.
     d.send(ForgeTui.Msg.Key(InputKey.ArrowUp))
-    assertEquals(d.model.scrollBack, 9)
+    assertEquals(d.model.scrollBack, 8)
 
   test("PageDown from the top returns to following the tail"):
     val d = driver(scrollable)
@@ -180,8 +180,8 @@ class ForgeTuiAppSuite extends munit.FunSuite:
     assertEquals(d.model.ticks, 1L)
     assert(!d.exited)
 
-  test("a reload preserves the scroll position across a refresh"):
-    // Park the viewport one line back, then a refresh that appends a line keeps the same scrollBack.
+  test("a reload preserves the scroll position across an append-only refresh in the same pane"):
+    // Park the viewport one line back, then a refresh that appends a line (same LogTail pane) keeps the same scrollBack.
     val grown = scrollable.copy(activeLines = scrollable.activeLines :+ "line 21")
     val d = reloadingDriver(scrollable, () => Future.successful(Some(grown)))
     d.send(ForgeTui.Msg.Key(InputKey.ArrowUp))
@@ -189,3 +189,39 @@ class ForgeTuiAppSuite extends munit.FunSuite:
     d.send(ForgeTui.Msg.Tick)
     assertEquals(d.model.snapshot, grown)
     assertEquals(d.model.scrollBack, 1)
+
+  test("a reload that changes the active pane resets scroll back to follow-tail"):
+    // Parked deep in an old LogTail; the feature then moves to a Question pane (a different content stream) — the
+    // viewport must not stay stranded in the old history, so scrollBack resets to 0.
+    val question = scrollable.copy(
+      activePane = ActivePane.Question,
+      activeLines = Vector("needs human intervention:", "  ci failed", "display-only; answer via: forge resume")
+    )
+    val d = reloadingDriver(scrollable, () => Future.successful(Some(question)))
+    d.send(ForgeTui.Msg.Key(InputKey.PageUp))
+    assert(d.model.scrollBack > 0)
+    d.send(ForgeTui.Msg.Tick)
+    assertEquals(d.model.snapshot.activePane, ActivePane.Question)
+    assertEquals(d.model.scrollBack, 0)
+
+  // ── Task 2.1.7 — resize + help overlay ───────────────────────────────────────────────────────────────────────────
+
+  test("Resize changes the rendered frame size and keeps panes visible"):
+    val d = driver()
+    d.send(ForgeTui.Msg.Resize(100, 24))
+    val f = d.frame
+    val frame = text(d)
+    assertEquals(f.width, 100)
+    assertEquals(f.height, 24)
+    assert(frame.contains("STATUS"), frame)
+    assert(frame.contains("ACTIVE — streaming"), frame)
+
+  test("? toggles the key-help overlay and Escape closes it"):
+    val d = driver()
+    d.send(ForgeTui.Msg.Key(InputKey.CharKey('?')))
+    assert(d.model.showHelp)
+    assert(text(d).contains("Forge keys"), text(d))
+    assert(text(d).contains("PageUp/PageDown"), text(d))
+    d.send(ForgeTui.Msg.Key(InputKey.Escape))
+    assert(!d.model.showHelp)
+    assert(!text(d).contains("Forge keys"), text(d))

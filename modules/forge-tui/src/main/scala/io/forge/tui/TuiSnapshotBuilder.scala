@@ -1,7 +1,7 @@
 package io.forge.tui
 
 import cats.effect.IO
-import io.forge.core.FeatureId
+import io.forge.core.{FeatureId, Question}
 import io.forge.core.fsm.{Feature, FsmState}
 import io.forge.core.log.Action
 import io.forge.core.manifest.{FileManifestStore, Manifest}
@@ -31,14 +31,15 @@ import upickle.default as upickle
   */
 object TuiSnapshotBuilder:
 
-  /** Most-recent committed-log lines surfaced in the LogTail / Streaming active pane (oldest→newest). Task 2.1.4 makes
-    * this pane scrollable; v1 shows the tail.
+  /** Scrollback budget for the LogTail / Streaming active pane: the most-recent N committed actions are rendered
+    * oldest→newest. Because Task 2.1.4 made the pane scrollable, this is a real scrollback buffer — not the original
+    * 10-line tail, which left `PageUp` with nothing to reveal in production (`forge tui` feeds the *whole* decoded log
+    * in; capping at 10 before the UI saw it defeated the scroll feature). When the log is longer than the cap, a marker
+    * line is prepended so the truncation is visible rather than silent.
     */
-  private val MaxTailLines = 10
+  private val MaxTailLines = 500
 
-  /** Max question prompts surfaced in the Question pane. Task 2.1.6 enriches the Q&A display; v1 lists the prompts and
-    * points at the existing answer path.
-    */
+  /** Max question prompt lines surfaced in the Question pane. */
   private val MaxQuestionLines = 8
 
   /** Pure fold of committed data into a [[TuiSnapshot]] — the unit-testable seam (no I/O).
@@ -130,9 +131,19 @@ object TuiSnapshotBuilder:
     */
   private def activeLines(pane: ActivePane, state: Option[FsmState], actions: Vector[Action]): Vector[String] =
     pane match
-      case ActivePane.LogTail | ActivePane.Streaming => actions.takeRight(MaxTailLines).map(actionLine)
+      case ActivePane.LogTail | ActivePane.Streaming => logTailLines(actions)
       case ActivePane.Question => questionLines(state)
       case ActivePane.Idle => Vector.empty
+
+  /** The most-recent [[MaxTailLines]] committed actions (oldest→newest), with a marker line prepended when older
+    * history was dropped so the operator can tell the pane is capped rather than empty above.
+    */
+  private def logTailLines(actions: Vector[Action]): Vector[String] =
+    val hidden = actions.size - MaxTailLines
+    val tail = actions.takeRight(MaxTailLines).map(actionLine)
+    if hidden <= 0 then tail
+    else
+      s"… $hidden older action${if hidden == 1 then "" else "s"} not shown (scrollback capped at $MaxTailLines)" +: tail
 
   /** A compact one-line render of an action for the log-tail pane: `#<seq> <kind> [<piece>] @ <ts>`. */
   private def actionLine(a: Action): String =
@@ -140,15 +151,36 @@ object TuiSnapshotBuilder:
     s"#${a.seq} ${a.kind}$piece @ ${a.at}"
 
   /** Question-pane lines for the human-blocking states. v1 **displays** the pending questions and points the operator
-    * at the existing answer path (Task 2.1.6 enriches this); answering from the TUI would need the write path + lock,
-    * breaking §15 read-only.
+    * at the existing answer path; answering from the TUI would need the write path + lock, breaking §15 read-only.
+    *
+    * **Scope (finding 3):** only the questions/reason carried *in the cached FSM state* are surfaced — these are the
+    * facts the §15 read-only projection can actually observe. A driver's mid-turn `AskUserQuestion` is **not** written
+    * to the action log as a durable "unanswered question" record (the orchestrator only commits the kinds listed in §19
+    * — `session.complete` / `cost.update` / `harness.*` / `audit.*` / `user.command` — never a `.ask_user_question`
+    * row), so there is nothing for the TUI to poll for those. Surfacing live driver questions needs either a durable
+    * "question opened" audit event or the Task 2.1.5 live tap — see `docs/design-2.1-tui.md` §4 T4.
     */
   private def questionLines(state: Option[FsmState]): Vector[String] =
     state match
       case Some(FsmState.DesignNeedsHumanInput(round, questions)) =>
         val header = Vector(s"design review round $round — ${questions.size} question(s):")
-        val qs = questions.take(MaxQuestionLines).zipWithIndex.map { case (q, i) => s"  ${i + 1}. ${q.text}" }
-        header ++ qs ++ Vector("answer via: forge spec")
+        val qs = questions.flatMap(renderQuestion).take(MaxQuestionLines)
+        header ++ qs ++ Vector(answerPath("forge spec"))
       case Some(FsmState.NeedsHumanIntervention(reason, _)) =>
-        Vector("needs human intervention:", s"  $reason", "resume via: forge resume")
+        Vector("needs human intervention:", s"  $reason", answerPath("forge resume"))
       case _ => Vector.empty
+
+  private def renderQuestion(q: Question): Vector[String] =
+    val prefix = s"  [${q.severity.asString}] "
+    val options =
+      if q.options.isEmpty then Vector.empty
+      else Vector(s"    options: ${q.options.mkString(", ")}")
+    val freeText =
+      if q.allowFreeText then Vector("    free text allowed")
+      else Vector.empty
+    val default =
+      q.defaultOption.map(d => Vector(s"    default: $d")).getOrElse(Vector.empty)
+    Vector(prefix + q.text) ++ options ++ freeText ++ default
+
+  private def answerPath(command: String): String =
+    s"display-only; answer via: $command"

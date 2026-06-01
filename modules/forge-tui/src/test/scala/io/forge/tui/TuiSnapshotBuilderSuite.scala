@@ -149,12 +149,23 @@ class TuiSnapshotBuilderSuite extends munit.FunSuite:
     assertEquals(snap.activeLines.head, "#1 session.start [p1] @ 2026-06-01T10:00:00Z")
     assertEquals(snap.activeLines.last, "#5 fsm.transition [p1] @ 2026-06-01T10:00:00Z")
 
-  test("log tail is capped at the most recent lines"):
+  test("log tail under the cap is shown in full with no truncation marker"):
     val many = (1L to 15L).map(s => action(s, "cost.update")).toVector
     val snap = TuiSnapshotBuilder.build(manifest, Some(featureIn(FsmState.PieceImplementing(p1))), many, 25.0, 8.0)
-    assertEquals(snap.activeLines.size, 10)
-    assert(snap.activeLines.head.startsWith("#6 "), snap.activeLines.head)
+    assertEquals(snap.activeLines.size, 15)
+    assert(snap.activeLines.head.startsWith("#1 "), snap.activeLines.head)
     assert(snap.activeLines.last.startsWith("#15 "), snap.activeLines.last)
+    assert(!snap.activeLines.exists(_.contains("not shown")), snap.activeLines.toString)
+
+  test("log tail over the cap keeps the most-recent lines and prepends a truncation marker"):
+    // 510 actions over the 500-line cap → 10 dropped, surfaced as a marker line above the 500 kept (oldest→newest).
+    val many = (1L to 510L).map(s => action(s, "cost.update")).toVector
+    val snap = TuiSnapshotBuilder.build(manifest, Some(featureIn(FsmState.PieceImplementing(p1))), many, 25.0, 8.0)
+    assertEquals(snap.activeLines.size, 501) // 500 kept + 1 marker
+    assert(snap.activeLines.head.contains("10 older actions not shown"), snap.activeLines.head)
+    assert(snap.activeLines.head.contains("scrollback capped at 500"), snap.activeLines.head)
+    assert(snap.activeLines(1).startsWith("#11 "), snap.activeLines(1)) // oldest *shown* action
+    assert(snap.activeLines.last.startsWith("#510 "), snap.activeLines.last)
 
   test("Question pane lists the pending design questions + the answer pointer"):
     val qs = Vector(
@@ -165,9 +176,11 @@ class TuiSnapshotBuilderSuite extends munit.FunSuite:
       TuiSnapshotBuilder.build(manifest, Some(featureIn(FsmState.DesignNeedsHumanInput(2, qs))), actions, 25.0, 8.0)
     assertEquals(snap.activePane, ActivePane.Question)
     assert(snap.activeLines.contains("design review round 2 — 2 question(s):"), snap.activeLines.toString)
-    assert(snap.activeLines.contains("  1. Why verify the signature?"), snap.activeLines.toString)
-    assert(snap.activeLines.contains("  2. Which store?"), snap.activeLines.toString)
-    assert(snap.activeLines.contains("answer via: forge spec"), snap.activeLines.toString)
+    assert(snap.activeLines.contains("  [blocking] Why verify the signature?"), snap.activeLines.toString)
+    assert(snap.activeLines.contains("    options: a, b"), snap.activeLines.toString)
+    assert(snap.activeLines.contains("    free text allowed"), snap.activeLines.toString)
+    assert(snap.activeLines.contains("  [blocking] Which store?"), snap.activeLines.toString)
+    assert(snap.activeLines.contains("display-only; answer via: forge spec"), snap.activeLines.toString)
 
   test("Question pane for needs-human-intervention shows the reason + resume pointer"):
     val snap = TuiSnapshotBuilder.build(
@@ -181,7 +194,28 @@ class TuiSnapshotBuilderSuite extends munit.FunSuite:
     )
     assertEquals(snap.activePane, ActivePane.Question)
     assert(snap.activeLines.contains("  ci failed after 3 fix-ups"), snap.activeLines.toString)
-    assert(snap.activeLines.contains("resume via: forge resume"), snap.activeLines.toString)
+    assert(snap.activeLines.contains("display-only; answer via: forge resume"), snap.activeLines.toString)
+
+  // Finding 3: the Question pane surfaces only what the §15 read-only projection can observe in the cached FSM state.
+  // A driver's mid-turn AskUserQuestion is never written to the action log as a durable unanswered-question record
+  // (the orchestrator commits no `.ask_user_question` kind), so the TUI cannot — and no longer claims to — show it; a
+  // log tail that happens to contain such a row is inert. Live driver questions await §4 T4 (durable event / live tap).
+  test("Question pane ignores action-log content — only the cached state drives it"):
+    val ask = action(6, "claude.ask_user_question").copy(
+      payload = ujson.Obj("question" -> ujson.Str("Continue with the smaller migration?"))
+    )
+    val snap = TuiSnapshotBuilder.build(
+      manifest,
+      Some(featureIn(FsmState.NeedsHumanIntervention("driver paused", ResumeHint.AbortOrAbandon))),
+      actions :+ ask,
+      25.0,
+      8.0
+    )
+    assertEquals(
+      snap.activeLines,
+      Vector("needs human intervention:", "  driver paused", "display-only; answer via: forge resume")
+    )
+    assert(!snap.activeLines.exists(_.contains("Continue with the smaller migration?")), snap.activeLines.toString)
 
   test("Idle pane carries no committed lines (the view paints a placeholder)"):
     val snap =

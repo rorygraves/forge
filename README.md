@@ -165,7 +165,7 @@ modules/
   forge-git/     ← BranchManager, PRWatcher (gh CLI)
   forge-specs/   ← SpecStore, DocSync, manifest, ChangeCollector
   forge-app/     ← orchestrator, the forge CLI, config, process lock
-  forge-tui/     ← termflow TUI (later slice)
+  forge-tui/     ← termflow TUI (`forge tui <feature>`)
   forge-it/      ← integration tests against the real claude/codex/gh CLIs
 ```
 

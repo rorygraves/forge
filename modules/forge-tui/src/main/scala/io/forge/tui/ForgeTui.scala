@@ -32,7 +32,15 @@ object ForgeTui:
     * newest lines, while a parked viewport stays anchored relative to the tail. The value is clamped to the scrollable
     * range at render time, so a snapshot that shrinks can never strand the viewport.
     */
-  final case class Model(snapshot: TuiSnapshot, ticks: Long, lastKey: Option[String], scrollBack: Int = 0)
+  final case class Model(
+      snapshot: TuiSnapshot,
+      ticks: Long,
+      lastKey: Option[String],
+      scrollBack: Int = 0,
+      width: Int = MinFrameWidth,
+      height: Int = MinFrameHeight,
+      showHelp: Boolean = false
+  )
 
   enum Msg:
     /** 1s heartbeat from `Sub.Every` — bumps the liveness counter and kicks off a [[reload]] of the committed data. */
@@ -43,6 +51,9 @@ object ForgeTui:
 
     /** A decoded key event from `Sub.InputKey`. */
     case Key(k: InputKey)
+
+    /** Terminal dimensions changed; the next frame reflows the panes. */
+    case Resize(width: Int, height: Int)
 
     /** An input-source error forwarded from `Sub.InputKey` — surfaced, not fatal. */
     case KeyError(t: Throwable)
@@ -55,22 +66,16 @@ object ForgeTui:
     */
   private val NoReload: () => Future[Option[TuiSnapshot]] = () => Future.successful(None)
 
-  /** Logical drawing surface. The renderer reads the real terminal size; these are the app's own frame bounds (fixed
-    * for the first slice; reflow-on-resize is a later Task).
-    */
-  private val FrameWidth = 80
-  private val FrameHeight = 20
+  private val MinFrameWidth = 60
+  private val MinFrameHeight = 16
 
-  // Status pane: cols 1..36, rows 2..17. Active pane: cols 38..79, rows 2..17.
-  private val StatusInnerCol = 3
-  private val StatusInnerWidth = 32
-  private val ActiveInnerCol = 40
-  private val ActiveInnerWidth = 38
-  private val ActiveFirstRow = 5
-  private val ActiveLastRow = 15
-
-  /** Height (in lines) of the active-pane viewport — the scroll page size for `PageUp` / `PageDown`. */
-  private val ActiveRows = ActiveLastRow - ActiveFirstRow + 1
+  private val Theme0: Theme =
+    Theme.dark.copy(
+      primary = Color.Cyan,
+      secondary = Color.Blue,
+      border = Color.BrightBlack,
+      chars = BorderChars.rounded
+    )
 
   /** Run the TUI against a static `snapshot` (no live refresh). Blocks until the user quits. */
   def run(snapshot: TuiSnapshot): Unit =
@@ -87,72 +92,103 @@ object ForgeTui:
       extends TuiApp[Model, Msg]:
 
     def init(ctx: RuntimeCtx[Msg]): Tui[Model, Msg] =
-      val _ = ctx.registerSub(Sub.Every(1000L, () => Msg.Tick, ctx))
-      val _ = ctx.registerSub(Sub.InputKey(k => Msg.Key(k), t => Msg.KeyError(t), ctx))
-      Model(initial, 0L, None).tui
+      // Each Sub.* factory already auto-registers with the RuntimeCtx (termflow's `Sub.autoRegisterIfRuntimeCtx` /
+      // `ctx.registerSub` inside the factory), so constructing them is enough — wrapping in `ctx.registerSub(...)`
+      // would register the same subscription a second time.
+      val _ = Sub.Every(1000L, () => Msg.Tick, ctx)
+      val _ = Sub.InputKey(k => Msg.Key(k), t => Msg.KeyError(t), ctx)
+      val _ = Sub.TerminalResize(250L, Msg.Resize.apply, ctx)
+      Model(initial, 0L, None, width = ctx.terminal.width, height = ctx.terminal.height).tui
 
     def update(model: Model, msg: Msg, ctx: RuntimeCtx[Msg]): Tui[Model, Msg] =
       msg match
         // The tick bumps the liveness counter and launches a reload; the re-folded snapshot arrives as Msg.Refreshed.
         case Msg.Tick =>
           Tui(model.copy(ticks = model.ticks + 1), Cmd.FCmd(reload(), refreshCmd))
-        // Replace the rendered snapshot; scrollBack is left untouched (re-clamped at render), so a follow-tail viewport
-        // keeps tracking the newest lines while a parked one stays anchored relative to the tail.
-        case Msg.Refreshed(snapshot) => model.copy(snapshot = snapshot).tui
+        // Replace the rendered snapshot. `scrollBack` is tail-relative, so it carries across an append-only refresh
+        // within the same pane (a follow-tail viewport keeps tracking the newest lines; a parked one stays anchored to
+        // the tail). But a *pane change* means a different content stream — preserving scrollBack there would strand the
+        // viewport in unrelated history, so reset to follow-tail. (Within a pane the log is append-only, so the
+        // tail-relative model holds; the at-render clamp covers any shrink.)
+        case Msg.Refreshed(snapshot) =>
+          val scrollBack = if snapshot.activePane == model.snapshot.activePane then model.scrollBack else 0
+          model.copy(snapshot = snapshot, scrollBack = scrollBack).tui
         case Msg.Quit => Tui(model, Cmd.Exit)
+        case Msg.Resize(width, height) => model.copy(width = width, height = height).tui
         case Msg.KeyError(_) => model.tui
         case Msg.Key(k) =>
           k match
             case InputKey.CharKey('q') => Tui(model, Cmd.Exit)
+            case InputKey.CharKey('?') => model.copy(showHelp = !model.showHelp).tui
+            case InputKey.Escape if model.showHelp => model.copy(showHelp = false).tui
             case InputKey.Ctrl('c') => Tui(model, Cmd.Exit)
+            case InputKey.Ctrl('C') => Tui(model, Cmd.Exit)
             case other =>
               // Scroll keys adjust the active-pane viewport; every other key is recorded (last-key indicator) but inert.
-              val scrolled = scrollDelta(other) match
-                case Some(delta) => model.copy(scrollBack = clampScrollBack(model.scrollBack + delta, model.snapshot))
+              val scrolled = scrollDelta(other, model) match
+                case Some(delta) => model.copy(scrollBack = clampScrollBack(model.scrollBack + delta, model))
                 case None => model
               scrolled.copy(lastKey = Some(other.toString)).tui
 
     def view(model: Model): RootNode =
       val s = model.snapshot
+      val m = FrameMetrics.forModel(model)
+      given Theme = Theme0
       val title =
-        TextNode(2.x, 1.y, List(s"""Forge — ${s.featureId}  "${s.title}"  [${s.mode}]""".text(Style(bold = true))))
+        TextNode(
+          2.x,
+          1.y,
+          List(
+            truncate(s"""Forge — ${s.featureId}  "${s.title}"  [${s.mode}]""", m.width - 3)
+              .text(Style(fg = Theme0.primary, bold = true))
+          )
+        )
 
       val statusBox = BoxNode(
         1.x,
-        2.y,
-        width = 36,
-        height = 16,
+        1.y,
+        width = m.statusWidth,
+        height = m.panelHeight,
         children = List(
-          TextNode(StatusInnerCol.x, 3.y, List("STATUS".text(Style(bold = true, underline = true)))),
-          statusLine(5, "state:  ", s.stateLabel),
-          statusLine(6, "piece:  ", s.pieceLabel),
-          statusLine(7, "last:   ", s.lastAction),
-          statusLine(9, "budget: ", s.budgetLine),
-          statusLine(15, "tick:   ", model.ticks.toString)
+          TextNode(3.x, 2.y, List("STATUS".text(Style(fg = Theme0.primary, bold = true, underline = true)))),
+          statusLine(4, "state:  ", s.stateLabel, m.statusInnerWidth),
+          statusLine(5, "piece:  ", s.pieceLabel, m.statusInnerWidth),
+          statusLine(6, "last:   ", s.lastAction, m.statusInnerWidth),
+          statusLine(8, "budget: ", s.budgetLine, m.statusInnerWidth),
+          statusLine(math.max(9, m.panelHeight - 2), "tick:   ", model.ticks.toString, m.statusInnerWidth)
         ),
-        style = Style(border = true)
+        style = Style(border = true, fg = Theme0.border),
+        chars = Theme0.chars
       )
 
       val av = activeView(model)
-      val activeHeader = truncate(s"ACTIVE — ${paneLabel(s.activePane)}${scrollIndicator(av)}", ActiveInnerWidth)
+      val activeHeader = truncate(s"ACTIVE — ${paneLabel(s.activePane)}${scrollIndicator(av)}", m.activeInnerWidth)
       val activeBox = BoxNode(
-        38.x,
-        2.y,
-        width = 42,
-        height = 16,
-        children = TextNode(ActiveInnerCol.x, 3.y, List(activeHeader.text(Style(bold = true)))) ::
-          activeLineNodes(av),
-        style = Style(border = true)
+        1.x,
+        1.y,
+        width = m.activeWidth,
+        height = m.panelHeight,
+        children = TextNode(3.x, 2.y, List(activeHeader.text(Style(fg = Theme0.primary, bold = true)))) ::
+          activeLineNodes(av, m),
+        style = Style(border = true, fg = Theme0.border),
+        chars = Theme0.chars
       )
 
       val footer =
-        TextNode(2.x, 19.y, List("q quit · ↑↓ PgUp/PgDn scroll · :q command".text(Style(dim = true))))
+        TextNode(
+          2.x,
+          m.height.y,
+          List(truncate("q quit · ↑↓ PgUp/PgDn scroll · ? help · :q command", m.width - 3).text(Style(dim = true)))
+        )
+
+      val body = Layout.row(gap = 1)(statusBox, activeBox).resolve(Coord(1.x, 2.y))
 
       RootNode(
-        width = FrameWidth,
-        height = FrameHeight,
-        children = List(title, statusBox, activeBox, footer),
-        input = None
+        width = m.width,
+        height = m.height,
+        children = title :: body ::: List(footer),
+        input = None,
+        overlays = if model.showHelp then List(helpOverlay()) else Nil
       )
 
     def toMsg(input: PromptLine): Result[Msg] =
@@ -168,12 +204,12 @@ object ForgeTui:
         case Some(snapshot) => Cmd.GCmd(Msg.Refreshed(snapshot))
         case None => Cmd.NoCmd
 
-    private def statusLine(row: Int, label: String, value: String): VNode =
-      TextNode(StatusInnerCol.x, row.y, List(truncate(s"$label$value", StatusInnerWidth).text))
+    private def statusLine(row: Int, label: String, value: String, width: Int): VNode =
+      TextNode(3.x, row.y, List(truncate(s"$label$value", width).text))
 
-    private def activeLineNodes(av: ActiveView): List[VNode] =
+    private def activeLineNodes(av: ActiveView, m: FrameMetrics): List[VNode] =
       av.lines.toList.zipWithIndex.map { case (text, i) =>
-        TextNode(ActiveInnerCol.x, (ActiveFirstRow + i).y, List(truncate(text, ActiveInnerWidth).text))
+        TextNode(3.x, (m.activeFirstRow + i).y, List(truncate(text, m.activeInnerWidth).text))
       }
 
   private def paneLabel(p: ActivePane): String = p match
@@ -199,20 +235,20 @@ object ForgeTui:
   /** The largest meaningful `scrollBack` for `total` lines: scrolling further would push the first line off the top of
     * the viewport with nothing to reveal, so it is capped at "first line at the top".
     */
-  private def maxScrollBack(total: Int): Int = math.max(0, total - ActiveRows)
+  private def maxScrollBack(total: Int, rows: Int): Int = math.max(0, total - rows)
 
   /** Clamp a candidate `scrollBack` to `[0, maxScrollBack]` for the snapshot's active-line count. */
-  private def clampScrollBack(back: Int, snapshot: TuiSnapshot): Int =
-    math.max(0, math.min(back, maxScrollBack(snapshot.activeLines.size)))
+  private def clampScrollBack(back: Int, model: Model): Int =
+    math.max(0, math.min(back, maxScrollBack(model.snapshot.activeLines.size, FrameMetrics.forModel(model).activeRows)))
 
   /** The per-key viewport delta: `ArrowUp`/`ArrowDown` move one line, `PageUp`/`PageDown` a full viewport. Positive
     * scrolls back into history (older lines); negative scrolls toward the tail. `None` for non-scroll keys.
     */
-  private def scrollDelta(k: InputKey): Option[Int] = k match
+  private def scrollDelta(k: InputKey, model: Model): Option[Int] = k match
     case InputKey.ArrowUp => Some(1)
     case InputKey.ArrowDown => Some(-1)
-    case InputKey.PageUp => Some(ActiveRows)
-    case InputKey.PageDown => Some(-ActiveRows)
+    case InputKey.PageUp => Some(FrameMetrics.forModel(model).activeRows)
+    case InputKey.PageDown => Some(-FrameMetrics.forModel(model).activeRows)
     case _ => None
 
   /** Project the model's active lines + scroll position onto the viewport. Falls back to a single placeholder line when
@@ -222,9 +258,10 @@ object ForgeTui:
     val s = model.snapshot
     val lines = if s.activeLines.nonEmpty then s.activeLines else Vector(placeholderFor(s.activePane))
     val total = lines.size
-    val back = clampScrollBack(model.scrollBack, s)
+    val rows = FrameMetrics.forModel(model).activeRows
+    val back = clampScrollBack(model.scrollBack, model)
     val bottom = total - back
-    val top = math.max(0, bottom - ActiveRows)
+    val top = math.max(0, bottom - rows)
     ActiveView(lines = lines.slice(top, bottom), hiddenAbove = top, hiddenBelow = back)
 
   /** A compact scroll position for the active-pane header: nothing when the lines fit, `[↑a ↓b]` otherwise (`b == 0`
@@ -232,3 +269,58 @@ object ForgeTui:
     */
   private def scrollIndicator(av: ActiveView): String =
     if av.overflow then s"  [↑${av.hiddenAbove} ↓${av.hiddenBelow}]" else ""
+
+  private final case class FrameMetrics(
+      width: Int,
+      height: Int,
+      panelHeight: Int,
+      statusWidth: Int,
+      activeWidth: Int,
+      activeInnerWidth: Int,
+      activeFirstRow: Int,
+      activeRows: Int
+  ):
+    def statusInnerWidth: Int = statusWidth - 4
+
+  private object FrameMetrics:
+    def forModel(model: Model): FrameMetrics =
+      val width = math.max(MinFrameWidth, model.width)
+      val height = math.max(MinFrameHeight, model.height)
+      val panelHeight = math.max(10, height - 3)
+      val statusWidth = math.max(28, math.min(40, (width * 45) / 100))
+      val activeWidth = math.max(20, width - statusWidth - 1)
+      val activeFirstRow = 4
+      val activeRows = math.max(1, panelHeight - activeFirstRow - 1)
+      FrameMetrics(
+        width = width,
+        height = height,
+        panelHeight = panelHeight,
+        statusWidth = statusWidth,
+        activeWidth = activeWidth,
+        activeInnerWidth = activeWidth - 4,
+        activeFirstRow = activeFirstRow,
+        activeRows = activeRows
+      )
+
+  private def helpOverlay()(using theme: Theme): Overlay =
+    val rows = Vector(
+      "q / Ctrl-C       quit",
+      "ArrowUp/Down     scroll one line",
+      "PageUp/PageDown  scroll one page",
+      "? / Esc          toggle this help",
+      ":q               prompt command quit"
+    )
+    val width = 38
+    val height = rows.size + 4
+    val box = Theme.box(1.x, 1.y, width, height)
+    val title = TextNode(3.x, 1.y, List(" Forge keys ".text(Style(fg = theme.primary, bold = true))))
+    val body = rows.zipWithIndex.map { case (line, i) =>
+      TextNode(3.x, (3 + i).y, List(line.text))
+    }.toList
+    Overlay(
+      position = OverlayPosition.Centered,
+      width = width,
+      height = height,
+      children = box :: title :: body,
+      inputCapture = InputCapture.Modal
+    )

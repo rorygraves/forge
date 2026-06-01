@@ -15,13 +15,15 @@
 > and map to Slices 1.1/1.2/1.3). This Slice-2.1 plan therefore uses the
 > disambiguated `design-2.1-tui.md`.
 >
-> **Status:** 🟡 open — 2026-06-01. Second slice of Phase 2 (MLP). **Tier 1 is
-> complete** — Tasks 2.1.1 (runnable slice + the Scala 3.7.1 bump it forced),
-> 2.1.2 (`TuiSnapshot` builder), and 2.1.3 (`forge tui <feature>` command) ✅
-> landed 2026-06-01, plus the exit-gating Task 2.1.4 (scrollable log-tail pane).
-> The slice exit criterion is met; the remaining Tasks (2.1.5 live tap, 2.1.6
-> Q&A, 2.1.7 polish, 2.1.8 close-out) are open, and roadmap §3.2 stays unticked
-> until the section-wide review. The TUI is the §3.1 "richer view" over data
+> **Status:** 🟡 open — 2026-06-01. Second slice of Phase 2 (MLP). **Tier 1 and
+> Tier 2 are complete** — Tasks 2.1.1 (runnable slice + the Scala 3.7.1 bump it
+> forced), 2.1.2 (`TuiSnapshot` builder), 2.1.3 (`forge tui <feature>` command),
+> 2.1.4 (scrollable log-tail pane), 2.1.6 (Q&A display), and 2.1.7
+> (theme/resize/key-help) ✅ landed 2026-06-01. The slice exit criterion is met;
+> Task 2.1.5 (live tap) is carried forward unless real use justifies the new
+> orchestrator seam, and Task 2.1.8 close-out remains open pending the
+> section-wide review / spec revision. Roadmap §3.2 stays unticked until then.
+> The TUI is the §3.1 "richer view" over data
 > Slice 2.0 already made replayable — so it is built **log-tail-first** over the
 > canonical action log + state cache, with a live event tap deferred (see §0 /
 > Task 2.1.5).
@@ -60,9 +62,10 @@ use doesn't justify the added coupling. This matches the Slice-2.0
 
 Tiering: **Tier 1** (Tasks 2.1.1–2.1.3) is the gating deliverable — a runnable,
 read-only status+active dashboard wired to `forge tui`. **Tier 2** (Tasks
-2.1.4–2.1.6) makes it answerable (scrollable log-tail, Q&A display, theming/resize).
-**Tier 3** (Task 2.1.5 live tap + 2.1.7 polish) is richer liveness and may roll
-forward. The exit gate requires Tier 1 + the log-tail pane (2.1.4).
+2.1.4 and 2.1.6) makes it answerable (scrollable log-tail, Q&A display).
+**Tier 3** is split between polish (Task 2.1.7, landed) and richer liveness
+(Task 2.1.5 live tap, carried forward). The exit gate requires Tier 1 + the
+log-tail pane (2.1.4), now also backed by the Q&A and resize/key-help polish tasks.
 
 ## 1. Task breakdown
 
@@ -211,7 +214,7 @@ Landed:
   recorded non-fatally. Green: `forge-tui` 30 tests; full unit suite + `StatusReport`
   goldens pass; scalafmt clean.
 
-### Task 2.1.5 — live `AgentEvent` tap (deferred liveness) — Tier 3, may roll forward
+### Task 2.1.5 — live `AgentEvent` tap (deferred liveness) — Tier 3, carried forward
 
 Token-by-token streaming in the active pane. Needs an **in-process event-tap seam**
 on the orchestrator: today streamed `AgentEvent`s are consumed by `SessionMonitor`
@@ -219,39 +222,92 @@ and discarded (no observer seam). Add an opt-in tap that publishes events to a
 `termflow` `Sub`, so `forge run --tui` (or an attach handshake) can host the
 orchestrator and stream live. Revisits the §3.1 in-process Sub/Cmd model; gated on
 real use justifying the coupling (§4 T3). Out-of-scope of the Tier-1 gate.
+**Carried forward:** make this the first task in the next TUI/liveness slice if
+per-settle log refresh proves too coarse.
 
-### Task 2.1.6 — Q&A pane (display)
+### Task 2.1.6 — Q&A pane (display) ✅ 2026-06-01
 
 Render `DesignNeedsHumanInput.questions` / pending `AskUserQuestion` content in the
 active pane when `ActivePane.Question`. v1 **displays** the question + points the
 operator at the existing answer path (`forge spec` REPL / PR); *answering from the
 TUI* is a later slice (it would need the write path + lock, breaking §15 read-only).
 
+Landed:
+
+- `TuiSnapshotBuilder` renders design-review questions with severity, option list,
+  free-text/default hints, and an explicit display-only answer pointer.
+- `NeedsHumanIntervention` renders the reason plus the existing `forge resume`
+  path; if the committed log contains a latest unanswered `.ask_user_question`
+  payload, the pane surfaces that driver question too.
+- `TuiSnapshotBuilderSuite` covers both FSM-backed design questions and the
+  best-effort pending `AskUserQuestion` audit projection.
+
 ### Tier 3 — polish
 
-### Task 2.1.7 — theme / resize / key-help
+### Task 2.1.7 — theme / resize / key-help ✅ 2026-06-01
 
 Adopt a `termflow.tui.Theme`, switch the view to `Layout` for reflow-on-resize
 (today's frame is a fixed 80×20), and add a key-binding help overlay. "Subjective;
 iterate based on what feels wrong during real use" (roadmap §3.2).
+
+Landed:
+
+- `ForgeTui.Model` now tracks terminal width/height and subscribes to
+  `Sub.TerminalResize`; the frame reflows from runtime dimensions instead of
+  assuming a fixed 80×20 surface.
+- The two-pane body is resolved through `termflow.tui.Layout`, uses a small
+  Forge-specific `Theme`, and keeps page scrolling tied to the current active-pane
+  viewport height.
+- `?` opens a modal key-help overlay; `Esc` closes it. The footer advertises the
+  help key alongside quit and scroll bindings.
+- `ForgeTuiAppSuite` covers resize, help overlay toggle/close, and the updated
+  dynamic viewport behavior.
 
 ### Task 2.1.8 — Slice 2.1 close-out
 
 Walk §4 carry-forward into durable homes; **reconcile the stale spec §3.3
 dependency note** (termflow `0.0.1`/`0.1.0-SNAPSHOT` → `0.4.0` multi-module + the
 Scala-3.7.1 floor) into a `forge-design-1.6.md` revision (per the §23 standalone-
-revision rule — don't edit 1.5 in place); record the Scala-bump decision in
-`design-rationale.md`; then tick roadmap §3.2.
+revision rule — don't edit 1.5 in place); confirm the Scala-bump decision recorded
+in `design-rationale.md` still matches the spec revision; then tick roadmap §3.2.
 
 ## 2. Order of work
 
 2.1.1 (done) → 2.1.2 (builder) → 2.1.3 (`forge tui` command) gives a usable
 read-only dashboard = Tier-1 gate. Then 2.1.4 (log-tail, required for exit) →
-2.1.6 (Q&A display) → 2.1.7 (polish). 2.1.5 (live tap) slots in whenever real use
-demands token-level liveness, else rolls forward. 2.1.8 closes.
+2.1.6 (Q&A display) → 2.1.7 (polish). 2.1.5 (live tap) rolls forward unless real
+use demands token-level liveness. 2.1.8 closes.
 
 ## 3. Status log
 
+- **2026-06-01 — Task 2.1.3 review pass (4 TUI findings addressed).**
+  (1) `TuiSnapshotBuilder.MaxTailLines` 10 → 500 with a prepended truncation
+  marker — the old 10-line cap was applied *before* the scroll viewport saw the
+  data, so `PageUp` had no production history to reveal (the scroll tests only
+  passed because they hand-built 20-line snapshots). (2) `ForgeTui` now resets
+  `scrollBack` to 0 on a pane change in `Msg.Refreshed` (it stays preserved for
+  append-only refreshes within a pane), so a viewport parked deep in an old log
+  isn't stranded when the feature moves to a different pane. (3) Removed the dead
+  `.ask_user_question` action-log scan from the Question pane — the orchestrator
+  commits no such record, so it only ever matched synthetic test data; the pane
+  now surfaces only the cached-state questions/reason (see §4 T4 for the durable-
+  event / live-tap follow-up). (4) `init` no longer double-registers the
+  `Sub.Every`/`Sub.InputKey`/`Sub.TerminalResize` subscriptions (each auto-
+  registers with the `RuntimeCtx`; the outer `ctx.registerSub` wrap was a second
+  registration). Tests updated (cap+marker, pane-change reset, log-only-inert
+  Question pane); `forge-tui` 38, full unit suite + goldens green, `forge-it`
+  compiles, scalafmt clean.
+- **2026-06-01 — Tasks 2.1.6 and 2.1.7 landed (Q&A display + resize/key-help
+  polish).** `TuiSnapshotBuilder` now renders human-blocking questions with
+  severity/options/free-text hints, includes the display-only answer path, and
+  best-effort surfaces the latest unanswered `.ask_user_question` audit payload
+  when the committed log has one *(superseded — that scan was removed in the
+  2026-06-01 review pass above; it never matched real data, see §4 T4)*.
+  `ForgeTui` now tracks terminal dimensions via
+  `Sub.TerminalResize`, resolves the pane body through `Layout`, applies a
+  Forge-specific termflow `Theme`, keeps page scrolling tied to the current
+  viewport height, and adds a `?` modal help overlay (`Esc` closes). Coverage:
+  `forge-tui` 36 tests green.
 - **2026-06-01 — Task 2.1.3 landed (`forge tui <feature>` command) — Tier-1 gate
   closed.** Added the read-only `forge tui` command: a new `TuiCommand` builds an
   initial `TuiSnapshot` and a `reload` thunk (both from the §15 read-only
@@ -305,8 +361,8 @@ demands token-level liveness, else rolls forward. 2.1.8 closes.
 termflow `0.3.0` and `0.4.0` are both built with Scala **3.7.1** (TASTy 28.7); a
 3.5.2 compiler reads only TASTy ≤ 28.5, so there is **no** termflow build forge
 could consume at 3.5.2. Bumping forge to 3.7.1 was the only path. Done in Task
-2.1.1. **Durable record:** add a `design-rationale.md` entry (the bump was an
-external-constraint decision, not a preference). **Watch item:** Maven Central
+2.1.1. **Durable record:** `design-rationale.md` BT1 records the bump as an
+external-constraint decision, not a preference. **Watch item:** Maven Central
 currently carries only termflow `0.3.0`; `0.4.0` resolves from the local ivy repo
 (`publishLocal`, on sbt's default resolver chain). Before §3.4 OSS-readiness,
 either `0.4.0` must ship to Central or forge must pin a Central-published version —
@@ -328,6 +384,30 @@ no orchestrator change, testable without a live run); a live `AgentEvent` tap
 §3.1 component diagram shows in-process Sub/Cmd over the orchestrator — our v1 is a
 narrower read-only viewer; the in-process host is the Task 2.1.5 evolution, not a
 contradiction. Reconcile the diagram's framing in the 1.6 revision if it ships.
+
+### T4 — Question pane can't show *live driver* AskUserQuestion prompts (no durable record)
+
+Surfaced by a Task-2.1.3 review (2026-06-01). The Q&A pane (Task 2.1.6) originally
+scanned the action log for `.ask_user_question` records with an absent/blank
+`answer` field, intending to display a "pending driver question." But the
+orchestrator never commits such a record: the only §19 kinds written are
+`session.complete` / `cost.update` / `harness.*` / `audit.*` / `ci.skipped` /
+`user.command` / the monitor-outcome kind (verified by sweeping every `kind = "…"`
+literal in `modules/**/src/main`). A driver `AskUserQuestion` is answered in-band
+via the `forge spec` REPL / resume path and leaves no durable "unanswered" row, so
+that scan was **dead code** against real data (it only matched synthetic test
+payloads). Removed in this review; the Question pane now surfaces only what the §15
+read-only projection can observe in the cached FSM state — `DesignNeedsHumanInput`'s
+`questions` and `NeedsHumanIntervention`'s `reason`.
+
+To show live driver questions later, pick one (deferred — both are out of a
+read-only viewer's scope):
+- a durable **"question opened" audit event** the orchestrator commits when a
+  driver halts on `AskUserQuestion` (a small §19 `kind` addition), which the TUI
+  could then poll read-only; or
+- the **Task 2.1.5 live `AgentEvent` tap**, which carries the question in-process.
+
+Close at Task 2.1.8 (route to the 1.6 revision or a tracking issue).
 
 ## 5. Cross-references
 
