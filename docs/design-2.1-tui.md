@@ -1,7 +1,7 @@
 # design-2.1-tui — Slice 2.1 implementation plan (TUI)
 
 > **Maps to:** [`roadmap.md`](roadmap.md) §3.2 (Phase 2 / Slice 2.1 — TUI) and the
-> §3.1 component diagram in [`forge-design-1.5.md`](forge-design-1.5.md) ("Forge TUI
+> §3.1 component diagram in [`forge-design-1.6.md`](forge-design-1.6.md) ("Forge TUI
 > (termflow, Elm-architecture)" — status / active panes).
 >
 > **Convention** ([`AGENTS.md`](../AGENTS.md) §"Per-section implementation plans"):
@@ -15,18 +15,17 @@
 > and map to Slices 1.1/1.2/1.3). This Slice-2.1 plan therefore uses the
 > disambiguated `design-2.1-tui.md`.
 >
-> **Status:** 🟡 open — 2026-06-01. Second slice of Phase 2 (MLP). **Tier 1 and
-> Tier 2 are complete** — Tasks 2.1.1 (runnable slice + the Scala 3.7.1 bump it
+> **Status:** ✅ closed — 2026-06-01. Second slice of Phase 2 (MLP). **All
+> shipped tasks landed** — Tasks 2.1.1 (runnable slice + the Scala 3.7.1 bump it
 > forced), 2.1.2 (`TuiSnapshot` builder), 2.1.3 (`forge tui <feature>` command),
-> 2.1.4 (scrollable log-tail pane), 2.1.6 (Q&A display), and 2.1.7
-> (theme/resize/key-help) ✅ landed 2026-06-01. The slice exit criterion is met;
-> Task 2.1.5 (live tap) is carried forward unless real use justifies the new
-> orchestrator seam, and Task 2.1.8 close-out remains open pending the
-> section-wide review / spec revision. Roadmap §3.2 stays unticked until then.
-> The TUI is the §3.1 "richer view" over data
-> Slice 2.0 already made replayable — so it is built **log-tail-first** over the
-> canonical action log + state cache, with a live event tap deferred (see §0 /
-> Task 2.1.5).
+> 2.1.4 (scrollable log-tail pane), 2.1.6 (Q&A display), 2.1.7
+> (theme/resize/key-help), and 2.1.8 (close-out → `forge-design-1.6.md`) ✅
+> landed 2026-06-01. Task 2.1.5 (live tap) and the §4 T4 live-driver-question
+> display are **carried forward** unless real use justifies the new orchestrator
+> seam. Roadmap §3.2 ticked at close-out. The TUI is the §3.1 "richer view" over
+> data Slice 2.0 already made replayable — so it is built **log-tail-first** over
+> the canonical action log + state cache, with a live event tap deferred (see
+> §0 / Task 2.1.5).
 
 ## 0. Exit criterion for Slice 2.1
 
@@ -263,13 +262,36 @@ Landed:
 - `ForgeTuiAppSuite` covers resize, help overlay toggle/close, and the updated
   dynamic viewport behavior.
 
-### Task 2.1.8 — Slice 2.1 close-out
+### Task 2.1.8 — Slice 2.1 close-out ✅ 2026-06-01
 
 Walk §4 carry-forward into durable homes; **reconcile the stale spec §3.3
 dependency note** (termflow `0.0.1`/`0.1.0-SNAPSHOT` → `0.4.0` multi-module + the
 Scala-3.7.1 floor) into a `forge-design-1.6.md` revision (per the §23 standalone-
 revision rule — don't edit 1.5 in place); confirm the Scala-bump decision recorded
 in `design-rationale.md` still matches the spec revision; then tick roadmap §3.2.
+
+Landed:
+
+- **`forge-design-1.6.md`** (new standalone revision; 1.5 → redirect stub per §23):
+  §3.3 dependency row now reads termflow **`0.4.0`** (the multi-module split), a new
+  **§3.3.1** documents the Scala-3.7.1 floor as an external constraint (not a
+  preference, pointing at design-rationale BT1), and a §3.1 TUI data-flow note
+  reconciles the diagram's in-process `Sub`/`Cmd` framing (the link is the deferred
+  live-tap target; shipped v1 `forge tui` is a read-only viewer). §23/§24 carry the
+  1.6 revision-history + acknowledgements entries. **No contract surface (§7 trait,
+  §11 FSM, §19 schema) changed** — documentation-only reconciliation.
+- **Carry-forward dispositions** (see §4): T1 ✅ done this slice; T2 ✅ reconciled
+  into 1.6 §3.3/§3.3.1; T3 ✅ reconciled into the 1.6 §3.1 data-flow note; T4 →
+  carried forward (needs a durable "question opened" §19 audit event or the Task
+  2.1.5 live tap — both out of a read-only viewer's scope), recorded on the roadmap
+  §3.2 carry-forward line. The termflow-`0.4.0`-to-Central **watch item** (design-
+  rationale BT1) is **not** closed here — it's a §3.4 OSS-readiness prerequisite,
+  now homed on the roadmap §3.4 bullet + the live-spec §3.3 dependency row.
+- **Pointer sweep:** CLAUDE.md / AGENTS.md / `design-rationale.md` live-contract
+  pointers → 1.6; the `forge-design-1.4.md` stub's "current live contract" → 1.6;
+  roadmap status line + §3.2 bullet ticked. Closed audit trails (design-2.0/3.5.md)
+  intentionally **keep** their contemporaneous 1.5/1.4 references per the
+  established convention (the redirect chain + preserved §-numbers resolve them).
 
 ## 2. Order of work
 
@@ -279,6 +301,28 @@ read-only dashboard = Tier-1 gate. Then 2.1.4 (log-tail, required for exit) →
 use demands token-level liveness. 2.1.8 closes.
 
 ## 3. Status log
+
+- **2026-06-01 — Task 2.1.8 landed (Slice 2.1 close-out) — slice ✅ closed,
+  roadmap §3.2 ticked.** Shipped **`forge-design-1.6.md`** as a standalone
+  revision (§23 rule; 1.5 → redirect stub, not edited in place): §3.3 dependency
+  row reconciled to termflow **`0.4.0`** (multi-module split) with the
+  publishLocal-only watch item inline, a new **§3.3.1** documenting the Scala-3.7.1
+  floor as an external constraint (→ design-rationale BT1), and a §3.1 "TUI
+  data-flow note" reconciling the diagram's in-process `Sub`/`Cmd` framing (the
+  link is the deferred live-tap target; shipped v1 `forge tui` is a read-only
+  viewer). §23/§24 carry the 1.6 history + acknowledgement entries.
+  **Documentation-only — no §7/§11/§19 contract surface moved.** Carry-forward
+  dispositions: T1 (Scala bump) done; T2 (§3.3 stale note) ✅ reconciled; T3
+  (data-flow framing) ✅ reconciled into the §3.1 note; T4 (live driver-question
+  display) carried forward to the next TUI/liveness slice via the roadmap §3.2
+  line (needs a §19 "question opened" event or the Task 2.1.5 live tap). The
+  termflow-`0.4.0`-to-Central **watch item** is *not* closed — it's a §3.4
+  OSS-readiness prerequisite, homed on roadmap §3.4 + the live-spec §3.3 row +
+  BT1. Pointer sweep: CLAUDE.md / AGENTS.md / `design-rationale.md` /
+  `forge-design-1.4.md` stub live-contract pointers → 1.6; closed audit trails
+  (design-2.0/3.5.md) intentionally keep their contemporaneous 1.4/1.5 references
+  per convention (redirect chain + preserved §-numbers resolve them). No code
+  change; `sbt scalafmtCheckAll` unaffected.
 
 - **2026-06-01 — Task 2.1.3 review pass (4 TUI findings addressed).**
   (1) `TuiSnapshotBuilder.MaxTailLines` 10 → 500 with a prepended truncation
@@ -366,24 +410,33 @@ external-constraint decision, not a preference. **Watch item:** Maven Central
 currently carries only termflow `0.3.0`; `0.4.0` resolves from the local ivy repo
 (`publishLocal`, on sbt's default resolver chain). Before §3.4 OSS-readiness,
 either `0.4.0` must ship to Central or forge must pin a Central-published version —
-otherwise a fresh clone can't resolve the build. Close at Task 2.1.8.
+otherwise a fresh clone can't resolve the build. **Disposition (Task 2.1.8,
+2026-06-01):** the *spec* side is reconciled (1.6 §3.3 dependency row + new §3.3.1
+Scala floor); the *watch item* is **not** closed here — it's a §3.4 OSS-readiness
+prerequisite and now lives durably on the roadmap §3.4 bullet, the live-spec §3.3
+dependency row, and design-rationale BT1's "still open after Slice 2.1 close" note.
 
-### T2 — spec §3.3 dependency note is stale
+### T2 — spec §3.3 dependency note is stale ✅ done (Task 2.1.8)
 
-`forge-design-1.5.md` §3.3 still says `termflow:0.0.1` / "depend on a
-`0.1.0-SNAPSHOT` from publishLocal until 0.1.0 ships". Reality: `0.4.0`, a
-multi-module split (`termflow-{terminal,screen,app,widgets,testkit}` + aggregator),
-and a Scala-3.7.x floor. Reconcile into `forge-design-1.6.md` at close-out (Task
-2.1.8) — **not** edited into 1.5 in place (§23 standalone-revision rule).
+`forge-design-1.5.md` §3.3 said `termflow:0.0.1` / "depend on a `0.1.0-SNAPSHOT`
+from publishLocal until 0.1.0 ships". Reality: `0.4.0`, a multi-module split
+(`termflow-{terminal,screen,app,widgets,testkit}` + aggregator), and a Scala-3.7.x
+floor. **Reconciled into `forge-design-1.6.md` §3.3** (the dependency row now reads
+`0.4.0` + the multi-module split, with the watch item inline) **and the new §3.3.1**
+(Scala-3.7.1 floor) at close-out (Task 2.1.8, 2026-06-01) — 1.5 demoted to a
+redirect stub, **not** edited in place (§23 standalone-revision rule).
 
-### T3 — data-flow: log-tail-first, live tap deferred
+### T3 — data-flow: log-tail-first, live tap deferred ✅ framing reconciled (Task 2.1.8)
 
 Decided via `AskUserQuestion` (2026-06-01): v1 reads committed data (replayable,
 no orchestrator change, testable without a live run); a live `AgentEvent` tap
 (Task 2.1.5) adds token streaming later if real use justifies the coupling. The
 §3.1 component diagram shows in-process Sub/Cmd over the orchestrator — our v1 is a
 narrower read-only viewer; the in-process host is the Task 2.1.5 evolution, not a
-contradiction. Reconcile the diagram's framing in the 1.6 revision if it ships.
+contradiction. **Done (Task 2.1.8, 2026-06-01):** the 1.6 revision shipped, so the
+§3.1 diagram now carries a "TUI data-flow note" recording exactly this (the
+in-process `Sub`/`Cmd` link is the deferred live-tap target; shipped v1 `forge tui`
+is a read-only viewer). The live-tap evolution itself is Task 2.1.5 (carried forward).
 
 ### T4 — Question pane can't show *live driver* AskUserQuestion prompts (no durable record)
 
@@ -407,13 +460,19 @@ read-only viewer's scope):
   could then poll read-only; or
 - the **Task 2.1.5 live `AgentEvent` tap**, which carries the question in-process.
 
-Close at Task 2.1.8 (route to the 1.6 revision or a tracking issue).
+**Disposition (Task 2.1.8, 2026-06-01):** carried forward — both options are out
+of a read-only viewer's scope, so neither lands a 1.6 contract change. Routed to a
+durable home on the **roadmap §3.2 carry-forward line** (alongside Task 2.1.5),
+where the next TUI/liveness slice picks it up: a "question opened" §19 audit event
+*or* the live tap is the prerequisite. No tracking issue opened (single-operator
+repo; the roadmap line is the tracker).
 
 ## 5. Cross-references
 
 - [`roadmap.md`](roadmap.md) §3.2 — the terse slice direction this expands.
-- [`forge-design-1.5.md`](forge-design-1.5.md) §3.1 (panes), §3.2 (`forge-tui`
-  module), §3.3 (deps — stale, see T2), §15 (read-only commands).
+- [`forge-design-1.6.md`](forge-design-1.6.md) §3.1 (panes + the TUI data-flow
+  note, T3), §3.2 (`forge-tui` module), §3.3/§3.3.1 (termflow `0.4.0` dep + Scala
+  floor, reconciled per T2), §15 (read-only commands).
 - `StatusReport.renderFeature` / `StatsReport` (`modules/forge-app/.../command/`)
   — the field-for-field reference for the Task 2.1.2 snapshot builder.
 - [`design-2.0.md`](design-2.0.md) — the prior slice that made the action log a

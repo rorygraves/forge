@@ -5,16 +5,19 @@ that first; everything below is Claude-Code-specific.
 
 ## TL;DR
 
-- **Implementation contract:** [`docs/forge-design-1.5.md`](docs/forge-design-1.5.md). The 1.1, 1.2, 1.3, and 1.4 revisions are kept in-tree only as superseded stubs that point here (full prior text in git history); §-numbers are preserved, so any "v1.4 §N" reference resolves to the same §N in 1.5.
+- **Implementation contract:** [`docs/forge-design-1.6.md`](docs/forge-design-1.6.md). The 1.1, 1.2, 1.3, 1.4, and 1.5 revisions are kept in-tree only as superseded stubs that point here (full prior text in git history); §-numbers are preserved, so any "v1.4 §N" reference resolves to the same §N in 1.6.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
-- **Active implementation plan:** [`docs/design-2.1-tui.md`](docs/design-2.1-tui.md)
-  (Slice 2.1 — Phase-2 TUI, 🟡 open 2026-06-01; Task 2.1.1 — termflow
-  wiring + the Scala 3.5.2→3.7.1 bump it forced — ✅ landed; Task 2.1.2 —
-  `TuiSnapshot` builder over the new shared `forge-core` `StatusFields` —
-  ✅ landed). The most
-  recent closed audit trail is
+- **Active implementation plan:** none — between slices. The most recent
+  closed audit trail is [`docs/design-2.1-tui.md`](docs/design-2.1-tui.md)
+  (Slice 2.1 — Phase-2 TUI, ✅ closed 2026-06-01): read-only `forge tui
+  <feature>` over the committed action log + state cache (Tasks 2.1.1–2.1.4,
+  2.1.6, 2.1.7), with the termflow `0.4.0` wiring + repo-wide Scala 3.5.2→3.7.1
+  bump it forced; Task 2.1.5 (live `AgentEvent` tap) is carried forward. Its
+  close-out (Task 2.1.8) shipped [`docs/forge-design-1.6.md`](docs/forge-design-1.6.md)
+  (the §3.3 termflow-dep + new §3.3.1 Scala-floor reconciliation; 1.5 →
+  redirect stub). Older trails are
   [`docs/design-2.0.md`](docs/design-2.0.md) (Slice 2.0 — run
-  observability, ✅ closed 2026-05-31); older trails are
+  observability, ✅ closed 2026-05-31),
   [`docs/design-1.4.md`](docs/design-1.4.md) (Slice 1.4 — Phase-1 MVP
   gate, ✅ closed 2026-05-31),
   [`docs/design-2.3.md`](docs/design-2.3.md) (Slice 1.3),
@@ -24,7 +27,8 @@ that first; everything below is Claude-Code-specific.
   (Task breakdown with checkbox items).
 - **Current state:** Slices 1.1, 1.2, 1.3 ✅ closed 2026-05-27;
   **Slice 1.4 ✅ closed 2026-05-31 — Phase 1 (MVP) complete; Phase 2
-  (MLP) open, first slice 2.0 (run observability).**
+  (MLP) open: Slice 2.0 (run observability) ✅ closed 2026-05-31, Slice
+  2.1 (read-only TUI) ✅ closed 2026-06-01.**
   Slice 1.1 shipped both connectors against v1.2 §7.1 with real-CLI
   integration coverage in `forge-it`. Slice 1.2 shipped `forge-core` —
   `ForgePaths`, relocated manifest data types,
@@ -85,9 +89,10 @@ FORGE_IT_RUN_REGRESSION_SMOKE=1 sbt "project forge-it" "testOnly *ReviewerRegres
 # FORGE_IT_REGRESSION_CAP, FORGE_IT_SKIP_CLAUDE/CODEX, FORGE_REVIEWER_RAW_DUMP_DIR (raw-envelope capture for drift triage).
 ```
 
-Scala 3.5.2, sbt build. `-Xfatal-warnings`, `-Wunused:imports`, and
-`-Wvalue-discard` are on; warnings are errors. Run a fresh `sbt
-compile` before declaring a task done.
+Scala 3.7.1 (bumped from 3.5.2 in Slice 2.1 — termflow ships only for 3.7.x;
+see `forge-design-1.6.md` §3.3.1 / design-rationale BT1), sbt build.
+`-Xfatal-warnings`, `-Wunused:imports`, and `-Wvalue-discard` are on; warnings
+are errors. Run a fresh `sbt compile` before declaring a task done.
 
 ## Things Forge itself happens to care about
 
@@ -124,8 +129,8 @@ their CLIs. A few cross-cutting points that show up while working on
   after a code review on the whole section. See `AGENTS.md`
   §"Per-section implementation plans".
 - **Spec edits go to the next revision file.** The live spec is
-  `forge-design-1.5.md`; don't edit it in place — open a
-  `forge-design-1.6.md` (per the §23 "standalone revisions" rule). The
+  `forge-design-1.6.md`; don't edit it in place — open a
+  `forge-design-1.7.md` (per the §23 "standalone revisions" rule). The
   exception is the small inline pointer to `roadmap.md` already in §17,
   which exists to keep readers oriented.
 - **Don't introduce `langfuse` / `llm4s` / API-direct calls** in
