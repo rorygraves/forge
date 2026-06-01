@@ -94,12 +94,12 @@ final class RealSideEffects(
   override def resumeImplement(feature: Feature, piece: PieceId, sessionId: String): IO[ActiveSession] =
     connector
       .resumeHeadlessDriver(sessionId, promptPath("implement"), resumeMessage(feature, piece))
-      .map(ActiveSession(SessionPhase.Implement, _))
+      .map(ActiveSession(SessionPhase.Implement, _, resumed = true))
 
   override def resumeFixup(feature: Feature, piece: PieceId, sessionId: String): IO[ActiveSession] =
     connector
       .resumeHeadlessDriver(sessionId, promptPath("fixup"), resumeMessage(feature, piece))
-      .map(ActiveSession(SessionPhase.Fixup, _))
+      .map(ActiveSession(SessionPhase.Fixup, _, resumed = true))
 
   /** D3-3 continuation nudge for a resumed implement/fix-up driver. The CLI restores the prior conversation (C19), so
     * this only points the driver back at the in-flight task with absolute paths (C19 watch item 3: cheap models
@@ -140,7 +140,7 @@ final class RealSideEffects(
     IO.fromOption(feature.designSessionId)(
       new IllegalStateException("resume design driver: feature.designSessionId is empty")
     ).flatMap(connector.resumeStreamingSpec(_, promptPath("specify"), message))
-      .map(ActiveSession(SessionPhase.DesignRevision, _))
+      .map(ActiveSession(SessionPhase.DesignRevision, _, resumed = true))
 
   // --- reviewer-input assembly ----------------------------------------------
 

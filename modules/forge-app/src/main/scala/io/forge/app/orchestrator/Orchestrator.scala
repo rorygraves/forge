@@ -557,11 +557,16 @@ final class Orchestrator(
     * event has nothing to attribute and the totals are unchanged. The `session.complete` (Task 2.0.2) is emitted for
     * every settle so per-phase timing/attribution is recorded even for a zero-cost or failed turn.
     */
-  private def settleAuditDrafts(feature: Feature, report: MonitorReport, totals: CostTotals): Vector[ActionDraft] =
+  private def settleAuditDrafts(
+      feature: Feature,
+      report: MonitorReport,
+      totals: CostTotals,
+      resumed: Boolean
+  ): Vector[ActionDraft] =
     val piece = pieceOf(feature.state)
     val role = roleOf(report.phase)
     report.turnCost.toVector.map(costUpdateDraft(feature, piece, role, totals, _)) :+
-      sessionCompleteDraft(feature, report, piece, role)
+      sessionCompleteDraft(feature, report, piece, role, resumed)
 
   /** §19 `cost.update` — `{ provider, model, inputTokens, outputTokens, usd, featureTotalUsd, pieceTotalUsd,
     * turnTotalUsd }`. The three totals are the running scopes off [[CostTotals]] (`Replay.applyCostUpdate` projects
@@ -593,16 +598,19 @@ final class Orchestrator(
       )
     )
 
-  /** §19 `session.complete` (new in Slice 2.0 Task 2.0.2) — `{ phase, piece, durationMs, model, turnCostUsd, success
-    * }`. An audit-only record (a no-op projection in `Replay`); folded by `forge stats` (Task 2.0.3) into per-phase
-    * timing and attribution. `durationMs` is the CLI's own turn duration (`None` → `null` on a timeout/kill with no
-    * `Result`).
+  /** §19 `session.complete` (new in Slice 2.0 Task 2.0.2; `resumed` added D3-4) — `{ phase, piece, durationMs, model,
+    * turnCostUsd, success, resumed }`. An audit-only record (a no-op projection in `Replay`); folded by `forge stats`
+    * (Task 2.0.3) into per-phase timing and attribution. `durationMs` is the CLI's own turn duration (`None` → `null`
+    * on a timeout/kill with no `Result`). `resumed` (D3-4, roadmap §3.5) is `true` when this turn *continued* an
+    * existing driver session via `--resume` (the resume side effects) rather than spawning fresh — the discriminator
+    * that lets `forge stats` count a resumed turn as the gap-#10 re-exploration-avoided saving.
     */
   private def sessionCompleteDraft(
       feature: Feature,
       report: MonitorReport,
       piece: Option[PieceId],
-      role: String
+      role: String,
+      resumed: Boolean
   ): ActionDraft =
     ActionDraft(
       feature.id,
@@ -616,7 +624,8 @@ final class Orchestrator(
         "durationMs" -> report.durationMs.map(d => ujson.Num(d.toDouble)).getOrElse(ujson.Null),
         "model" -> ujson.Str(report.turnCost.map(_.model).getOrElse("")),
         "turnCostUsd" -> ujson.Num(report.turnCost.map(_.usd).getOrElse(BigDecimal(0)).toDouble),
-        "success" -> ujson.Bool(Orchestrator.outcomeSuccess(report.outcome))
+        "success" -> ujson.Bool(Orchestrator.outcomeSuccess(report.outcome)),
+        "resumed" -> ujson.Bool(resumed)
       )
     )
 
@@ -739,32 +748,34 @@ final class Orchestrator(
         // cost totals (the monitor just folded this turn's spend into the shared ref) and draft the §19 `cost.update`
         // + `session.complete` audit records; they are persisted in the SAME atomic append as the settle transition
         // (`applyAndPersist`'s `extraDrafts` / the prepend below), so a crash after the transition still has them.
-        driverRef.set(None) >> totalsRef.get.flatMap { totals =>
-          val auditDrafts = settleAuditDrafts(feature, report, totals)
-          val plan = PostSettleSynthesis.plan(feature.state, report.outcome)
-          plan.effect match
-            case SettleEffect.None =>
-              // Pass-through outcome. Apply the converted event directly; if it no-ops (an unhandled driver settle
-              // such as HitQuestionLimit), route to NHI rather than spin on a now-session-less state.
-              val raw = passThroughEvent(plan.synthesis, report.outcome)
-              val (cand, drafts) = Fsm.transition(feature, raw, fsmConfig)
-              if cand.state == feature.state then
-                applyAndPersist(
-                  feature,
-                  FsmEvent.HarnessError(s"unhandled driver settle in ${feature.state}: ${report.outcome}"),
-                  auditDrafts
-                )
-              else persistTransition(cand, auditDrafts ++ drafts).as(cand)
-            case eff =>
-              // Driver settled clean: run the §11 side effect FIRST, then apply the synthesized event. For the
-              // post-settle-recoverable piece-driver effects, first durably record a `monitor.outcome` marker (roadmap
-              // §3.5 Unit B): a crash anywhere between this settle and the transition persist then routes the cold
-              // rebuild to `RebuildState.settledButUnadvanced` (re-run the idempotent side effect — `run`'s
-              // `postSettleRecover`) instead of re-spawning the driver from scratch (the D3 exploration cost) or
-              // emitting an unactionable NHI. The marker is written as its own append, before the effect, so it is on
-              // disk for the whole window.
-              recordSettleMarker(feature, report, eff) >>
-                runSettleEffect(feature, eff).flatMap(applyAndPersist(feature, _, auditDrafts))
+        driverRef.getAndSet(None).flatMap { active =>
+          totalsRef.get.flatMap { totals =>
+            val auditDrafts = settleAuditDrafts(feature, report, totals, resumed = active.exists(_.resumed))
+            val plan = PostSettleSynthesis.plan(feature.state, report.outcome)
+            plan.effect match
+              case SettleEffect.None =>
+                // Pass-through outcome. Apply the converted event directly; if it no-ops (an unhandled driver settle
+                // such as HitQuestionLimit), route to NHI rather than spin on a now-session-less state.
+                val raw = passThroughEvent(plan.synthesis, report.outcome)
+                val (cand, drafts) = Fsm.transition(feature, raw, fsmConfig)
+                if cand.state == feature.state then
+                  applyAndPersist(
+                    feature,
+                    FsmEvent.HarnessError(s"unhandled driver settle in ${feature.state}: ${report.outcome}"),
+                    auditDrafts
+                  )
+                else persistTransition(cand, auditDrafts ++ drafts).as(cand)
+              case eff =>
+                // Driver settled clean: run the §11 side effect FIRST, then apply the synthesized event. For the
+                // post-settle-recoverable piece-driver effects, first durably record a `monitor.outcome` marker (roadmap
+                // §3.5 Unit B): a crash anywhere between this settle and the transition persist then routes the cold
+                // rebuild to `RebuildState.settledButUnadvanced` (re-run the idempotent side effect — `run`'s
+                // `postSettleRecover`) instead of re-spawning the driver from scratch (the D3 exploration cost) or
+                // emitting an unactionable NHI. The marker is written as its own append, before the effect, so it is on
+                // disk for the whole window.
+                recordSettleMarker(feature, report, eff) >>
+                  runSettleEffect(feature, eff).flatMap(applyAndPersist(feature, _, auditDrafts))
+          }
         }
 
       case RaceResult.FromWatcher(event) => applyAndPersist(feature, event)

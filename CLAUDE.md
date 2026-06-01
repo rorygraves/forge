@@ -5,7 +5,7 @@ that first; everything below is Claude-Code-specific.
 
 ## TL;DR
 
-- **Implementation contract:** [`docs/forge-design-1.4.md`](docs/forge-design-1.4.md). The 1.1, 1.2, and 1.3 revisions are kept in-tree only as superseded stubs that point here (full prior text in git history); §-numbers are preserved, so any "v1.3 §N" reference resolves to the same §N in 1.4.
+- **Implementation contract:** [`docs/forge-design-1.5.md`](docs/forge-design-1.5.md). The 1.1, 1.2, 1.3, and 1.4 revisions are kept in-tree only as superseded stubs that point here (full prior text in git history); §-numbers are preserved, so any "v1.4 §N" reference resolves to the same §N in 1.5.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
 - **Active implementation plan:** [`docs/design-2.0.md`](docs/design-2.0.md)
   (Slice 2.0 — Phase-2 run observability, 🟡 open 2026-05-31). The most
@@ -119,8 +119,8 @@ their CLIs. A few cross-cutting points that show up while working on
   after a code review on the whole section. See `AGENTS.md`
   §"Per-section implementation plans".
 - **Spec edits go to the next revision file.** The live spec is
-  `forge-design-1.4.md`; don't edit it in place — open a
-  `forge-design-1.5.md` (per the §23 "standalone revisions" rule). The
+  `forge-design-1.5.md`; don't edit it in place — open a
+  `forge-design-1.6.md` (per the §23 "standalone revisions" rule). The
   exception is the small inline pointer to `roadmap.md` already in §17,
   which exists to keep readers oriented.
 - **Don't introduce `langfuse` / `llm4s` / API-direct calls** in

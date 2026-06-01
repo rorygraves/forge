@@ -138,6 +138,9 @@ class OrchestratorCostUpdateWriterSuite extends munit.FunSuite:
       assertEquals(str(implSession, "model"), Some("haiku"))
       assertEquals(num(implSession, "turnCostUsd"), Some(1.5))
       assertEquals(implSession.payload.objOpt.flatMap(_.get("success")).flatMap(_.boolOpt), Some(true))
+      // D3-4: a freshly-spawned driver turn carries resumed=false (the gap-#10 saving is only claimed for a turn that
+      // continued an existing session via --resume; see OrchestratorResumeRecoverySuite for the resumed=true path).
+      assertEquals(implSession.payload.objOpt.flatMap(_.get("resumed")).flatMap(_.boolOpt), Some(false))
 
       // (iii) the dead read side is now fed: a from-scratch RebuildState projects the final running totals onto
       // Feature.cost. A Left here would mean replay rejected the new session.complete kind.

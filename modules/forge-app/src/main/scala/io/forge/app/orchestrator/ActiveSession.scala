@@ -17,5 +17,11 @@ import io.forge.core.fsm.SessionPhase
   * carries enough type information to safely downcast where the streaming surface is needed (the `forge spec` REPL
   * matches `case Some(ActiveSession(SessionPhase.Spec, s: StreamingSession))`). `SessionMonitor` consumes only the
   * `AgentSession` surface (`events` + `kill()`), so the headless / streaming distinction is invisible there.
+  *
+  * `resumed` (D3-4, roadmap §3.5 driver-respawn-avoidance) flags a session that *continued* a prior driver session via
+  * `--resume` (the resume side effects — `resumeImplement` / `resumeFixup` for the gap-#10 mid-exploration crash, and
+  * the design-phase `resumeDesignRevision` / `resumeDesignFeedback`) rather than a fresh spawn. The orchestrator reads
+  * it off the live session at settle and stamps it onto the §19 `session.complete` record, so `forge stats` can fold a
+  * resumed turn distinctly from a fresh spawn — turning gap #10's "re-exploration avoided" into a measured saving.
   */
-final case class ActiveSession(phase: SessionPhase, session: AgentSession)
+final case class ActiveSession(phase: SessionPhase, session: AgentSession, resumed: Boolean = false)

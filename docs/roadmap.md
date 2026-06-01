@@ -6,7 +6,7 @@
 > §17 of the design); later phases capture direction and have not yet been
 > turned into specs.
 >
-> **Status:** draft v0.11 — 2026-05-31. **Phase 1 (MVP) ✅ COMPLETE — Slices 1.1, 1.2, 1.3, and 1.4 all closed.** Phase 2 (MLP) is open; **Slice 2.0 (run observability, §3.1) ✅ closed 2026-05-31** — all three tiers landed (`cost.update` + `session.complete` writers, `forge stats`, work-vs-wait markers, driver raw-dump, clean resume-from-NHI); spec reconciled into [`forge-design-1.4.md`](forge-design-1.4.md); §4 carry-forward placed (§3.5). The close-out live re-validation reproduced and fixed **gap #7** (`designSessionId` log durability); the final implement-turn `forge stats` capture against real CLI output is a watch item (the writers + fold are unit-tested). Audit trail in [`design-2.0.md`](design-2.0.md). Next: Slice 2.1 (TUI, §3.2) or the §3.5 deferred tuning/durability follow-ups.
+> **Status:** draft v0.12 — 2026-06-01. **Phase 1 (MVP) ✅ COMPLETE — Slices 1.1, 1.2, 1.3, and 1.4 all closed.** Phase 2 (MLP) is open; **Slice 2.0 (run observability, §3.1) ✅ closed 2026-05-31** — all three tiers landed (`cost.update` + `session.complete` writers, `forge stats`, work-vs-wait markers, driver raw-dump, clean resume-from-NHI); the final implement-turn `forge stats` capture against real CLI output is a watch item (the writers + fold are unit-tested). **§3.5 driver-respawn-avoidance (the D3 large half) ✅ closed 2026-06-01** — a restart from a mid-exploration implement/fix-up crash now resumes the existing driver session instead of re-paying the full exploration (gap #10), gated by a worktree-safety classifier; `forge stats` folds the resumed turn as a measured saving. The live contract is now **[`forge-design-1.5.md`](forge-design-1.5.md)** (1.4 → redirect stub), which reconciles both the Slice-2.0 §19 additions and the §3.5 D3 deltas; §3.5's second bullet (§18 reviewer/driver tuning, S4-3/S4-5) stays open. Audit trails: [`design-2.0.md`](design-2.0.md), [`design-3.5.md`](design-3.5.md). Next: Slice 2.1 (TUI, §3.2) or the §3.5 §18 tuning follow-up.
 > Slice 1.1 (Task 1.1.1 → Task 1.1.5 in [`design-2.1.md`](design-2.1.md)) ships
 > both connectors against the v1.2 §7.1 streaming-spec trait with
 > real-CLI integration tests in `forge-it`. Slice 1.2 (Task 1.2.1 → Task 1.2.7 in
@@ -497,10 +497,18 @@ out-scoped the observability slice (full dispositions in
   already flagged the live target: the implement settle cap was too tight
   (`maxTurnCostUsd = $2.0` vs an actual $9.56 turn). A §18 schema extension, so
   it lands via a `forge-design-1.x.md` revision.
-- [ ] **Driver-respawn-avoidance on resume-from-NHI** (design-2.0 §4 **D3**
-  large half). **Per-chunk plan: [`design-3.5.md`](design-3.5.md)** (D3-0
-  spike → D3-1 connector resume seam → D3-2 worktree-safety classifier →
-  D3-3 orchestrator resume-instead-of-respawn → D3-4 stats/close-out).
+- [x] **Driver-respawn-avoidance on resume-from-NHI** (design-2.0 §4 **D3**
+  large half). ✅ **CLOSED 2026-06-01** — all five chunks (D3-0…D3-4) landed and
+  the spec deltas are reconciled into [`forge-design-1.5.md`](forge-design-1.5.md)
+  (§7.1 `resumeHeadlessDriver`, §11.4 restart-recovery resume-instead-of-respawn
+  gated by a worktree-safety classifier (default-on once safe), §19 `<actor>.resume`
+  for piece drivers + `session.complete.resumed`). A restart from a mid-exploration
+  implement/fix-up crash now **resumes the existing driver session** instead of
+  re-paying the full exploration (gap #10's ~$10 / 2.18M-token turn), and
+  `forge stats` folds the resumed turn as a measured saving. **Per-chunk plan +
+  audit trail: [`design-3.5.md`](design-3.5.md)** (D3-0 spike → D3-1 connector
+  resume seam → D3-2 worktree-safety classifier → D3-3 orchestrator
+  resume-instead-of-respawn → D3-4 stats/close-out).
   Slice 2.0 made resume append-only and self-describing
   (`audit.resume_from_nhi`) but a resume still **re-spawns the implement/fix-up
   driver from scratch**, re-paying the full exploration (~$10 in the szork run).
@@ -559,10 +567,13 @@ out-scoped the observability slice (full dispositions in
     implement driver launched exactly once — the empty pass-2 monitor would raise on
     any stray re-spawn), `ReadOnlyHandlerSuite` +1 (the rebuild-state report line).
     `forge-core` 402, `forge-app` 364 (full unit suite green); `forge-it` compiles.
-    **Still open (the rest of this bullet):** the **D3 large half** — driver-CLI
-    `--resume` for the *mid-exploration* (uncommitted) cost, which still re-pays
-    exploration on every resume (the watch item above stands; Unit B only recovers
-    the *post-settle* window, where the driver had already finished exploring).
+    **The D3 large half (the rest of this bullet) ✅ closed 2026-06-01** —
+    driver-CLI `--resume` for the *mid-exploration* (uncommitted) cost now
+    resumes instead of re-spawning (D3-0…D3-4, design-3.5.md; the watch item
+    above no longer stands for a worktree-safe restart). Unit B recovered the
+    *post-settle* window (driver finished exploring, crashed before the
+    transition persisted); D3 recovers the *mid-exploration* window (driver
+    killed while still exploring), gated by the worktree-safety classifier.
 - [x] **`designSessionId` durability** (Task 1.4.16 **gap #7**). ✅ **Fixed
   2026-05-31** during the Slice 2.0 live re-validation, which reproduced it: a
   `forge run` started after `forge spec` dead-ended at
@@ -860,7 +871,7 @@ project guidelines + project state; post inline comments.
 ## 7. Divergences from the v1 spec
 
 Tracked here so they don't surprise anyone mid-implementation. None
-require changes to the v1 contract (now `forge-design-1.4.md`); all are deliberately
+require changes to the v1 contract (now `forge-design-1.5.md`); all are deliberately
 deferred to Phase 3+.
 
 | Long-term direction | v1 spec stance | Phase that resolves it |

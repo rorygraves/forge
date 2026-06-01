@@ -154,6 +154,12 @@ class OrchestratorResumeRecoverySuite extends munit.FunSuite:
     assertEquals(implLaunches.get.unsafeRunSync(), 1, "resume must NOT re-spawn the implement driver (still 1)")
     // The durable timeline records the resume (`driver.resume`), the discriminator a second restart would key on.
     assert(out._2.exists(_.kind == "driver.resume"), "expected a driver.resume durability entry after the resume")
+    // D3-4: the resumed turn's settle stamps `session.complete.resumed = true`, the field `forge stats` folds into the
+    // gap-#10 re-exploration-avoided saving (distinct from a fresh spawn, whose `session.complete` is resumed=false).
+    val resumedSessions = out._2.filter(a =>
+      a.kind == "session.complete" && a.payload.objOpt.flatMap(_.get("resumed")).flatMap(_.boolOpt).contains(true)
+    )
+    assertEquals(resumedSessions.size, 1, s"expected exactly one resumed session.complete, got ${out._2.map(_.kind)}")
 
   tempFixture.test("unsafe worktree: an UnexpectedDivergence routes to NHI, no resume, no re-spawn"): root =>
     val paths = new ForgePaths(repoRoot = root)

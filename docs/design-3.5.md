@@ -14,11 +14,16 @@
 > file owns. The roadmap §3.5 bullets stay terse; chunks get ticked here as
 > they land, and the roadmap bullet flips only after a section-level review.
 >
-> **Status:** 🟡 open — 2026-06-01. Active focus: the **D3 large half**
-> (driver-respawn-avoidance on resume-from-NHI), decomposed into five
-> riskiest-first chunks (D3-0 … D3-4). The §18 tuning track (S4-3 / S4-5)
-> is parked here too but not yet started — it wants more lived
-> cost-attribution data first.
+> **Status:** 🟢 D3 large half COMPLETE — 2026-06-01. All five
+> riskiest-first chunks (D3-0 … D3-4) landed; the driver-respawn-avoidance
+> spec deltas are reconciled into the live contract
+> [`forge-design-1.5.md`](forge-design-1.5.md) (§7.1 `resumeHeadlessDriver`,
+> §11.4 restart-recovery resume-instead-of-respawn, §19 `<actor>.resume` for
+> piece drivers + `session.complete.resumed`). The roadmap §3.5
+> driver-respawn-avoidance bullet is flipped. The §18 tuning track (S4-3 /
+> S4-5) is still **parked here, not started** — it wants more lived
+> cost-attribution data first (the D3 work + a few real features will produce
+> it). This file stays open as the home for that track until it lands.
 
 ## 0. Background — what Units A/B already closed, and what D3 leaves open
 
@@ -196,7 +201,7 @@ a gated "resumable" route in place of the unconditional NHI.
   (forge-core 404, forge-app 366, forge-git 213, forge-agents 205). **Next:
   D3-4** (cost/stats proof + close-out).
 
-### [ ] D3-4 — Cost/stats proof + close-out
+### [x] D3-4 — Cost/stats proof + close-out ✅ **2026-06-01**
 
 Emit a marker distinguishing a driver-*resumed* turn from a fresh spawn so
 `forge stats` turns the gap #10 watch item into a measured saving.
@@ -204,6 +209,35 @@ Reconcile the new connector flag / marker into the next-revision spec
 (`forge-design-1.x.md`, not the live 1.4 in place), walk the §4
 carry-forward, flip the roadmap §3.5 bullet (after a section-level review),
 and optionally re-validate on a real feature.
+
+- *Landed:* `session.complete` gained a `resumed: Boolean` field (Slice-2.0
+  §19 audit record), stamped from the live session at settle — `true` when
+  the turn continued an existing driver session via the resume side effects
+  (`resumeImplement` / `resumeFixup` — the D3-3 restart-resume — and the
+  design-phase `resumeDesignRevision` / `resumeDesignFeedback`), `false` for a
+  fresh spawn. The flag rides a new `ActiveSession.resumed` bit read at
+  `handleWinner`'s settle (`driverRef.getAndSet(None)`). `forge stats`
+  (`StatsReport`) folds it per phase (`PhaseStats.resumedTurns`) and renders a
+  `└ N resumed (continued prior session — re-exploration avoided)` sub-line
+  under the phase row, so the gap-#10 saving reads in place; a pre-D3-4 log
+  (no field) folds to `false` (fresh spawn). Tests: `StatsReportSuite`
+  (fold + render of resumed turns, pre-D3-4 degradation),
+  `OrchestratorResumeRecoverySuite` (the D3-3 safe-resume path now asserts one
+  `session.complete` with `resumed=true`), `OrchestratorCostUpdateWriterSuite`
+  (a fresh spawn asserts `resumed=false`); the `FakeSideEffects` resume fakes
+  mirror the real `resumed` flag. Full forge-app sweep green; `scalafmtCheckAll`
+  clean.
+- *Spec:* the accumulated D3 deltas are reconciled into the new standalone
+  [`forge-design-1.5.md`](forge-design-1.5.md) (1.4 demoted to a redirect
+  stub per §23): §7.1 `resumeHeadlessDriver`, §7.10(a), §11.4 restart-recovery
+  resume-instead-of-respawn, §19 `<actor>.resume` (piece) + `session.complete`
+  `resumed`. design-rationale **C19** "In the spec" updated to RECONCILED; the
+  CLAUDE.md / AGENTS.md live-spec pointers moved to 1.5.
+- *Carry-forward:* the only remaining §3.5 item is the §18 reviewer/driver
+  tuning track (S4-3 / S4-5), which stays parked in §3 below (it wants more
+  lived cost-attribution data first) — so the roadmap §3.5
+  driver-respawn-avoidance bullet flips, but the §3.5 *section* keeps its
+  second open bullet.
 
 ## 3. Parallel track — §18 reviewer/driver tuning (S4-3 / S4-5)
 
@@ -326,6 +360,28 @@ is attributed cost data to tune against.
   emit a resumed-turn marker so `forge stats` turns gap #10 into a measured saving, then reconcile the spec + flip
   the roadmap §3.5 bullet).
 
+- 2026-06-01 — **D3-4 closed ✅ — resumed-turn marker + `forge stats` saving + spec cut + roadmap flip. D3 large half
+  COMPLETE.** The settled-turn discriminator chosen (over counting the standalone `driver.resume` entries): a
+  `resumed: Boolean` field on the Slice-2.0 §19 `session.complete` record, which already carries the turn's
+  per-phase cost/duration — so the resumed turn's *actual* cost is attributable, not just its existence. A new
+  `ActiveSession.resumed` bit (set `true` by the four resume side effects — `resumeImplement` / `resumeFixup` for the
+  D3-3 restart-resume, and the design-phase `resumeDesignRevision` / `resumeDesignFeedback`; `false` for `launch*`) is
+  read at the settle (`handleWinner`'s `driverRef.getAndSet(None)`) and stamped onto `session.complete`. `forge stats`
+  (`StatsReport.fold`) counts it per phase (`PhaseStats.resumedTurns`) and `render` emits a
+  `└ N resumed (continued prior session — re-exploration avoided)` sub-line under the phase row; a pre-D3-4 log (no
+  field) folds to `false` (a fresh spawn), never inventing a saving. Tests: `StatsReportSuite` (+4: fold counts
+  per-phase resumes, pre-D3-4 degradation; render annotates / omits the sub-line), `OrchestratorResumeRecoverySuite`
+  (the D3-3 safe-resume path now asserts exactly one `session.complete` with `resumed=true`),
+  `OrchestratorCostUpdateWriterSuite` (a fresh spawn asserts `resumed=false`); `FakeSideEffects` resume fakes mirror
+  the real `resumed` flag (the "fake must mirror real" discipline). Full forge-app sweep green; `scalafmtCheckAll`
+  clean. **Spec:** all accumulated D3 deltas reconciled into the new standalone
+  [`forge-design-1.5.md`](forge-design-1.5.md) (1.4 demoted to a redirect stub per §23) — §7.1 `resumeHeadlessDriver`,
+  §7.10(a), §11.4 restart-recovery resume-instead-of-respawn, §19 `<actor>.resume` (piece) + `session.complete.resumed`;
+  design-rationale **C19** "In the spec" flipped to RECONCILED; CLAUDE.md / AGENTS.md live-spec pointers moved to 1.5.
+  **Roadmap:** §3.5 driver-respawn-avoidance bullet flipped `[ ]` → `[x]` (the §18 tuning bullet stays open, parked in
+  §3 below). The optional real-feature re-validation is left as a watch item — the writers + fold are unit-tested and the
+  D3-1/D3-3 resume path is real-CLI verified (C19#1), mirroring the Slice-2.0 close-out's live-capture watch item.
+
 - 2026-06-01 — **D3-1 seam + unit/IT harness landed; real-CLI run pending.** Added
   `Connector.resumeHeadlessDriver(sessionId, systemPromptPath, message): IO[AgentSession]` — the headless driver-side
   analogue of `resumeStreamingSpec`, phase-agnostic (one method serves both implement- and fix-up-phase resume; the
@@ -350,8 +406,10 @@ is attributed cost data to tune against.
   (D3) and the 2026-06-01 status-log entries.
 - Friction source: [`slice-4/mvp-friction.md`](slice-4/mvp-friction.md)
   gap #10 (the 2.18M-token / \$9.56 implement turn that resume re-pays).
-- Spec: [`forge-design-1.4.md`](forge-design-1.4.md) §7.1 / §7.10 (connector
-  resume seams), §11.3 (restart recovery), §19 (action-log kinds).
+- Spec: [`forge-design-1.5.md`](forge-design-1.5.md) §7.1 / §7.10 (connector
+  resume seams incl. `resumeHeadlessDriver`), §11.4 (restart-recovery
+  resume-instead-of-respawn), §19 (action-log kinds incl. `<actor>.resume` for
+  piece drivers + `session.complete.resumed`).
 - Code anchors: `RestartRecovery`
   (`forge-app/.../orchestrator/RestartRecovery.scala:11`), `RebuildState`
   (`forge-core/.../state/RebuildState.scala`), `ClaudeConnector` /

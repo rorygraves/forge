@@ -195,13 +195,16 @@ object OrchestratorTestKit:
   // --- SideEffects fake: returns the documented success events; launches return fake sessions ---
 
   class FakeSideEffects(designPr: PrNumber, prForPiece: PieceId => PrNumber) extends SideEffects:
-    private def session(phase: SessionPhase, id: String): ActiveSession = ActiveSession(phase, FakeAgentSession(id))
+    // `resumed` mirrors the real side effects (D3-4): a launch* is a fresh spawn, a resume* continues an existing
+    // session — so the orchestrator stamps the right `session.complete.resumed` and `forge stats` folds it correctly.
+    private def session(phase: SessionPhase, id: String, resumed: Boolean = false): ActiveSession =
+      ActiveSession(phase, FakeAgentSession(id), resumed)
 
     override def launchSpec(feature: Feature): IO[ActiveSession] = IO.pure(session(SessionPhase.Spec, "spec-1"))
     override def resumeDesignRevision(feature: Feature, round: Int): IO[ActiveSession] =
-      IO.pure(session(SessionPhase.DesignRevision, s"design-rev-$round"))
+      IO.pure(session(SessionPhase.DesignRevision, s"design-rev-$round", resumed = true))
     override def resumeDesignFeedback(feature: Feature, pr: PrNumber, round: Int): IO[ActiveSession] =
-      IO.pure(session(SessionPhase.DesignRevision, s"design-fb-$round"))
+      IO.pure(session(SessionPhase.DesignRevision, s"design-fb-$round", resumed = true))
     override def launchImplement(feature: Feature, piece: PieceId): IO[ActiveSession] =
       IO.pure(session(SessionPhase.Implement, s"impl-${piece.value}"))
     override def launchFixup(feature: Feature, piece: PieceId, attempt: Int): IO[ActiveSession] =
@@ -210,9 +213,9 @@ object OrchestratorTestKit:
     // D3-3: resume reuses the existing session id (mirrors the pinned-CLI same-id resume); the default classifier
     // reports DriverUncommittedOnly (safe) — suites that exercise the unsafe branch override classifyPieceWorktree.
     override def resumeImplement(feature: Feature, piece: PieceId, sessionId: String): IO[ActiveSession] =
-      IO.pure(session(SessionPhase.Implement, sessionId))
+      IO.pure(session(SessionPhase.Implement, sessionId, resumed = true))
     override def resumeFixup(feature: Feature, piece: PieceId, sessionId: String): IO[ActiveSession] =
-      IO.pure(session(SessionPhase.Fixup, sessionId))
+      IO.pure(session(SessionPhase.Fixup, sessionId, resumed = true))
     override def classifyPieceWorktree(feature: Feature, piece: PieceId): IO[Either[String, WorktreeSafety]] =
       IO.pure(Right(WorktreeSafety.DriverUncommittedOnly))
 

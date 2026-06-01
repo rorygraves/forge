@@ -1,6 +1,6 @@
 # Forge — design rationale
 
-> Why the live spec ([`forge-design-1.4.md`](forge-design-1.4.md)) looks the way it does. Each item names a decision, what was rejected, and what to read in the live spec for the resulting contract. Older entries reference §-numbers in v1.1 / v1.2 / v1.3 — those sections survived intact into v1.4 (the numbering is preserved across revisions) unless explicitly noted.
+> Why the live spec ([`forge-design-1.5.md`](forge-design-1.5.md)) looks the way it does. Each item names a decision, what was rejected, and what to read in the live spec for the resulting contract. Older entries reference §-numbers in v1.1 / v1.2 / v1.3 / v1.4 — those sections survived intact into v1.5 (the numbering is preserved across revisions) unless explicitly noted.
 >
 > The design went through several iterations (0.1 → 0.9 → 1.0 → 1.1 → 1.2 → 1.3) with delta-only commentaries at each step. Those commentaries have been removed from the tree; this document preserves the non-obvious rationale a future contributor would want before re-litigating a settled question. Decisions already explicit in the live spec's §22 (rejects) or §20 (v2 candidates) are not repeated here.
 
@@ -291,7 +291,7 @@
 2. **Codex requires a git repo / trusted dir.** `codex exec` refuses an untrusted non-git dir ("Not inside a trusted directory and --skip-git-repo-check was not specified"); the spike git-inits its workdir. Real driver runs are inside the repo worktree, so this is satisfied in production — but D3 resume code must not assume otherwise.
 3. **Headless models resolve relative paths inconsistently.** A cheap model (haiku) wrote `plan.md` to `$HOME` when told "the current directory", while opus wrote into cwd correctly; the spike now passes absolute paths and treats file-survival as a soft signal. Not a resume issue, but a reminder that D3 prompts should use absolute worktree paths.
 
-**In the spec today:** v1.2 §7.1 / §7.10(a) (the existing *spec-phase* resume seams + C14); this extends the same `--resume` mechanism to the headless **driver** methods, which D3-1 will add to the trait. Filed here so the go/no-go and the three watch items are durable ahead of D3-1.
+**In the spec:** ~~v1.2 §7.1 / §7.10(a) (the existing *spec-phase* resume seams + C14); this extends the same `--resume` mechanism to the headless **driver** methods, which D3-1 will add to the trait.~~ **RECONCILED into v1.5 (D3-4 close-out, 2026-06-01).** The accumulated D3 deltas are now in the live contract: §7.1 `resumeHeadlessDriver` (the headless driver-side resume method, extended to §7.10(a)), §11.4 restart-recovery resume-instead-of-respawn (gated by the worktree-safety classifier, default-on once safe), §19 `<actor>.resume` now emitted for piece-driver restart resumes, and the `session.complete` `resumed` field that lets `forge stats` measure the avoided re-exploration (gap #10). The interim deviation lived here + in the `design-3.5.md` status log between D3-0 and the v1.5 cut; both now point at v1.5.
 
 ---
 

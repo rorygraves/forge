@@ -19,9 +19,12 @@ import upickle.default as upickle
   * `ActionLog.replay`, whose repair-on-read could write.
   *
   * **Data source.** The fold reads the two Slice-2.0 audit kinds:
-  *   - `session.complete` (Task 2.0.2) — one per settled driver session, carrying `{ phase, piece, durationMs,
-  *     turnCostUsd, success }`. This is the per-phase source: it has the phase tag, the CLI wall-clock, and the turn's
-  *     cost, so turns / wall-clock / USD all fold from it.
+  *   - `session.complete` (Task 2.0.2; `resumed` added by D3-4) — one per settled driver session, carrying `{ phase,
+  *     piece, durationMs, turnCostUsd, success, resumed }`. This is the per-phase source: it has the phase tag, the CLI
+  *     wall-clock, and the turn's cost, so turns / wall-clock / USD all fold from it. `resumed` (D3-4, roadmap §3.5)
+  *     marks a turn that *continued* an existing driver session via `--resume` rather than re-spawning from scratch;
+  *     the fold counts those per phase so a resumed turn reads as the gap-#10 re-exploration-avoided saving, distinct
+  *     from a fresh spawn.
   *   - `cost.update` (Task 2.0.1) — the running `featureTotalUsd` is the §13 single-writer authoritative total; its
   *     last value pins the feature-total cost (and its mere presence proves cost data was captured even if every turn's
   *     `turnCostUsd` happened to be zero).
@@ -53,7 +56,11 @@ object StatsReport:
       knownDurationMs: Long,
       /** `session.complete` records in this phase whose `durationMs` was `null` (timeout / kill with no `Result`). */
       missingDurations: Int,
-      usd: BigDecimal
+      usd: BigDecimal,
+      /** `session.complete` records in this phase whose `resumed` was `true` — turns that continued an existing driver
+        * session via `--resume` rather than re-spawning (D3-4, roadmap §3.5; gap-#10 re-exploration avoided).
+        */
+      resumedTurns: Int
   )
 
   /** The whole-feature fold. `phases` is ordered by [[PhaseOrder]] (only phases that appear). `featureUsd` prefers the
@@ -162,7 +169,8 @@ object StatsReport:
             turns = as.size,
             knownDurationMs = durations.flatten.sum,
             missingDurations = durations.count(_.isEmpty),
-            usd = as.map(turnCostUsdOf).sum
+            usd = as.map(turnCostUsdOf).sum,
+            resumedTurns = as.count(resumedOf)
           )
         }
       }
@@ -218,7 +226,7 @@ object StatsReport:
     else
       val header = f"  ${"phase"}%-16s${"turns"}%7s${"wall-clock"}%14s${"cost"}%12s"
       val rule = "  " + ("─" * (16 + 7 + 14 + 12))
-      val rows = summary.phases.map(renderRow)
+      val rows = summary.phases.flatMap(renderRow)
       val totalCost = if summary.costAvailable then f"$$${summary.featureUsd}%.2f" else "unavailable"
       val totalRow =
         f"  ${"total"}%-16s${summary.totalTurns}%7d${formatDuration(summary.totalKnownDurationMs, summary.totalMissingDurations)}%14s${totalCost}%12s"
@@ -249,9 +257,17 @@ object StatsReport:
       }
       Vector("") ++ Vector(headerLine) ++ kindRows
 
-  private def renderRow(p: PhaseStats): String =
+  /** A phase row, plus a `└ N resumed …` continuation line when any turn in the phase continued an existing driver
+    * session via `--resume` instead of re-spawning (D3-4, roadmap §3.5). The sub-line makes the gap-#10 saving visible
+    * in place — a resumed implement/fix-up turn reads as re-exploration avoided, distinct from a fresh spawn.
+    */
+  private def renderRow(p: PhaseStats): Vector[String] =
     val cost = if p.usd > 0 then f"$$${p.usd}%.2f" else "—"
-    f"  ${label(p.phase)}%-16s${p.turns}%7d${formatDuration(p.knownDurationMs, p.missingDurations)}%14s${cost}%12s"
+    val row =
+      f"  ${label(p.phase)}%-16s${p.turns}%7d${formatDuration(p.knownDurationMs, p.missingDurations)}%14s${cost}%12s"
+    if p.resumedTurns > 0 then
+      Vector(row, s"    └ ${p.resumedTurns} resumed (continued prior session — re-exploration avoided)")
+    else Vector(row)
 
   /** Footnotes appended below the table: a wall-clock caveat when some sessions lacked a duration, and the
     * cost-unavailable hint for pre-observability logs.
@@ -324,6 +340,12 @@ object StatsReport:
 
   private def turnCostUsdOf(a: Action): BigDecimal =
     a.payload.objOpt.flatMap(_.get("turnCostUsd")).flatMap(_.numOpt).map(BigDecimal(_)).getOrElse(BigDecimal(0))
+
+  /** `session.complete.resumed` (D3-4) — `true` when this turn continued an existing driver session via `--resume`. A
+    * missing field (a pre-D3-4 log) folds to `false`: those turns are reported as fresh spawns, never as resumes.
+    */
+  private def resumedOf(a: Action): Boolean =
+    a.payload.objOpt.flatMap(_.get("resumed")).flatMap(_.boolOpt).getOrElse(false)
 
   private def featureTotalUsdOf(a: Action): Option[BigDecimal] =
     a.payload.objOpt.flatMap(_.get("featureTotalUsd")).flatMap(_.numOpt).map(BigDecimal(_))

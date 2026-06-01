@@ -35,7 +35,8 @@ class StatsReportSuite extends munit.FunSuite:
       piece: Option[PieceId],
       durationMs: Option[Long],
       turnCostUsd: BigDecimal,
-      success: Boolean = true
+      success: Boolean = true,
+      resumed: Boolean = false
   ): Action =
     Action(
       seq = nextSeq(),
@@ -51,7 +52,8 @@ class StatsReportSuite extends munit.FunSuite:
         "durationMs" -> durationMs.map(d => ujson.Num(d.toDouble)).getOrElse(ujson.Null),
         "model" -> ujson.Str("haiku"),
         "turnCostUsd" -> ujson.Num(turnCostUsd.toDouble),
-        "success" -> ujson.Bool(success)
+        "success" -> ujson.Bool(success),
+        "resumed" -> ujson.Bool(resumed)
       )
     )
 
@@ -231,6 +233,25 @@ class StatsReportSuite extends munit.FunSuite:
     val summary = StatsReport.fold(Vector(sessionComplete(SessionPhase.Spec, None, Some(5000), BigDecimal("1.50"))))
     assertEquals(summary.resumeCount, 0)
 
+  // --- resumed-turn fold (D3-4, roadmap §3.5) ------------------------------
+
+  test("fold counts session.complete records flagged resumed=true per phase (D3-4)"):
+    // A fresh implement spawn settles, the run NHIs + a process restart resumes the *same* driver session (D3-3), and
+    // the resumed turn settles. Both are Implement turns; only the second is a resumed continuation.
+    val actions = Vector(
+      sessionComplete(SessionPhase.Implement, Some(p1), Some(9000), BigDecimal("9.56"), resumed = false),
+      sessionComplete(SessionPhase.Implement, Some(p1), Some(3000), BigDecimal("0.50"), resumed = true)
+    )
+    val impl = StatsReport.fold(actions).phases.find(_.phase == SessionPhase.Implement).getOrElse(fail("no implement"))
+    assertEquals(impl.turns, 2)
+    assertEquals(impl.resumedTurns, 1, "only the second Implement turn continued an existing session")
+
+  test("fold treats a pre-D3-4 session.complete (no `resumed` field) as a fresh spawn, not a resume"):
+    val legacy = sessionComplete(SessionPhase.Implement, Some(p1), Some(4000), BigDecimal("1.0"))
+      .copy(payload = ujson.Obj("phase" -> ujson.Str("Implement"), "turnCostUsd" -> ujson.Num(1.0)))
+    val impl = StatsReport.fold(Vector(legacy)).phases.head
+    assertEquals(impl.resumedTurns, 0)
+
   // --- render --------------------------------------------------------------
 
   test("render shows a per-phase table with a total row"):
@@ -295,6 +316,23 @@ class StatsReportSuite extends munit.FunSuite:
     val summary = StatsReport.fold(Vector(sessionComplete(SessionPhase.Spec, None, Some(5000), BigDecimal("1.50"))))
     val text = StatsReport.render(featureId, summary)
     assert(!text.contains("operator resume"), text)
+
+  test("render annotates a phase whose turn(s) resumed an existing driver session (D3-4)"):
+    val summary = StatsReport.fold(
+      Vector(
+        sessionComplete(SessionPhase.Implement, Some(p1), Some(9000), BigDecimal("9.56"), resumed = false),
+        sessionComplete(SessionPhase.Implement, Some(p1), Some(3000), BigDecimal("0.50"), resumed = true)
+      )
+    )
+    val text = StatsReport.render(featureId, summary)
+    assert(text.contains("1 resumed"), text)
+    assert(text.contains("re-exploration avoided"), text)
+
+  test("render of a run with no resumed turns omits the resumed sub-line"):
+    val summary =
+      StatsReport.fold(Vector(sessionComplete(SessionPhase.Implement, Some(p1), Some(4000), BigDecimal("1.0"))))
+    val text = StatsReport.render(featureId, summary)
+    assert(!text.contains("resumed"), text)
 
   test("render notes an open wait (process stopped mid-wait)"):
     val summary = StatsReport.fold(
