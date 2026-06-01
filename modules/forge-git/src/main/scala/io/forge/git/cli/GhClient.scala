@@ -48,3 +48,12 @@ trait GhClient:
     * when Forge calls it — so the implementation captures stdout regardless of exit code (not a `GhError`).
     */
   def prChecks(pr: PrNumber): IO[Either[GhError, String]]
+
+  /** `gh pr list --head <head> --state open --json number` — the open PR whose head branch is `head`, or `None` when
+    * none exists. Used to make the §11.4 commit→push→createPr flow idempotent: a re-run after a post-settle crash (the
+    * driver settled, the orchestrator already opened the piece PR, then crashed before the `PrOpened` transition
+    * persisted) detects the already-open PR and returns its number instead of failing `prCreate` ("a pull request
+    * already exists for branch …"). `gh pr list` exits 0 with `[]` when there is no match, so the empty list is a clean
+    * `Right(None)`, not an error.
+    */
+  def prForBranch(head: BranchName): IO[Either[GhError, Option[PrNumber]]]

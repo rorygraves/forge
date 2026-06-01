@@ -60,6 +60,7 @@ class RealSideEffectsSuite extends munit.FunSuite:
       pieceSpec: String = "piece spec body",
       design: String = "the design",
       prNumber: PrNumber = PrNumber(42),
+      prForBranch: Either[GhError, Option[PrNumber]] = Right(None),
       connector: Connector = new FakeConnector
   ): RealSideEffects =
     val paths = ForgePaths(repoRoot, repoRoot / "home")
@@ -67,7 +68,7 @@ class RealSideEffectsSuite extends munit.FunSuite:
       connector = connector,
       branchManager = new FakeBranchManager(calls, prNumber),
       git = new FakeGitClient(calls, status),
-      gh = new FakeGhClient(diff),
+      gh = new FakeGhClient(diff, prForBranchResult = prForBranch),
       changeCollector = new DefaultChangeCollector,
       specStore = new FakeSpecStore(design, Map(p1 -> pieceSpec)),
       docSync = new FakeDocSync,
@@ -114,6 +115,20 @@ class RealSideEffectsSuite extends munit.FunSuite:
     val pr = calls.indexWhere(_.startsWith("bm.createPr"))
     assert(staged >= 0 && committed > staged && pushed > committed && pr > pushed, calls.mkString(" | "))
     assert(calls.exists(_ == "git.commit(feat(feat): Piece p1)"), calls.mkString(" | "))
+
+  tempFixture.test("classifyCommitOpenPr: an already-open PR for the branch is reused, createPr is skipped (§3.5)"):
+    repo =>
+      // Post-settle crash window: a prior pass opened the piece PR then crashed before the PrOpened transition
+      // persisted. On the resume re-run, the existing open PR must be detected and reused — calling `createPr` again
+      // would fail "a pull request already exists …". `createPr` (via the branch manager) must NOT be called.
+      val calls = ArrayBuffer.empty[String]
+      val status = Vector(StatusEntry('M', ' ', "src/Main.scala", None, ignored = false))
+      val se = sut(repo, calls = calls, status = status, prForBranch = Right(Some(PrNumber(7))))
+      val ev = se.classifyCommitOpenPr(feature(FsmState.PieceImplementing(p1)), p1).unsafeRunSync()
+      assertEquals(ev, Right(FsmEvent.PrOpened(p1, PrNumber(7))))
+      assert(!calls.exists(_.startsWith("bm.createPr")), s"createPr must be skipped: ${calls.mkString(" | ")}")
+      // The commit/push still run (idempotent): a partial prior pass may have crashed before push.
+      assert(calls.exists(_.startsWith("git.commit")) && calls.exists(_.startsWith("bm.push")), calls.mkString(" | "))
 
   tempFixture.test("classifyCommitOpenPr: a denied path → Left, no commit / createPr"): repo =>
     val calls = ArrayBuffer.empty[String]
@@ -322,8 +337,11 @@ class RealSideEffectsSuite extends munit.FunSuite:
         Right(RequiredChecksOverlay(Set("build"), java.time.Instant.EPOCH, OverlaySource.Protected))
       }
 
-  private final class FakeGhClient(diff: String, checks: String = "backend\tfail\t1m\thttps://x/runs/1\n")
-      extends GhClient:
+  private final class FakeGhClient(
+      diff: String,
+      checks: String = "backend\tfail\t1m\thttps://x/runs/1\n",
+      prForBranchResult: Either[GhError, Option[PrNumber]] = Right(None)
+  ) extends GhClient:
     def prView(pr: PrNumber, fields: Vector[String]): IO[Either[GhError, ujson.Value]] =
       IO.raiseError(new NotImplementedError)
     def prCreate(title: String, body: String, base: BranchName, head: BranchName): IO[Either[GhError, PrNumber]] =
@@ -332,6 +350,7 @@ class RealSideEffectsSuite extends munit.FunSuite:
     def prDiff(pr: PrNumber): IO[Either[GhError, String]] = IO.pure(Right(diff))
     def apiBranchProtection(base: BranchName): IO[Either[GhError, Option[ujson.Value]]] = IO.pure(Right(None))
     def prChecks(pr: PrNumber): IO[Either[GhError, String]] = IO.pure(Right(checks))
+    def prForBranch(head: BranchName): IO[Either[GhError, Option[PrNumber]]] = IO.pure(prForBranchResult)
 
   private final class FakeSpecStore(design: String, pieceSpecs: Map[PieceId, String]) extends SpecStore:
     def loadManifest(feature: FeatureId): IO[Either[SpecStoreError, Manifest]] =

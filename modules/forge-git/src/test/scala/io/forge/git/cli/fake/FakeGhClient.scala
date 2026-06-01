@@ -26,7 +26,8 @@ final class FakeGhClient private (
     prUpdateBranchFn: PrNumber => IO[Either[GhError, Unit]],
     prDiffFn: PrNumber => IO[Either[GhError, String]],
     apiBranchProtectionFn: BranchName => IO[Either[GhError, Option[ujson.Value]]],
-    prChecksFn: PrNumber => IO[Either[GhError, String]]
+    prChecksFn: PrNumber => IO[Either[GhError, String]],
+    prForBranchFn: BranchName => IO[Either[GhError, Option[PrNumber]]]
 ) extends GhClient:
 
   override def prView(pr: PrNumber, fields: Vector[String]): IO[Either[GhError, ujson.Value]] = prViewFn(pr)
@@ -47,6 +48,8 @@ final class FakeGhClient private (
 
   override def prChecks(pr: PrNumber): IO[Either[GhError, String]] = prChecksFn(pr)
 
+  override def prForBranch(head: BranchName): IO[Either[GhError, Option[PrNumber]]] = prForBranchFn(head)
+
 object FakeGhClient:
 
   private def notConfigured[A](method: String): IO[Either[GhError, A]] =
@@ -61,7 +64,9 @@ object FakeGhClient:
       private val prDiffFn: PrNumber => IO[Either[GhError, String]] = (_: PrNumber) => notConfigured("prDiff"),
       private val apiBranchProtectionFn: BranchName => IO[Either[GhError, Option[ujson.Value]]] = (_: BranchName) =>
         notConfigured("apiBranchProtection"),
-      private val prChecksFn: PrNumber => IO[Either[GhError, String]] = (_: PrNumber) => notConfigured("prChecks")
+      private val prChecksFn: PrNumber => IO[Either[GhError, String]] = (_: PrNumber) => notConfigured("prChecks"),
+      private val prForBranchFn: BranchName => IO[Either[GhError, Option[PrNumber]]] = (_: BranchName) =>
+        notConfigured("prForBranch")
   ):
     def prView(fn: PrNumber => IO[Either[GhError, ujson.Value]]): Builder = copy(prViewFn = fn)
     def prView(response: Either[GhError, ujson.Value]): Builder = prView(_ => IO.pure(response))
@@ -100,7 +105,19 @@ object FakeGhClient:
     def prChecks(fn: PrNumber => IO[Either[GhError, String]]): Builder = copy(prChecksFn = fn)
     def prChecks(report: String): Builder = prChecks(_ => IO.pure(Right(report)))
 
+    def prForBranch(fn: BranchName => IO[Either[GhError, Option[PrNumber]]]): Builder = copy(prForBranchFn = fn)
+    def prForBranch(response: Either[GhError, Option[PrNumber]]): Builder = prForBranch(_ => IO.pure(response))
+    def prForBranch(pr: Option[PrNumber]): Builder = prForBranch(Right(pr))
+
     def build: FakeGhClient =
-      new FakeGhClient(prViewFn, prCreateFn, prUpdateBranchFn, prDiffFn, apiBranchProtectionFn, prChecksFn)
+      new FakeGhClient(
+        prViewFn,
+        prCreateFn,
+        prUpdateBranchFn,
+        prDiffFn,
+        apiBranchProtectionFn,
+        prChecksFn,
+        prForBranchFn
+      )
 
   def builder: Builder = Builder()

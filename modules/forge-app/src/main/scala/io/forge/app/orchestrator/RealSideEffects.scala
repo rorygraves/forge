@@ -189,8 +189,18 @@ final class RealSideEffects(
           _ <- stageChanges(included)
           _ <- et(git.commit(s"feat(${feature.id.value}): ${p.title}"))(gitErr)
           _ <- et(branchManager.pushCurrentBranch())(branchErr)
-          body <- EitherT.liftF[IO, String, String](piecePrBody(feature, p))
-          pr <- et(branchManager.createPr(p.title, body, feature.manifest.baseBranch))(branchErr)
+          // Idempotency (roadmap §3.5 driver-respawn-avoidance, Unit A): if a prior post-settle pass already opened the
+          // PR for this branch and crashed before the `PrOpened` transition persisted, re-running here must NOT call
+          // `gh pr create` again (it would fail "a pull request already exists …" → NHI, stranding the resume). Look up
+          // the open PR for the piece branch first; reuse it when present, otherwise open it. `git commit`
+          // (NothingToCommit is a clean Right) and `git push` are already idempotent, so the lookup closes the last gap.
+          existing <- et(gh.prForBranch(feature.manifest.pieceBranch(piece)))(ghErr)
+          pr <- existing match
+            case Some(open) => EitherT.pure[IO, String](open)
+            case None =>
+              EitherT
+                .liftF[IO, String, String](piecePrBody(feature, p))
+                .flatMap(body => et(branchManager.createPr(p.title, body, feature.manifest.baseBranch))(branchErr))
         yield FsmEvent.PrOpened(piece, pr)).value
 
   override def classifyCommitPush(feature: Feature, piece: PieceId, pr: PrNumber): IO[Either[String, FsmEvent]] =

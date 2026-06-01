@@ -55,6 +55,10 @@ final class RealGhClient(repoRoot: os.Path, env: Map[String, String] = Map.empty
   override def prUpdateBranch(pr: PrNumber): IO[Either[GhError, Unit]] =
     invoke(Vector("gh", "pr", "update-branch", pr.value.toString)).map(_.map(_ => ()))
 
+  override def prForBranch(head: BranchName): IO[Either[GhError, Option[PrNumber]]] =
+    val argv = Vector("gh", "pr", "list", "--head", head.value, "--state", "open", "--json", "number")
+    invoke(argv).map(_.flatMap(RealGhClient.parsePrList))
+
   override def prDiff(pr: PrNumber): IO[Either[GhError, String]] =
     invoke(Vector("gh", "pr", "diff", pr.value.toString))
 
@@ -136,6 +140,33 @@ object RealGhClient:
       case Left(GhError.NotFound(_)) => Right(None)
       case Left(other) => Left(other)
       case Right(stdout) => parseJson("branch-protection", stdout).map(Some(_))
+
+  /** Parse `gh pr list --json number` stdout into the first match's [[PrNumber]], or `None` for an empty list. `gh`
+    * emits a JSON array of `{ "number": <int> }` objects (`[]` when nothing matches); we take the head since the caller
+    * filters to a single head branch + open state. A non-array payload or a first element missing a numeric `number`
+    * surfaces as a [[GhError.ParseFailure]] rather than a silent `None`. Visible for testing
+    * (`RealGhClientPrListSuite`).
+    */
+  def parsePrList(raw: String): Either[GhError, Option[PrNumber]] =
+    parseJson("pr-list", raw).flatMap { json =>
+      json.arrOpt match
+        case None =>
+          Left(GhError.ParseFailure("pr-list", IllegalArgumentException(s"expected a JSON array, got '$raw'"), raw))
+        case Some(arr) =>
+          arr.headOption match
+            case None => Right(None)
+            case Some(first) =>
+              first.objOpt.flatMap(_.get("number")).flatMap(_.numOpt) match
+                case Some(n) => Right(Some(PrNumber(n.toInt)))
+                case None =>
+                  Left(
+                    GhError.ParseFailure(
+                      "pr-list",
+                      IllegalArgumentException(s"no numeric .number in first element of '$raw'"),
+                      raw
+                    )
+                  )
+    }
 
   /** Pure JSON parse, lifted into the companion so [[mapApiBranchProtection]] doesn't need an instance to call. */
   def parseJson(stage: String, raw: String): Either[GhError, ujson.Value] =

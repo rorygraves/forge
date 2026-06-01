@@ -60,3 +60,24 @@ class FakeGhClientSuite extends CatsEffectSuite:
       case Right(Some(j)) => assertEquals(j("contexts")(0).str, "ci")
       case other => fail(s"expected payload, got $other")
     }
+
+  test("unconfigured prForBranch → Transient error naming the method"):
+    val gh = FakeGhClient.builder.build
+    gh.prForBranch(BranchName("feat/p1")).map {
+      case Left(GhError.Transient(_, msg)) => assert(msg.contains("prForBranch"))
+      case other => fail(s"expected unconfigured prForBranch error, got $other")
+    }
+
+  test("prForBranch with a canned Some → returns that PR"):
+    val gh = FakeGhClient.builder.prForBranch(Some(PrNumber(7))).build
+    gh.prForBranch(BranchName("feat/p1")).map {
+      case Right(Some(pr)) => assertEquals(pr, PrNumber(7))
+      case other => fail(s"expected Some(7), got $other")
+    }
+
+  test("prForBranch with None → no open PR for the branch"):
+    val gh = FakeGhClient.builder.prForBranch(None).build
+    gh.prForBranch(BranchName("feat/p1")).map {
+      case Right(None) => ()
+      case other => fail(s"expected Right(None), got $other")
+    }

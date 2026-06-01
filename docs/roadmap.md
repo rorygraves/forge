@@ -518,6 +518,28 @@ out-scoped the observability slice (full dispositions in
   silent driver re-spawn — exactly this item's cost). Wiring the writer so the
   post-settle window recovers belongs with this respawn-avoidance work; the
   projection is already pinned by `RebuildStateInFlightSuite` (synthetic marker).
+  - **Unit A landed 2026-06-01 (idempotency only; box stays open).** Scoping this
+    item surfaced that **the driver never commits** — implement/fix-up prompts say
+    "Do not commit — Forge will commit after you settle" — so "already-committed
+    work on the branch" exists *only* in the post-settle crash window (the
+    orchestrator opens the piece PR, then crashes before the `PrOpened` transition
+    persists). On the operator's resume that re-ran `classifyCommitOpenPr` →
+    `gh pr create` → "a pull request already exists for branch …"
+    (`GhError.Transient`) → NHI, stranding the run. Unit A makes
+    `classifyCommitOpenPr` idempotent: a new `GhClient.prForBranch`
+    (`gh pr list --head <b> --state open --json number`, pinned `parsePrList` +
+    `RealGhClientPrListSuite`) looks up the open PR for the piece branch and reuses
+    it instead of re-creating. (`git commit` already models a clean tree as
+    `CommitResult.NothingToCommit`, and `git push` is naturally idempotent, so this
+    closed the last gap; `classifyCommitPush` needed no change.) `RealGhClient` +
+    both `FakeGhClient`s updated; `RealSideEffectsSuite` + `FakeGhClientSuite`
+    extended. **Still open (the rest of this bullet):** *Unit B* — the
+    `monitor.outcome` writer + a "settled-but-unadvanced" rebuild projection + an
+    effectful post-settle recovery step in `Orchestrator.run` (must land
+    atomically — writing the marker without the recovery is strictly worse than
+    today's NHI); and the **D3 large half** — driver-CLI `--resume` for the
+    *mid-exploration* (uncommitted) cost, which still re-pays exploration on every
+    resume (the watch item above stands).
 - [x] **`designSessionId` durability** (Task 1.4.16 **gap #7**). ✅ **Fixed
   2026-05-31** during the Slice 2.0 live re-validation, which reproduced it: a
   `forge run` started after `forge spec` dead-ended at
