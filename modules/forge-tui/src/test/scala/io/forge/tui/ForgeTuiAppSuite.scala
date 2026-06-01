@@ -85,3 +85,66 @@ class ForgeTuiAppSuite extends munit.FunSuite:
     assertEquals(app.toMsg(PromptLine("quit")), Right(ForgeTui.Msg.Quit))
     assertEquals(app.toMsg(PromptLine(":q")), Right(ForgeTui.Msg.Quit))
     assert(app.toMsg(PromptLine("nonsense")).isLeft)
+
+  // ── Task 2.1.4 — scrollable action-log pane ───────────────────────────────────────────────────────────────────────
+  //
+  // 20 log lines ("line 01".."line 20") over an 11-row active viewport (ActiveRows = ActiveLastRow - ActiveFirstRow + 1
+  // = 15 - 5 + 1). The labels are zero-padded so no label is a substring of another (e.g. "line 01" ⊄ "line 10").
+
+  private val scrollable = sample.copy(
+    activePane = ActivePane.LogTail,
+    activeLines = (1 to 20).map(i => f"line $i%02d").toVector
+  )
+
+  test("active pane follows the tail by default — newest lines shown, oldest hidden"):
+    val frame = text(driver(scrollable))
+    assert(frame.contains("line 20"), frame) // last line visible
+    assert(frame.contains("line 10"), frame) // top of the 11-row tail window
+    assert(!frame.contains("line 09"), frame) // line 09 is scrolled off the top
+    assert(!frame.contains("line 01"), frame)
+    assert(frame.contains("[↑9 ↓0]"), frame) // 9 hidden above, 0 below = following the tail
+
+  test("ArrowUp scrolls one line back into history"):
+    val d = driver(scrollable)
+    d.send(ForgeTui.Msg.Key(InputKey.ArrowUp))
+    assertEquals(d.model.scrollBack, 1)
+    val frame = text(d)
+    assert(frame.contains("line 09"), frame) // revealed at the top
+    assert(!frame.contains("line 20"), frame) // newest line scrolled off the bottom
+    assert(frame.contains("[↑8 ↓1]"), frame)
+
+  test("ArrowDown does not scroll below the tail"):
+    val d = driver(scrollable)
+    d.send(ForgeTui.Msg.Key(InputKey.ArrowDown))
+    assertEquals(d.model.scrollBack, 0)
+    assert(text(d).contains("line 20"), text(d))
+
+  test("PageUp scrolls a full viewport and clamps at the top"):
+    val d = driver(scrollable)
+    d.send(ForgeTui.Msg.Key(InputKey.PageUp))
+    assertEquals(d.model.scrollBack, 9) // clamped to maxScrollBack = 20 - 11
+    val frame = text(d)
+    assert(frame.contains("line 01"), frame) // oldest line now at the top
+    assert(!frame.contains("line 12"), frame)
+    assert(frame.contains("[↑0 ↓9]"), frame)
+    // A further ArrowUp at the top is a no-op.
+    d.send(ForgeTui.Msg.Key(InputKey.ArrowUp))
+    assertEquals(d.model.scrollBack, 9)
+
+  test("PageDown from the top returns to following the tail"):
+    val d = driver(scrollable)
+    d.send(ForgeTui.Msg.Key(InputKey.PageUp))
+    d.send(ForgeTui.Msg.Key(InputKey.PageDown))
+    assertEquals(d.model.scrollBack, 0)
+    assert(text(d).contains("line 20"), text(d))
+
+  test("no scroll indicator when the lines fit the viewport"):
+    val frame = text(driver(scrollable.copy(activeLines = Vector("only one line"))))
+    assert(frame.contains("ACTIVE — log tail"), frame)
+    assert(!frame.contains("[↑"), frame)
+
+  test("scroll keys are recorded as the last key (non-fatal)"):
+    val d = driver(scrollable)
+    d.send(ForgeTui.Msg.Key(InputKey.PageUp))
+    assert(!d.exited)
+    assertEquals(d.model.lastKey, Some(InputKey.PageUp.toString))

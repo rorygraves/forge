@@ -18,8 +18,17 @@ import termflow.tui.KeyDecoder.InputKey
   */
 object ForgeTui:
 
-  /** The TUI model: the rendered snapshot plus liveness bookkeeping (tick count, last key). */
-  final case class Model(snapshot: TuiSnapshot, ticks: Long, lastKey: Option[String])
+  /** The TUI model: the rendered snapshot plus liveness bookkeeping (tick count, last key) and the active-pane scroll
+    * position.
+    *
+    * `scrollBack` is the number of lines the *bottom* of the active-pane viewport sits above the newest line — `0`
+    * means **follow-tail** (the viewport shows the most recent lines), and a positive value parks the viewport that
+    * many lines back in history. Measuring from the tail (rather than from the top) is what makes follow-tail fall out
+    * for free: when a poll refresh (Task 2.1.3) appends new lines, a `scrollBack == 0` viewport keeps showing the
+    * newest lines, while a parked viewport stays anchored relative to the tail. The value is clamped to the scrollable
+    * range at render time, so a snapshot that shrinks can never strand the viewport.
+    */
+  final case class Model(snapshot: TuiSnapshot, ticks: Long, lastKey: Option[String], scrollBack: Int = 0)
 
   enum Msg:
     /** 1s heartbeat from `Sub.Every` — drives a "still alive" indicator (and later, a log re-poll). */
@@ -48,6 +57,9 @@ object ForgeTui:
   private val ActiveFirstRow = 5
   private val ActiveLastRow = 15
 
+  /** Height (in lines) of the active-pane viewport — the scroll page size for `PageUp` / `PageDown`. */
+  private val ActiveRows = ActiveLastRow - ActiveFirstRow + 1
+
   /** Run the TUI against `snapshot`. Blocks until the user quits. */
   def run(snapshot: TuiSnapshot): Unit =
     val _ = TuiRuntime.run(new App(snapshot))
@@ -68,7 +80,12 @@ object ForgeTui:
           k match
             case InputKey.CharKey('q') => Tui(model, Cmd.Exit)
             case InputKey.Ctrl('c') => Tui(model, Cmd.Exit)
-            case other => model.copy(lastKey = Some(other.toString)).tui
+            case other =>
+              // Scroll keys adjust the active-pane viewport; every other key is recorded (last-key indicator) but inert.
+              val scrolled = scrollDelta(other) match
+                case Some(delta) => model.copy(scrollBack = clampScrollBack(model.scrollBack + delta, model.snapshot))
+                case None => model
+              scrolled.copy(lastKey = Some(other.toString)).tui
 
     def view(model: Model): RootNode =
       val s = model.snapshot
@@ -91,19 +108,20 @@ object ForgeTui:
         style = Style(border = true)
       )
 
+      val av = activeView(model)
+      val activeHeader = truncate(s"ACTIVE — ${paneLabel(s.activePane)}${scrollIndicator(av)}", ActiveInnerWidth)
       val activeBox = BoxNode(
         38.x,
         2.y,
         width = 42,
         height = 16,
-        children =
-          TextNode(ActiveInnerCol.x, 3.y, List(s"ACTIVE — ${paneLabel(s.activePane)}".text(Style(bold = true)))) ::
-            activeLineNodes(s),
+        children = TextNode(ActiveInnerCol.x, 3.y, List(activeHeader.text(Style(bold = true)))) ::
+          activeLineNodes(av),
         style = Style(border = true)
       )
 
       val footer =
-        TextNode(2.x, 19.y, List("q quit · :q command".text(Style(dim = true))))
+        TextNode(2.x, 19.y, List("q quit · ↑↓ PgUp/PgDn scroll · :q command".text(Style(dim = true))))
 
       RootNode(
         width = FrameWidth,
@@ -120,9 +138,8 @@ object ForgeTui:
     private def statusLine(row: Int, label: String, value: String): VNode =
       TextNode(StatusInnerCol.x, row.y, List(truncate(s"$label$value", StatusInnerWidth).text))
 
-    private def activeLineNodes(s: TuiSnapshot): List[VNode] =
-      val lines = if s.activeLines.nonEmpty then s.activeLines else Vector(placeholderFor(s.activePane))
-      lines.take(ActiveLastRow - ActiveFirstRow + 1).toList.zipWithIndex.map { case (text, i) =>
+    private def activeLineNodes(av: ActiveView): List[VNode] =
+      av.lines.toList.zipWithIndex.map { case (text, i) =>
         TextNode(ActiveInnerCol.x, (ActiveFirstRow + i).y, List(truncate(text, ActiveInnerWidth).text))
       }
 
@@ -140,3 +157,45 @@ object ForgeTui:
 
   private def truncate(s: String, n: Int): String =
     if s.length <= n then s else s.take(math.max(0, n - 1)) + "…"
+
+  /** The slice of active-pane lines currently visible, plus how many are hidden above / below the viewport. */
+  private final case class ActiveView(lines: Vector[String], hiddenAbove: Int, hiddenBelow: Int):
+    /** True when the lines overflow the viewport — i.e. scrolling can change what's shown. */
+    def overflow: Boolean = hiddenAbove > 0 || hiddenBelow > 0
+
+  /** The largest meaningful `scrollBack` for `total` lines: scrolling further would push the first line off the top of
+    * the viewport with nothing to reveal, so it is capped at "first line at the top".
+    */
+  private def maxScrollBack(total: Int): Int = math.max(0, total - ActiveRows)
+
+  /** Clamp a candidate `scrollBack` to `[0, maxScrollBack]` for the snapshot's active-line count. */
+  private def clampScrollBack(back: Int, snapshot: TuiSnapshot): Int =
+    math.max(0, math.min(back, maxScrollBack(snapshot.activeLines.size)))
+
+  /** The per-key viewport delta: `ArrowUp`/`ArrowDown` move one line, `PageUp`/`PageDown` a full viewport. Positive
+    * scrolls back into history (older lines); negative scrolls toward the tail. `None` for non-scroll keys.
+    */
+  private def scrollDelta(k: InputKey): Option[Int] = k match
+    case InputKey.ArrowUp => Some(1)
+    case InputKey.ArrowDown => Some(-1)
+    case InputKey.PageUp => Some(ActiveRows)
+    case InputKey.PageDown => Some(-ActiveRows)
+    case _ => None
+
+  /** Project the model's active lines + scroll position onto the viewport. Falls back to a single placeholder line when
+    * there are no lines yet (which never overflows, so scroll keys are inert there).
+    */
+  private def activeView(model: Model): ActiveView =
+    val s = model.snapshot
+    val lines = if s.activeLines.nonEmpty then s.activeLines else Vector(placeholderFor(s.activePane))
+    val total = lines.size
+    val back = clampScrollBack(model.scrollBack, s)
+    val bottom = total - back
+    val top = math.max(0, bottom - ActiveRows)
+    ActiveView(lines = lines.slice(top, bottom), hiddenAbove = top, hiddenBelow = back)
+
+  /** A compact scroll position for the active-pane header: nothing when the lines fit, `[↑a ↓b]` otherwise (`b == 0`
+    * means following the tail).
+    */
+  private def scrollIndicator(av: ActiveView): String =
+    if av.overflow then s"  [↑${av.hiddenAbove} ↓${av.hiddenBelow}]" else ""

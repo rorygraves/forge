@@ -148,12 +148,32 @@ to run against an in-flight `forge run`. Register the command in `CommandRouter`
 
 ### Tier 2 — make it answerable
 
-### Task 2.1.4 — scrollable action-log pane
+### Task 2.1.4 — scrollable action-log pane  ✅ 2026-06-01
 
 A log-tail active-pane view over `FileActionLog` (the `forge tail` data) with
 `ArrowUp`/`ArrowDown`/`PageUp`/`PageDown` scroll and follow-tail. This is the pane
 that makes the dashboard a usable substitute for `forge tail`; **required for the
 exit gate.**
+
+Landed:
+
+- `ForgeTui.scala` — `Model` gains a `scrollBack` field: the number of lines the
+  *bottom* of the active-pane viewport sits above the newest line. `0` =
+  **follow-tail** (newest lines shown); positive parks the viewport that many lines
+  back. Measuring from the tail (not the top) makes follow-tail fall out for free —
+  a poll refresh (Task 2.1.3) that appends lines keeps a `scrollBack == 0` viewport
+  on the newest data. `ArrowUp`/`ArrowDown` move one line, `PageUp`/`PageDown` a full
+  `ActiveRows` viewport; `scrollDelta` + `clampScrollBack` keep it in `[0,
+  maxScrollBack]` (clamped again at render, so a snapshot that shrinks can't strand
+  the viewport). New `activeView` projects lines+scroll onto the viewport (replacing
+  the old `take`-from-top); the active-pane header carries a compact `[↑a ↓b]`
+  hidden-above/below indicator (`↓0` = following), and the footer advertises the
+  scroll keys. Non-scroll keys keep their existing last-key-recorded behaviour.
+- `ForgeTuiAppSuite` — 7 new tests (now 16) through `TuiTestDriver`: default
+  follow-tail window, single-line `ArrowUp`, `ArrowDown` floor, `PageUp` page +
+  top clamp, `PageDown`-back-to-tail, no-indicator-when-it-fits, and scroll keys
+  recorded non-fatally. Green: `forge-tui` 30 tests; full unit suite + `StatusReport`
+  goldens pass; scalafmt clean.
 
 ### Task 2.1.5 — live `AgentEvent` tap (deferred liveness) — Tier 3, may roll forward
 
@@ -196,6 +216,16 @@ demands token-level liveness, else rolls forward. 2.1.8 closes.
 
 ## 3. Status log
 
+- **2026-06-01 — Task 2.1.4 landed (scrollable log pane).** Added a `scrollBack`
+  field to `ForgeTui.Model` (lines-above-the-tail; `0` = follow-tail) plus
+  `ArrowUp`/`ArrowDown`/`PageUp`/`PageDown` handling, a clamped-at-render viewport
+  projection (`activeView`), a `[↑a ↓b]` header indicator, and a scroll-keys footer
+  hint. Measuring scroll from the tail makes follow-tail automatic across a future
+  poll refresh. 7 new `TuiTestDriver` tests (`forge-tui` now 30); full unit suite +
+  goldens green; scalafmt clean. Note this lands **ahead of Task 2.1.3** (the `forge
+  tui` command wiring) — the scroll behaviour is internal to the app and headlessly
+  testable, so it does not depend on the CLI entry point; 2.1.3 still gates the
+  Tier-1 exit.
 - **2026-06-01 — Task 2.1.2 landed (snapshot builder).** Lifted `StatusReport`'s pure
   render helpers into `forge-core`'s new `StatusFields` (rather than duplicate them in
   `forge-tui`), so `forge status` and `forge tui` share one definition; `StatusReport`
