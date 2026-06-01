@@ -75,20 +75,6 @@ class OrchestratorRestartSuite extends munit.FunSuite:
       FsmState.DesignPrFeedback(DesignPr, 1),
       "design PR feedback session interrupted by process restart",
       ResumeHint.ReopenDesign(Some(DesignPr))
-    ),
-    (
-      "Implement / PieceImplementing",
-      InFlightSession(SessionPhase.Implement, "sess-impl", Some(P1)),
-      FsmState.PieceImplementing(P1),
-      "implementation interrupted by process restart; worktree may have uncommitted changes",
-      ResumeHint.ResolveLocalImplementationChanges(P1, BranchName(s"forge/${FeatureA.value}/p1"))
-    ),
-    (
-      "Fixup / PieceFixingUp",
-      InFlightSession(SessionPhase.Fixup, "sess-fixup", Some(P1)),
-      FsmState.PieceFixingUp(P1, Pr, 1),
-      "fix-up interrupted by process restart; worktree may have uncommitted changes",
-      ResumeHint.RunAnotherFixup(P1, Pr)
     )
   )
 
@@ -99,6 +85,36 @@ class OrchestratorRestartSuite extends munit.FunSuite:
     test(s"recover routes through Fsm.transition to NHI($expectedHint) — $label"):
       val (recovered, _) = RestartRecovery.recover(feature(state), Vector(session))
       assertEquals(recovered.state, FsmState.NeedsHumanIntervention(expectedReason, expectedHint))
+  }
+
+  // ---------------------------------------------------------------------------
+  // D3-3 (roadmap §3.5): the resumable piece-driver pairs are NOT synthesised to NHI here — `recover` leaves them
+  // untouched so the orchestrator loop's IO-gated resume-vs-NHI decision (worktree classifier) can run.
+  // ---------------------------------------------------------------------------
+
+  private val loopResumableRows: Vector[(String, InFlightSession, FsmState)] = Vector(
+    (
+      "Implement / PieceImplementing",
+      InFlightSession(SessionPhase.Implement, "sess-impl", Some(P1)),
+      FsmState.PieceImplementing(P1)
+    ),
+    (
+      "Fixup / PieceFixingUp",
+      InFlightSession(SessionPhase.Fixup, "sess-fixup", Some(P1)),
+      FsmState.PieceFixingUp(P1, Pr, 1)
+    )
+  )
+
+  loopResumableRows.foreach { case (label, session, state) =>
+    test(s"recover leaves the feature in its driver state (delegated to the loop's resume-gate) — $label"):
+      val f = feature(state)
+      val (recovered, drafts) = RestartRecovery.recover(f, Vector(session))
+      assertEquals(recovered, f, "recover must not transition a resumable piece-driver session")
+      assertEquals(drafts, Vector.empty, "recover must emit no drafts for a resumable piece-driver session")
+
+    // The synthetic-HarnessError reason mapping is still defined (used by the defensive inconsistent-pair path).
+    test(s"syntheticHarnessError reason still defined — $label"):
+      assert(RestartRecovery.syntheticHarnessError(session, state).reason.contains("interrupted by process restart"))
   }
 
   // ---------------------------------------------------------------------------

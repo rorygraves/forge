@@ -27,6 +27,7 @@ import io.forge.core.pr.{CheckConclusion, CheckResult, CheckRollup, CheckState, 
 import io.forge.core.state.{RebuildError, StateCache, VerifyResult}
 import io.forge.git.branch.protection.{OverlaySource, RequiredChecksOverlay}
 import io.forge.git.watcher.{DecodedSnapshot, PRWatcher, PollBaseline, PollResult}
+import io.forge.git.worktree.WorktreeSafety
 
 import java.time.Instant
 
@@ -205,6 +206,15 @@ object OrchestratorTestKit:
       IO.pure(session(SessionPhase.Implement, s"impl-${piece.value}"))
     override def launchFixup(feature: Feature, piece: PieceId, attempt: Int): IO[ActiveSession] =
       IO.pure(session(SessionPhase.Fixup, s"fixup-${piece.value}-$attempt"))
+
+    // D3-3: resume reuses the existing session id (mirrors the pinned-CLI same-id resume); the default classifier
+    // reports DriverUncommittedOnly (safe) — suites that exercise the unsafe branch override classifyPieceWorktree.
+    override def resumeImplement(feature: Feature, piece: PieceId, sessionId: String): IO[ActiveSession] =
+      IO.pure(session(SessionPhase.Implement, sessionId))
+    override def resumeFixup(feature: Feature, piece: PieceId, sessionId: String): IO[ActiveSession] =
+      IO.pure(session(SessionPhase.Fixup, sessionId))
+    override def classifyPieceWorktree(feature: Feature, piece: PieceId): IO[Either[String, WorktreeSafety]] =
+      IO.pure(Right(WorktreeSafety.DriverUncommittedOnly))
 
     override def designReviewInput(feature: Feature, round: Int): IO[Either[String, DesignReviewInput]] =
       IO.pure(Right(DesignReviewInput(feature.id, round, "design.md")))

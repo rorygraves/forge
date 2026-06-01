@@ -12,7 +12,16 @@ import io.forge.core.state.RebuildState.InFlightSession
   * death, regardless of whether Claude / Codex preserve their session id under `--resume`. So `RebuildState.run`
   * projects the unmatched `spawn`/`resume` markers into `InFlightSession`s, and the orchestrator routes each to NHI
   * with a phase-appropriate hint so the operator decides recovery (no transparent resume — streaming sessions have no
-  * in-flight message to re-issue, and headless worktrees may carry partial uncommitted changes).
+  * in-flight message to re-issue).
+  *
+  * **D3-3 (roadmap §3.5 driver-respawn-avoidance) exception.** A *headless piece driver* in-flight session
+  * (`(Implement, PieceImplementing)` / `(Fixup, PieceFixingUp)`) is **not** synthesised to NHI here. Headless drivers
+  * gained a `--resume` seam (D3-1) and the worktree-safety classifier (D3-2) can now tell the expected
+  * driver-uncommitted state from unexpected divergence, so the resume-vs-NHI decision is gated — and that gate is IO
+  * (it reads `git`), so it lives in the orchestrator loop's entry hook (`Orchestrator.resumePieceDriver`), not in this
+  * pure mapping. [[recover]] therefore *leaves* those sessions' features in their driver state and lets the loop resume
+  * (safe) or route to NHI (unsafe). Every other in-flight phase — spec / design, and any inconsistent `(phase, state)`
+  * pair — keeps the unconditional synthetic-NHI behaviour.
   *
   * **The hint is the FSM's job, not ours.** Each synthetic `HarnessError` lands via `Fsm.transition`'s `HarnessError`
   * catch-all, which calls `hintFromState` to pick the `ResumeHint`. The doc's per-phase recovery table merely *mirrors*
@@ -57,6 +66,20 @@ object RestartRecovery:
       config: FsmConfig = FsmConfig.default
   ): (Feature, Vector[ActionDraft]) =
     sessions.foldLeft((feature, Vector.empty[ActionDraft])) { case ((f, drafts), s) =>
-      val (f2, d2) = Fsm.transition(f, syntheticHarnessError(s, f.state), config)
-      (f2, drafts ++ d2)
+      // D3-3: a resumable piece-driver session is left for the loop's IO-gated resume-vs-NHI decision (see the class
+      // doc) — no synthetic NHI here.
+      if loopResumablePieceDriver(s.phase, f.state) then (f, drafts)
+      else
+        val (f2, d2) = Fsm.transition(f, syntheticHarnessError(s, f.state), config)
+        (f2, drafts ++ d2)
     }
+
+  /** D3-3: the `(phase, state)` pairs whose resume the orchestrator loop gates on the D3-2 worktree classifier rather
+    * than this pure mapping. Only the *consistent* piece-driver pairs qualify — an inconsistent pair (e.g. an
+    * `Implement` session while the FSM is in `InteractiveSpec`) still falls through to the defensive synthetic NHI.
+    */
+  private def loopResumablePieceDriver(phase: SessionPhase, state: FsmState): Boolean =
+    (phase, state) match
+      case (SessionPhase.Implement, _: FsmState.PieceImplementing) => true
+      case (SessionPhase.Fixup, _: FsmState.PieceFixingUp) => true
+      case _ => false

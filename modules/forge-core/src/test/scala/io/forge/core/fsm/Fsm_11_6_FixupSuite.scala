@@ -35,6 +35,29 @@ class Fsm_11_6_FixupSuite extends munit.FunSuite:
     assertEquals(out.state, FsmState.PieceFixingUp(P1, P1Pr, attempt = 2))
     assertEquals(out.currentPieceSessionId, Some("fixup-2"))
 
+  test("PieceFixingUp + SessionResumed(piece=Some(p)) → currentPieceSessionId reprojected; driver.resume draft"):
+    // D3-3 (roadmap §3.5): the fix-up-phase piece-driver resume seam (symmetric with PieceImplementing).
+    val f = featureIn(
+      FsmState.PieceFixingUp(P1, P1Pr, attempt = 1),
+      pieces = Vector(pieceInProgress(P1, 1, prNumber = Some(P1Pr), attempts = 1), piecePending(P2, 2)),
+      currentPieceSessionId = Some("fixup-1")
+    )
+    val (out, drafts) = Fsm.transition(
+      f,
+      FsmEvent.SessionResumed(
+        "codex",
+        "driver",
+        oldSessionId = Some("fixup-1"),
+        newSessionId = "fixup-1",
+        piece = Some(P1)
+      )
+    )
+    assertEquals(out.state, FsmState.PieceFixingUp(P1, P1Pr, attempt = 1))
+    assertEquals(out.currentPieceSessionId, Some("fixup-1"))
+    assertEquals(drafts.size, 1)
+    assertEquals(drafts.head.kind, "codex.resume")
+    assertEquals(drafts.head.piece, Some(P1))
+
   test("PieceFixingUp + Settled(Fixup, Clean) → PieceAwaitingCi, currentPieceSessionId retained"):
     val f = featureIn(
       FsmState.PieceFixingUp(P1, P1Pr, attempt = 1),

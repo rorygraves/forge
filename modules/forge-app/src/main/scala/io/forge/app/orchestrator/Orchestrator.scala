@@ -319,15 +319,21 @@ final class Orchestrator(
         if !branchReady then sideEffects.advancePieceBranch(feature, s.p).map(e => Some(eventOrHarness(e)))
         else
           driverRef.get.flatMap {
-            case None =>
-              // A new piece's first driver turn: reset the per-piece cost accumulator (§6 / §12 — `piece` resets on
-              // the next `PieceImplementing`). A fix-up turn (PieceFixingUp/CiFailed/ReviewFailed) is the *same* piece,
-              // so it does NOT reset `piece` — only `store` resets `turn` there.
-              totalsRef.update(_.copy(piece = BigDecimal(0))) >>
-                sideEffects
-                  .launchImplement(feature, s.p)
-                  .flatMap(as => store(driverRef, totalsRef, as).as(Some(spawned(as, Some(s.p)))))
             case Some(_) => IO.pure(None)
+            // D3-3 (roadmap §3.5): a durable `currentPieceSessionId` with no live driver means a process restart hit
+            // mid-implement (a fresh forward entry always has `currentPieceSessionId = None` — it is cleared on every
+            // path into PieceImplementing and set only by the spawn below). Gate on the worktree classifier and resume
+            // instead of re-spawning; an unsafe worktree routes to NHI. Without a session id this is the normal first
+            // turn → fresh spawn (resetting the per-piece cost accumulator; §6 / §12 — `piece` resets on the next
+            // PieceImplementing, but NOT on a same-piece fix-up).
+            case None =>
+              feature.currentPieceSessionId match
+                case Some(sid) => resumePieceDriver(feature, s.p, sid, SessionPhase.Implement, driverRef, totalsRef)
+                case None =>
+                  totalsRef.update(_.copy(piece = BigDecimal(0))) >>
+                    sideEffects
+                      .launchImplement(feature, s.p)
+                      .flatMap(as => store(driverRef, totalsRef, as).as(Some(spawned(as, Some(s.p)))))
           }
 
       case s: FsmState.PieceCiFailed =>
@@ -342,15 +348,56 @@ final class Orchestrator(
 
       case s: FsmState.PieceFixingUp =>
         driverRef.get.flatMap {
-          case None =>
-            sideEffects
-              .launchFixup(feature, s.p, s.attempt)
-              .flatMap(as => store(driverRef, totalsRef, as).as(Some(spawned(as, Some(s.p)))))
           case Some(_) => IO.pure(None)
+          // D3-3: same restart resume-gate as PieceImplementing (fix-up-phase). A durable session id + no live driver
+          // ⇒ resume; otherwise fresh `launchFixup`.
+          case None =>
+            feature.currentPieceSessionId match
+              case Some(sid) => resumePieceDriver(feature, s.p, sid, SessionPhase.Fixup, driverRef, totalsRef)
+              case None =>
+                sideEffects
+                  .launchFixup(feature, s.p, s.attempt)
+                  .flatMap(as => store(driverRef, totalsRef, as).as(Some(spawned(as, Some(s.p)))))
         }
 
       // Watcher / reviewer / user-Q&A states have no entry side effect: fall through to the race.
       case _ => IO.pure(None)
+
+  /** D3-3 (roadmap §3.5 driver-respawn-avoidance) — the restart resume-gate for a piece driver, default-on once the
+    * D3-2 classifier reports the worktree safe (the 2026-06-01 decision). The classifier carries the safety burden:
+    *   - `Clean` / `DriverUncommittedOnly` (safe) → resume the existing session via the D3-1 seam
+    *     ([[SideEffects.resumeImplement]] / [[SideEffects.resumeFixup]]) instead of re-spawning and re-paying the
+    *     exploration (gap #10). The resulting `SessionResumed` projects `currentPieceSessionId` + emits the §19
+    *     `<actor>.resume` durability entry (so a *second* restart resumes again, idempotently).
+    *   - `UnexpectedDivergence` (committed/operator work, detached state) or a `Left` (git read failed / no branch) → a
+    *     `HarnessError`, which routes to NHI with the same phase hint the old unconditional-NHI restart produced
+    *     (`ResolveLocalImplementationChanges` / `RunAnotherFixup`).
+    */
+  private def resumePieceDriver(
+      feature: Feature,
+      piece: PieceId,
+      sessionId: String,
+      phase: SessionPhase,
+      driverRef: Ref[IO, Option[ActiveSession]],
+      totalsRef: Ref[IO, CostTotals]
+  ): IO[Option[FsmEvent]] =
+    sideEffects.classifyPieceWorktree(feature, piece).flatMap {
+      case Right(safety) if safety.safeToResume =>
+        val resume = phase match
+          case SessionPhase.Fixup => sideEffects.resumeFixup(feature, piece, sessionId)
+          case _ => sideEffects.resumeImplement(feature, piece, sessionId)
+        resume.flatMap(as => store(driverRef, totalsRef, as).as(Some(resumed(as, Some(sessionId), Some(piece)))))
+      case Right(unsafe) =>
+        IO.pure(
+          Some(
+            FsmEvent.HarnessError(
+              s"resume gate: ${piece.value} worktree is $unsafe on restart; routing to manual intervention"
+            )
+          )
+        )
+      case Left(reason) =>
+        IO.pure(Some(FsmEvent.HarnessError(s"resume gate: $reason")))
+    }
 
   /** A driver turn begins here: store the freshly spawned/resumed session and reset the per-turn cost accumulator to
     * zero. The orchestrator owns this reset per the [[io.forge.app.monitor.SessionMonitor]] contract — the monitor only

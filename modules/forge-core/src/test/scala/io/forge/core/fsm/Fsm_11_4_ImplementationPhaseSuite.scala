@@ -33,6 +33,32 @@ class Fsm_11_4_ImplementationPhaseSuite extends munit.FunSuite:
     assertEquals(drafts.head.piece, Some(P1))
     assertEquals(drafts.head.payload("sessionId").str, "impl-1")
 
+  test("PieceImplementing(p) + SessionResumed(piece=Some(p)) → currentPieceSessionId reprojected; driver.resume draft"):
+    // D3-3 (roadmap §3.5): the piece-driver resume seam — projects the (possibly new) session id + emits the §19
+    // `<actor>.resume` durability entry, no state change. Mirrors the design-phase resume.
+    val f = featureIn(
+      FsmState.PieceImplementing(P1),
+      pieces = Vector(pieceInProgress(P1, 1), piecePending(P2, 2)),
+      currentPieceSessionId = Some("impl-1")
+    )
+    val (out, drafts) = Fsm.transition(
+      f,
+      FsmEvent.SessionResumed(
+        "claude",
+        "driver",
+        oldSessionId = Some("impl-1"),
+        newSessionId = "impl-2",
+        piece = Some(P1)
+      )
+    )
+    assertEquals(out.state, FsmState.PieceImplementing(P1))
+    assertEquals(out.currentPieceSessionId, Some("impl-2"))
+    assertEquals(drafts.size, 1)
+    assertEquals(drafts.head.kind, "claude.resume")
+    assertEquals(drafts.head.piece, Some(P1))
+    assertEquals(drafts.head.payload("oldSessionId").str, "impl-1")
+    assertEquals(drafts.head.payload("newSessionId").str, "impl-2")
+
   test("PieceImplementing(p) + PrOpened(p, prNumber) → PieceAwaitingCi, manifest[p].prNumber set"):
     val f = featureIn(
       FsmState.PieceImplementing(P1),

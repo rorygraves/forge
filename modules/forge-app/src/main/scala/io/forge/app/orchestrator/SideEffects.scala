@@ -5,6 +5,7 @@ import io.forge.agents.{DesignReviewInput, PrReviewInput, RefineInput}
 import io.forge.core.{PieceId, PrNumber}
 import io.forge.core.fsm.{Feature, FsmEvent}
 import io.forge.git.branch.protection.RequiredChecksOverlay
+import io.forge.git.worktree.WorktreeSafety
 
 /** The orchestrator's effectful boundary (Task 1.4.10 J1/J2). Everything the loop engine cannot do with the pure
   * `Fsm.transition` + the atomic persist triad + the already-injectable `SessionMonitor` / `PRWatcher` / `ReviewerCall`
@@ -43,6 +44,26 @@ trait SideEffects:
 
   /** §11.6 — spawn a fresh headless fix-up driver (`runFixup`). */
   def launchFixup(feature: Feature, piece: PieceId, attempt: Int): IO[ActiveSession]
+
+  /** D3-3 (roadmap §3.5 driver-respawn-avoidance) — resume the interrupted implement driver via the D3-1
+    * `Connector.resumeHeadlessDriver(sessionId, …)` seam instead of re-spawning from scratch (and re-paying the
+    * exploration, gap #10). Called by the loop's restart resume-gate when `feature.currentPieceSessionId` is durable
+    * and [[classifyPieceWorktree]] reports the worktree safe.
+    */
+  def resumeImplement(feature: Feature, piece: PieceId, sessionId: String): IO[ActiveSession]
+
+  /** D3-3 — the fix-up-phase analogue of [[resumeImplement]]: resume the interrupted fix-up driver by its durable
+    * session id rather than spawning a fresh `runFixup`.
+    */
+  def resumeFixup(feature: Feature, piece: PieceId, sessionId: String): IO[ActiveSession]
+
+  /** D3-3 — classify the piece's worktree for resume safety (the D3-2 `WorktreeSafetyClassifier` over the live
+    * `GitClient`). `Right(Clean | DriverUncommittedOnly)` is safe to resume onto; `Right(UnexpectedDivergence)` and
+    * `Left(reason)` (a git read that failed, or the piece has no recorded branch) both route the loop's resume-gate
+    * back to `NeedsHumanIntervention`. Conservative by construction — see
+    * [[io.forge.git.worktree.WorktreeSafetyClassifier]].
+    */
+  def classifyPieceWorktree(feature: Feature, piece: PieceId): IO[Either[String, WorktreeSafety]]
 
   // --- reviewer-input assembly ---
 

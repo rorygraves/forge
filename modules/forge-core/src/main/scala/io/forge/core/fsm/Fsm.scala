@@ -439,6 +439,13 @@ object Fsm:
           Vector(sessionSpawnDraft(feature, actor, role, sid, piece = Some(p)))
         )
 
+      // D3-3 (roadmap §3.5 driver-respawn-avoidance): a piece-driver resume projects the (possibly new) session id and
+      // emits the §19 `<actor>.resume` durability entry, no state change — the implement-phase analogue of the
+      // `DesignReviewing`/`DesignPrFeedback` resume seams. Emitted by the orchestrator when a mid-exploration crash is
+      // resumed onto a worktree the D3-2 classifier reports safe (`Connector.resumeHeadlessDriver`).
+      case FsmEvent.SessionResumed(actor, role, oldSid, newSessionId, Some(p)) if p == state.p =>
+        applyPieceResume(feature, actor, role, oldSid, newSessionId, p)
+
       // §11.4 step 1 (idempotent — re-entering PieceImplementing via Refining → PieceImplementing(next), then
       // BranchCreated for the new piece arrives here): persist baseSha + status, no state change.
       case FsmEvent.BranchCreated(piece, _, baseSha) if piece == state.p =>
@@ -666,6 +673,11 @@ object Fsm:
           feature.copy(currentPieceSessionId = Some(sid)),
           Vector(sessionSpawnDraft(feature, actor, role, sid, piece = Some(p)))
         )
+
+      // D3-3 (roadmap §3.5): the fix-up-phase piece-driver resume — symmetric with the PieceImplementing seam above.
+      // Projects the (possibly new) session id + emits the §19 `<actor>.resume` durability entry; no state change.
+      case FsmEvent.SessionResumed(actor, role, oldSid, newSessionId, Some(p)) if p == state.p =>
+        applyPieceResume(feature, actor, role, oldSid, newSessionId, p)
 
       // §11.6: fix-up settle clean → PieceAwaitingCi. currentPieceSessionId retained per §6.1.
       case FsmEvent.Settled(SessionPhase.Fixup, SettleOutcome.Clean) =>
@@ -1217,6 +1229,29 @@ object Fsm:
     oldSid match
       case None => (updated, Vector.empty)
       case Some(old) => (updated, Vector(sessionResumeDraft(feature, actor, role, old, newSessionId, piece = None)))
+
+  /** D3-3 (roadmap §3.5 driver-respawn-avoidance) — a piece-driver resume projects `currentPieceSessionId` to the new
+    * id (no state change) and emits the §19 `<actor>.resume` durability entry so the (possibly new) id survives a cold
+    * rebuild. The `PieceImplementing` / `PieceFixingUp` analogue of [[applyDesignResume]]; same `oldSid` guard
+    * (`Replay.applySessionResume` rejects a resume whose `oldSessionId` no prior `<actor>.spawn` introduced —
+    * `ResumeWithoutSpawn`). The orchestrator only emits this with `oldSid = Some(currentPieceSessionId)` — a real,
+    * previously-logged id from the original implement/fix-up spawn — so the draft is always well-founded. Under the
+    * pinned CLIs `old == new` (resume preserves the session id, §6.1), so `currentPieceSessionId` is unchanged in
+    * practice; the two-field shape stays forward-compatible with a CLI that mints a fresh id on resume.
+    */
+  private def applyPieceResume(
+      feature: Feature,
+      actor: String,
+      role: String,
+      oldSid: Option[String],
+      newSessionId: String,
+      p: PieceId
+  ): (Feature, Vector[ActionDraft]) =
+    val updated = feature.copy(currentPieceSessionId = Some(newSessionId))
+    oldSid match
+      case None => (updated, Vector.empty)
+      case Some(old) =>
+        (updated, Vector(sessionResumeDraft(feature, actor, role, old, newSessionId, piece = Some(p))))
 
   /** Slice 2.0 Task 2.0.6 — the `audit.resume_from_nhi` marker written when a feature resumes from
     * `NeedsHumanIntervention`. It records the resume boundary explicitly (`{ hint, from, to, reason }`) so the

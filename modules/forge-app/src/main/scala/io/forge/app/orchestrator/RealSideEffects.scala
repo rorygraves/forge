@@ -4,7 +4,7 @@ import cats.data.EitherT
 import cats.effect.IO
 import io.forge.agents.{Connector, DesignReviewInput, FixupPrompt, ImplementationPrompt, PrReviewInput, RefineInput}
 import io.forge.app.config.ForgeConfig
-import io.forge.core.{PieceId, PrNumber}
+import io.forge.core.{PieceId, PrNumber, Sha}
 import io.forge.core.fsm.{Feature, FsmEvent, SessionPhase, SettleOutcome}
 import io.forge.core.manifest.Piece
 import io.forge.core.paths.ForgePaths
@@ -12,6 +12,7 @@ import io.forge.core.pr.{CheckRollup, PrSnapshot, PrState}
 import io.forge.git.branch.{BranchError, BranchManager}
 import io.forge.git.branch.protection.RequiredChecksOverlay
 import io.forge.git.cli.{GhClient, GhError, GitClient, GitError, StatusEntry}
+import io.forge.git.worktree.{WorktreeSafety, WorktreeSafetyClassifier}
 import io.forge.specs.{
   ChangeCollector,
   Classification,
@@ -89,6 +90,26 @@ final class RealSideEffects(
       connector
         .runFixup(FixupPrompt(feature.id, piece, attempt, promptPath("fixup"), fixupBody(feature, piece, attempt)))
         .map(ActiveSession(SessionPhase.Fixup, _))
+
+  override def resumeImplement(feature: Feature, piece: PieceId, sessionId: String): IO[ActiveSession] =
+    connector
+      .resumeHeadlessDriver(sessionId, promptPath("implement"), resumeMessage(feature, piece))
+      .map(ActiveSession(SessionPhase.Implement, _))
+
+  override def resumeFixup(feature: Feature, piece: PieceId, sessionId: String): IO[ActiveSession] =
+    connector
+      .resumeHeadlessDriver(sessionId, promptPath("fixup"), resumeMessage(feature, piece))
+      .map(ActiveSession(SessionPhase.Fixup, _))
+
+  /** D3-3 continuation nudge for a resumed implement/fix-up driver. The CLI restores the prior conversation (C19), so
+    * this only points the driver back at the in-flight task with absolute paths (C19 watch item 3: cheap models
+    * mis-resolve relative paths). It deliberately re-states "do not commit — Forge will commit".
+    */
+  private def resumeMessage(feature: Feature, piece: PieceId): String =
+    s"""Continue your in-flight work on piece `${piece.value}` of feature `${feature.id.value}`; your prior session was
+       |interrupted and has been resumed with its context intact. Pick up where you left off against the piece spec
+       |(${relPath(paths.pieceSpec(feature.id, piece))}) and finish making the acceptance criteria pass. Do not commit —
+       |Forge will commit your changes after you settle.""".stripMargin
 
   private def writeFailures(feature: Feature, piece: PieceId): IO[Unit] =
     feature.manifest.pieces.find(_.id == piece).flatMap(_.prNumber) match
@@ -213,6 +234,46 @@ final class RealSideEffects(
           _ <- et(git.commit(s"fix(${feature.id.value}): ${p.title}"))(gitErr)
           _ <- et(branchManager.pushCurrentBranch())(branchErr)
         yield settled(SessionPhase.Fixup)).value
+
+  // --- D3-3 worktree-safety classification ----------------------------------
+
+  /** D3-3 (roadmap §3.5) — classify the piece worktree for resume safety. `expectedBranch` is the piece branch;
+    * `expectedHead` is **where Forge last left the branch**:
+    *   - implement phase (`prNumber = None`, the driver runs before the post-settle commit) → the piece `baseSha`;
+    *   - fix-up phase (`prNumber = Some`, the branch already carries Forge's pushed commits) → the **remote PR head**
+    *     (`gh pr view --json headRefOid`). Requiring local HEAD == remote head also catches an un-pushed operator
+    *     commit.
+    *
+    * A missing `baseSha` (branch not created) or a `gh`/SHA-parse failure resolves to `Left` → the loop routes to NHI
+    * (conservative). The classifier itself is conservative on any further ambiguity (wrong branch, detached HEAD,
+    * unmerged rows). See [[WorktreeSafetyClassifier]].
+    */
+  override def classifyPieceWorktree(feature: Feature, piece: PieceId): IO[Either[String, WorktreeSafety]] =
+    pieceOf(feature, piece) match
+      case None => IO.pure(Left(s"piece not found in manifest: ${piece.value}"))
+      case Some(p) =>
+        p.baseSha match
+          case None => IO.pure(Left(s"piece ${piece.value} has no recorded baseSha; branch not created"))
+          case Some(base) =>
+            val branch = feature.manifest.pieceBranch(piece)
+            expectedHead(p, base).flatMap {
+              case Left(reason) => IO.pure(Left(reason))
+              case Right(head) =>
+                WorktreeSafetyClassifier.classifyWorktree(git, branch, head).map(_.left.map(gitErr))
+            }
+
+  /** The commit the worktree HEAD is expected to sit at (see [[classifyPieceWorktree]]). */
+  private def expectedHead(p: Piece, base: Sha): IO[Either[String, Sha]] =
+    p.prNumber match
+      case None => IO.pure(Right(base))
+      case Some(pr) =>
+        gh.prView(pr, Vector("headRefOid")).map {
+          case Left(err) => Left(s"resume gate: could not read PR #${pr.value} head: ${err.message}")
+          case Right(json) =>
+            json.objOpt.flatMap(_.get("headRefOid")).flatMap(_.strOpt) match
+              case Some(s) => Sha.fromString(s).left.map(e => s"resume gate: PR #${pr.value} headRefOid invalid: $e")
+              case None => Left(s"resume gate: PR #${pr.value} response missing headRefOid")
+        }
 
   // --- staging helpers ------------------------------------------------------
 

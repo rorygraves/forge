@@ -147,7 +147,7 @@ stays NHI.
   only a failed `status` read propagates as `Left`. `WorktreeSafetyClassifierSuite`
   (14 cases) covers the table + the `FakeGitClient` gather path.
 
-### [ ] D3-3 — Orchestrator resume-instead-of-respawn (forge-app)
+### [x] D3-3 — Orchestrator resume-instead-of-respawn (forge-app) ✅ **2026-06-01**
 
 On a resume from an implement/fix-up NHI where `currentPieceSessionId` is
 present (already durable post the §3.5 piece-spawn-durability fix), the
@@ -167,6 +167,34 @@ a gated "resumable" route in place of the unconditional NHI.
   id with no fresh spawn (the empty-pass monitor raises on any stray
   re-spawn, as in `OrchestratorPostSettleRecoverySuite`); a
   classifier-unsafe worktree still routes to NHI.
+- *Landed:* the resume-gate lives in the orchestrator **loop's entry hook**
+  (`Orchestrator.resumePieceDriver`), not in the pure `RestartRecovery` —
+  the classify step reads `git`, so it must be IO. `RestartRecovery.recover`
+  now **skips** the consistent piece-driver pairs
+  (`(Implement, PieceImplementing)` / `(Fixup, PieceFixingUp)`), leaving the
+  feature in its driver state for the loop to resume (safe) or NHI (unsafe);
+  every other in-flight phase — and any inconsistent `(phase, state)` pair —
+  keeps the unconditional synthetic-NHI. The entry hook fires the gate only
+  when `currentPieceSessionId` is durable **and** the live driver ref is
+  empty (the unambiguous restart signal — a fresh forward entry always has
+  `currentPieceSessionId = None`). Safe ⇒ `SideEffects.resume{Implement,Fixup}`
+  (D3-1 `resumeHeadlessDriver`) + a `SessionResumed` that projects the id and
+  emits the §19 `<actor>.resume` durability entry (new FSM seam
+  `applyPieceResume`, the piece analogue of `applyDesignResume`, in
+  `PieceImplementing` / `PieceFixingUp`); unsafe / `Left` ⇒ `HarnessError` →
+  NHI with the same hint the old restart produced
+  (`ResolveLocalImplementationChanges` / `RunAnotherFixup`). The real
+  classifier's `expectedHead` is the piece `baseSha` for the implement phase
+  (exact — pre-commit) and the **remote PR head** (`gh pr view --json
+  headRefOid`) for the fix-up phase (the branch already carries Forge's
+  pushed commits; requiring local HEAD == remote head also catches an
+  un-pushed operator commit). Tests: `OrchestratorResumeRecoverySuite`
+  (safe → resume → `FeatureDone`, no re-spawn, `driver.resume` on the log;
+  unsafe → NHI, no resume, no re-spawn), `OrchestratorRestartSuite` updated
+  (piece-driver rows now assert `recover` leaves them for the loop), and FSM
+  unit tests for the two `SessionResumed` piece handlers. Full sweep green
+  (forge-core 404, forge-app 366, forge-git 213, forge-agents 205). **Next:
+  D3-4** (cost/stats proof + close-out).
 
 ### [ ] D3-4 — Cost/stats proof + close-out
 
@@ -272,6 +300,31 @@ is attributed cost data to tune against.
   policy. `WorktreeSafetyClassifierSuite` (14 cases: pure table + `FakeGitClient` gather path) green;
   forge-git 213 unit tests, full `sbt compile` clean. **Dead code until D3-3.** D3-1 and D3-2 now both feed
   **D3-3** (orchestrator resume-instead-of-respawn, default-on once the classifier reports safe).
+
+- 2026-06-01 — **D3-3 closed ✅ — orchestrator resumes instead of respawning (default-on once safe).** Wired the
+  D3-1 seam + D3-2 classifier into the loop. **`RestartRecovery.recover` no longer synthesises NHI for the consistent
+  piece-driver pairs** (`(Implement, PieceImplementing)` / `(Fixup, PieceFixingUp)`); it leaves the feature in its
+  driver state, and the **loop's entry hook** (`Orchestrator.resumePieceDriver`) makes the IO-gated decision — the
+  classify step reads `git`, so it cannot live in the pure mapping. The gate fires only on the unambiguous restart
+  signal (`currentPieceSessionId` durable **and** no live driver ref; a fresh forward entry always clears
+  `currentPieceSessionId`). **Safe** (`Clean` / `DriverUncommittedOnly`) ⇒ `SideEffects.resume{Implement,Fixup}` →
+  `Connector.resumeHeadlessDriver` + a `SessionResumed` that reprojects the id and emits the §19 `<actor>.resume`
+  durability entry (so a *second* restart resumes again, idempotently) — via the new FSM seam `applyPieceResume`
+  (the `PieceImplementing` / `PieceFixingUp` analogue of `applyDesignResume`). **Unsafe** (`UnexpectedDivergence`) or
+  a classify `Left` ⇒ `HarnessError` → NHI with the *same* hint the old unconditional restart produced
+  (`ResolveLocalImplementationChanges` / `RunAnotherFixup`). `RealSideEffects.classifyPieceWorktree` computes
+  `expectedHead` per phase: piece `baseSha` for implement (exact, pre-commit), the **remote PR head**
+  (`gh pr view --json headRefOid`) for fix-up (the branch already carries Forge's pushed commits; requiring local
+  HEAD == remote head also catches an un-pushed operator commit; any gh/SHA-parse failure ⇒ `Left` ⇒ NHI). Tests:
+  `OrchestratorResumeRecoverySuite` (shared pass-1 crashes mid-implement leaving an `InFlightSession`; pass-2 safe →
+  resume → `FeatureDone` with **no re-spawn** and a `driver.resume` log entry, unsafe → NHI with no resume / no
+  re-spawn — the empty-pass monitor would raise on any stray spawn), `OrchestratorRestartSuite` updated (piece-driver
+  rows now assert `recover` leaves them for the loop; design/spec + inconsistent-pair rows unchanged), and the two
+  FSM `SessionResumed` piece handlers (`Fsm_11_4` / `Fsm_11_6`). Full unit sweep green (forge-core 404, forge-app
+  366, forge-git 213, forge-agents 205, forge-specs 141); `scalafmtCheckAll` clean. The D3-1 `resumeHeadlessDriver`
+  seam was already real-CLI verified (C19#1), so D3-3 needs no new IT. **Next: D3-4** (cost/stats proof + close-out —
+  emit a resumed-turn marker so `forge stats` turns gap #10 into a measured saving, then reconcile the spec + flip
+  the roadmap §3.5 bullet).
 
 - 2026-06-01 — **D3-1 seam + unit/IT harness landed; real-CLI run pending.** Added
   `Connector.resumeHeadlessDriver(sessionId, systemPromptPath, message): IO[AgentSession]` — the headless driver-side
