@@ -8,6 +8,7 @@ import io.forge.agents.{
   AgentSession,
   DesignReview,
   DesignReviewInput,
+  FailureClassifierInput,
   PrReview,
   PrReviewInput,
   RefineInput,
@@ -21,7 +22,7 @@ import io.forge.app.monitor.{MonitorOutcome, MonitorReport, SessionMonitor}
 import io.forge.app.reviewer.{ReviewerCall, ReviewerLimits, ReviewerOutcome}
 import io.forge.core.*
 import io.forge.core.cost.CostTotals
-import io.forge.core.profile.RepoProfile
+import io.forge.core.profile.{Classification, RepoProfile}
 import io.forge.core.fsm.{Feature, FsmEvent, FsmState, SessionPhase, SettleOutcome}
 import io.forge.core.log.{Action, ActionDraft, ActionLog}
 import io.forge.core.manifest.{Manifest, ManifestStore, Piece, PieceStatus}
@@ -175,7 +176,10 @@ object OrchestratorTestKit:
   final class FakeReviewerCall(
       designOutcome: ReviewerOutcome[DesignReview],
       prOutcome: ReviewerOutcome[PrReview],
-      refineOutcome: ReviewerOutcome[RefineResult]
+      refineOutcome: ReviewerOutcome[RefineResult],
+      classifyOutcome: IO[ReviewerOutcome[Classification]] = IO.raiseError(
+        new IllegalStateException("FakeReviewerCall: classifyFailure not configured (set classifyOutcome)")
+      )
   ) extends ReviewerCall:
     override def designReview(input: DesignReviewInput, limits: ReviewerLimits): IO[ReviewerOutcome[DesignReview]] =
       IO.pure(designOutcome)
@@ -187,6 +191,11 @@ object OrchestratorTestKit:
       IO.raiseError(
         new IllegalStateException("FakeReviewerCall: profileRepo not configured (out-of-band command path)")
       )
+    override def classifyFailure(
+        input: FailureClassifierInput,
+        limits: ReviewerLimits
+    ): IO[ReviewerOutcome[Classification]] =
+      classifyOutcome
 
   object FakeReviewerCall:
     val approveDesign: ReviewerOutcome[DesignReview] =

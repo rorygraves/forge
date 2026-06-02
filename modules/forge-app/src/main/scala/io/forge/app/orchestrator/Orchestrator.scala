@@ -1,7 +1,14 @@
 package io.forge.app.orchestrator
 
 import cats.effect.{IO, Ref}
-import io.forge.agents.{DesignReview, PrReview, RefineOutcome as AgentRefineOutcome, RefineResult, ReviewVerdict}
+import io.forge.agents.{
+  DesignReview,
+  FailureClassifierInput,
+  PrReview,
+  RefineOutcome as AgentRefineOutcome,
+  RefineResult,
+  ReviewVerdict
+}
 import io.forge.app.config.ForgeConfig
 import io.forge.app.monitor.{MonitorOutcome, MonitorReport, SessionLimits, SessionMonitor}
 import io.forge.app.reviewer.{ReviewerCall, ReviewerLimits, ReviewerOutcome}
@@ -25,6 +32,7 @@ import io.forge.core.profile.{
   CommandKind,
   Determinism,
   FailureClassifiedAction,
+  FailureKind,
   FixupRoute,
   ProfileSnapshot,
   ProfileStore,
@@ -644,21 +652,48 @@ final class Orchestrator(
             sideEffects.fetchFailingLog(id).flatMap {
               case Left(_) => blindFixup // gh fetch failed; don't strand the failure — route blind.
               case Right(failureLog) =>
-                val routed = failureRouter.route(p, failureLog, config.adapt)
-                val classifiedDraft =
-                  FailureClassifiedAction
-                    .draft(feature.id, piece, "ci", routed.classification, routed.route, routed.source)
-                log.append(feature.id, classifiedDraft) >> act(
-                  feature,
-                  piece,
-                  pr,
-                  snapshot,
-                  rollup,
-                  gateRef,
-                  gate,
-                  routed.route
-                )
+                maybeLlmClassify(feature, failureLog, failureRouter.route(p, failureLog, config.adapt), p).flatMap {
+                  routed =>
+                    val classifiedDraft =
+                      FailureClassifiedAction
+                        .draft(feature.id, piece, "ci", routed.classification, routed.route, routed.source)
+                    log.append(feature.id, classifiedDraft) >> act(
+                      feature,
+                      piece,
+                      pr,
+                      snapshot,
+                      rollup,
+                      gateRef,
+                      gate,
+                      routed.route
+                    )
+                }
             }
+
+  /** §7.11 cost lever (Task 3.1.4) — when the deterministic rules classifier could not pin the failure (its
+    * `Classification` is `Unknown`, which routes to `Escalate`) and `adapt.llmClassifierOnUnknown` is set, consult the
+    * LLM `classifyFailure` sensor and re-route from its proposal (recording `source = "llm"`). The rules baseline
+    * handles every dogfood case for free; the LLM tail pays a reviewer-call **only** for the genuinely ambiguous
+    * failure. Degrades safely: a [[ReviewerOutcome.Timeout]] / adapter / process failure keeps the rules `Escalate` —
+    * Forge never blocks a feature on a stalled sensor (it falls through to the safe human-escalation the rules already
+    * chose). When the LLM itself returns `Unknown`, that too routes to `Escalate`, now stamped `source = "llm"` so the
+    * §19 audit shows the sensor was consulted.
+    */
+  private def maybeLlmClassify(
+      feature: Feature,
+      failureLog: String,
+      rulesRouted: RoutedFailure,
+      profile: RepoProfile
+  ): IO[RoutedFailure] =
+    if !config.adapt.llmClassifierOnUnknown || rulesRouted.classification.kind != FailureKind.Unknown then
+      IO.pure(rulesRouted)
+    else
+      val input = FailureClassifierInput(feature.id, gate = "ci", failureLog = failureLog, profile = profile)
+      reviewer.classifyFailure(input, ReviewerLimits(reviewerWallClock)).map {
+        case ReviewerOutcome.Settled(llm) =>
+          failureRouter.routeFrom(llm, profile, failureLog, config.adapt, source = "llm")
+        case _ => rulesRouted // timeout / adapter / process failure → keep the rules Escalate (don't block on a stall).
+      }
 
   /** Act on the deterministic [[FixupRoute]] (the §8.2 row table). `blindFixup`-shaped events re-use the existing
     * `PrSnapshotUpdated` → Failed path so the FSM owns `attempts`; `RunLocalCommand` / `Retry` / `BackOff` never touch

@@ -19,7 +19,8 @@ final case class ReviewerAssets(
     designReview: ReviewerAssets.PerMethod,
     prReview: ReviewerAssets.PerMethod,
     refine: ReviewerAssets.PerMethod,
-    profileRepo: ReviewerAssets.PerMethod
+    profileRepo: ReviewerAssets.PerMethod,
+    classifyFailure: ReviewerAssets.PerMethod
 )
 
 object ReviewerAssets:

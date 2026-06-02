@@ -4,13 +4,14 @@ import cats.effect.IO
 import io.forge.agents.{
   DesignReview,
   DesignReviewInput,
+  FailureClassifierInput,
   PrReview,
   PrReviewInput,
   RefineInput,
   RefineResult,
   RepoProfilerInput
 }
-import io.forge.core.profile.RepoProfile
+import io.forge.core.profile.{Classification, RepoProfile}
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -45,6 +46,13 @@ trait ReviewerCall:
     * so the same "kill on stall" backstop and [[ReviewerOutcome]] surface apply.
     */
   def profileRepo(input: RepoProfilerInput, limits: ReviewerLimits): IO[ReviewerOutcome[RepoProfile]]
+
+  /** §7.11 `FailureClassifier` sensor under the same wall-clock cap (Task 3.1.4). Consulted mid-feature on a CI-gate
+    * failure the deterministic rules classifier left `Unknown` (`adapt.llmClassifierOnUnknown`) — so unlike
+    * [[profileRepo]] it *is* on the feature loop, but degrades safely: a [[ReviewerOutcome.Timeout]] / failure makes
+    * the orchestrator keep the rules `Escalate` rather than block on a stalled sensor.
+    */
+  def classifyFailure(input: FailureClassifierInput, limits: ReviewerLimits): IO[ReviewerOutcome[Classification]]
 
 /** §7.9 reviewer / refine wall-clock cap. Per-call only; no per-call cost cap (see [[ReviewerCall]] docstring and
   * carry-forward S4-3). The orchestrator (Task 1.4.10) populates this from `.forge/config.json` §18 reviewer settle

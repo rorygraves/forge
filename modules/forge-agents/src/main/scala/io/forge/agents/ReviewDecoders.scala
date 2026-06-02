@@ -3,9 +3,11 @@ package io.forge.agents
 import io.forge.core.{Question, QuestionSeverity}
 import io.forge.core.profile.{
   BranchModel,
+  Classification,
   CommandKind,
   CommitIdentity,
   Determinism,
+  FailureKind,
   MergeStrategy,
   RepoCommand,
   RepoProfile,
@@ -113,6 +115,39 @@ object ReviewDecoders:
       identity <- commitIdentity(obj.get("commitIdentity"))
       workflow <- workflowProfile(obj.get("workflow"))
     yield RepoProfile(RepoProfile.CurrentSchemaVersion, buildTool, commands, identity, workflow)
+
+  /** `failure-classifier.json` (§7.11 `FailureClassifier`, Task 3.1.4):
+    * {{{
+    *   {
+    *     "kind": "deterministic_fix" | "code_fix" | "flaky" | "env" | "rate_limit" | "unknown",
+    *     "confidence": number,            // 0..1
+    *     "suggested": "format" | "lint" | "build" | "test" | "typecheck" | null,
+    *     "evidence": string               // the log fragment the classifier keyed on
+    *   }
+    * }}}
+    *
+    * `suggested` is optional (absent or `null` ⇒ `None`); it names the remediating command for a `deterministic_fix`.
+    * The enum parses reuse the `forge-core` `fromString` helpers so the accepted wire strings can never drift from the
+    * model the spine routes on.
+    */
+  def failureClassification(v: Value): Either[String, Classification] =
+    for
+      obj <- objectOrLeft(v, "failure-classifier root")
+      kindStr <- stringOrLeft(obj.get("kind"), "kind")
+      kind <- FailureKind.fromString(kindStr).left.map(e => s"kind: $e")
+      confidence <- obj.get("confidence").flatMap(_.numOpt).toRight("missing or non-number required field 'confidence'")
+      suggested <- suggestedCommandKind(obj.get("suggested"))
+      evidence <- stringOrLeft(obj.get("evidence"), "evidence")
+    yield Classification(kind, confidence, suggested, evidence)
+
+  private def suggestedCommandKind(v: Option[Value]): Either[String, Option[CommandKind]] =
+    v match
+      case None | Some(ujson.Null) => Right(None)
+      case Some(value) =>
+        value.strOpt
+          .toRight(s"'suggested' expected string or null, got ${shapeName(value)}")
+          .flatMap(s => CommandKind.fromString(s).left.map(e => s"suggested: $e"))
+          .map(Some(_))
 
   private def repoCommands(v: Option[Value]): Either[String, Vector[RepoCommand]] =
     v match

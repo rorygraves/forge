@@ -61,3 +61,20 @@ class FailureRouterSuite extends munit.FunSuite:
     val r = router.route(profile(scalafmtCmd), "GraphQL: API rate limit already exceeded", AdaptConfig())
     assertEquals(r.classification.kind, FailureKind.RateLimit)
     assert(r.route.isInstanceOf[FixupRoute.BackOff], r.route.toString)
+
+  test("routeFrom re-routes a supplied (LLM) classification with source=llm"):
+    // The Task 3.1.4 path: an LLM that pins what the rules baseline left Unknown — a DeterministicFix proposal collapses
+    // to a local run, stamped source=llm, with no re-classification of the log.
+    val llm = Classification(FailureKind.DeterministicFix, 0.9, Some(CommandKind.Format), "scalafmt drift")
+    val r = router.routeFrom(llm, profile(scalafmtCmd), "opaque log", AdaptConfig(), source = "llm")
+    assertEquals(r.source, "llm")
+    assertEquals(r.classification, llm)
+    r.route match
+      case FixupRoute.RunLocalCommand(cmd) => assertEquals(cmd.argv, Vector("sbt", "scalafmtAll"))
+      case other => fail(s"expected RunLocalCommand, got $other")
+
+  test("routeFrom honours adapt.autofix=false (LLM RunLocalCommand degrades to DriverFixup)"):
+    val llm = Classification(FailureKind.DeterministicFix, 0.9, Some(CommandKind.Format), "scalafmt drift")
+    val r = router.routeFrom(llm, profile(scalafmtCmd), "opaque log", AdaptConfig(autofix = false), source = "llm")
+    assert(r.route.isInstanceOf[FixupRoute.DriverFixup], r.route.toString)
+    assertEquals(r.source, "llm")

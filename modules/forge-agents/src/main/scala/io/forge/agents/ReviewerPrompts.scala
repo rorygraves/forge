@@ -79,3 +79,37 @@ object ReviewerPrompts:
       files("Build files", input.buildFiles),
       files("CI workflow files", input.workflowFiles)
     ).mkString("\n\n") + "\n"
+
+  /** §7.11 `FailureClassifier` body (Task 3.1.4) — packages the gate failure log plus the profile's known commands
+    * under stable headers the `failure-classifier.<cli>.md` system prompt refers to. The available commands are
+    * rendered so the model can name a `suggested` kind the repo actually exposes (a `DeterministicFix` only routes to a
+    * local run when the profile declares the matching autofix command). The log is fenced so the model can tell its
+    * boundaries from the surrounding sections.
+    */
+  def classifyFailureBody(input: FailureClassifierInput): String =
+    val commands =
+      if input.profile.commands.isEmpty then "(none)"
+      else
+        input.profile.commands
+          .map { c =>
+            val argv = c.argv.mkString(" ")
+            s"- ${c.kind.asString}: `$argv` (${c.determinism.asString}, autofix=${c.autofix}, required=${c.required})"
+          }
+          .mkString("\n")
+    s"""## Feature
+       |${input.featureId.value}
+       |
+       |## Gate
+       |${input.gate}
+       |
+       |## Build tool
+       |${input.profile.buildTool}
+       |
+       |## Known commands
+       |$commands
+       |
+       |## Failure log
+       |```
+       |${input.failureLog.stripLineEnd}
+       |```
+       |""".stripMargin

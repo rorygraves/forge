@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://forge.io/schemas/failure-classifier.json",
+  "title": "FailureClassification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "confidence", "evidence"],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": ["deterministic_fix", "code_fix", "flaky", "env", "rate_limit", "unknown"],
+      "description": "What the gate failure IS. 'deterministic_fix' = a formatter/codegen gate the repo's own tool fixes in place; 'code_fix' = a real code defect needing a driver fix-up; 'flaky' = a transient test failure to retry; 'env' = toolchain/infrastructure failure (missing binary, OOM); 'rate_limit' = provider/API rate limit; 'unknown' = cannot be classified, escalate."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "How confident you are in the classification, 0..1. Be honest — a low confidence on 'unknown' is the correct answer when the log is genuinely ambiguous."
+    },
+    "suggested": {
+      "type": ["string", "null"],
+      "enum": ["format", "lint", "build", "test", "typecheck", null],
+      "description": "For a 'deterministic_fix' only: the kind of command that would remediate it, chosen from the repo's Known commands. Null for every other kind, or when no Known command matches."
+    },
+    "evidence": {
+      "type": "string",
+      "description": "The single most diagnostic line (or short fragment) from the failure log that you keyed your classification on, so the routing/audit trail shows WHY."
+    }
+  }
+}

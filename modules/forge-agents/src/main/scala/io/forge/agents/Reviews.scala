@@ -97,3 +97,22 @@ final case class RepoProfilerInput(
     buildFiles: Vector[RepoFile],
     workflowFiles: Vector[RepoFile]
 )
+
+// --- FailureClassifier (§7.11 sensor, Task 3.1.4) ----
+
+/** §7.11 `FailureClassifier` input — the gate failure the LLM sensor perceives into a
+  * [[io.forge.core.profile.Classification]]. Consulted **only** when the deterministic
+  * [[io.forge.core.profile.RuleBasedFailureClassifier]] returns a low-confidence `Unknown` (the §7.11 cost lever): the
+  * rules baseline handles every dogfood case for free; the LLM tail pays a reviewer-call only for the genuinely
+  * ambiguous failure. `profile` is carried so the model can name a `suggested` [[io.forge.core.profile.CommandKind]]
+  * the repo actually exposes (a `DeterministicFix` is only routable to a local run when the profile declares the
+  * matching autofix command). The connector renders these into a stable prompt body
+  * ([[ReviewerPrompts.classifyFailureBody]]) and decodes the structured reply via
+  * [[ReviewDecoders.failureClassification]].
+  */
+final case class FailureClassifierInput(
+    featureId: FeatureId,
+    gate: String,
+    failureLog: String,
+    profile: io.forge.core.profile.RepoProfile
+)

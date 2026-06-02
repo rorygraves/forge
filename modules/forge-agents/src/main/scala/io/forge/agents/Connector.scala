@@ -99,6 +99,16 @@ trait Connector:
     */
   def profileRepo(input: RepoProfilerInput): IO[RepoProfile]
 
+  /** `FailureClassifier` sensor (§7.11): perceive a gate failure (`failureLog` + `profile`) into a [[Classification]].
+    * A reviewer-side one-shot exactly like [[profileRepo]] — Native schema (`~/.forge/schemas/failure-classifier.json`)
+    * + `failure-classifier.<cli>.md` system prompt + a [[ReviewDecoders.failureClassification]] decode. Consulted by
+    * the orchestrator **only** when the deterministic [[io.forge.core.profile.RuleBasedFailureClassifier]] can't pin
+    * the failure (`Unknown`) and `adapt.llmClassifierOnUnknown` is set — the §7.11 cost lever. The proposal is a
+    * read-only input the spine routes on deterministically (§8.2); the core never re-invokes it on replay.
+    * Wall-clock-capped orchestrator-side via the `ReviewerCall` boundary.
+    */
+  def classifyFailure(input: FailureClassifierInput): IO[io.forge.core.profile.Classification]
+
   /** Schema enforcement (§7.4/§7.5). */
   def schemaMechanism: SchemaMechanism
 

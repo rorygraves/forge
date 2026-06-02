@@ -48,10 +48,9 @@ Concretely:
 6. A live `extract-media-network-config` (or equivalent format-gated) re-run on `szork`
    showing the collapse end-to-end.
 
-**Deliberately deferred inside this slice (see §4):** the LLM `RepoProfiler` that *populates*
-`.forge/profile.json` (Tier 2 — profiles are hand-authored fixtures until then); the LLM
-`classifyFailure` consulted on `Unknown` (Tier 2 — rules cover every dogfood case so far);
-`ConventionLearner` (Tier 3 — the least-developed sensor).
+**Landed since (Tier 2):** the LLM `RepoProfiler` that *populates* `.forge/profile.json` (Task 3.0.3) and the LLM
+`classifyFailure` consulted on rules-`Unknown` (Task 3.1.4). **Still deferred (see §4):** `ConventionLearner` (Tier 3 —
+the least-developed sensor); the §8.3 local **Build** gate (decision D2 — needs a pre-PR fix-up FSM path).
 
 Tiering: **Tier 1** (Tasks 3.0.1, 3.1.1, 3.1.2) is the gating deliverable — it is the
 dogfood-#2 collapse, live and measured. **Tier 2** (Tasks 3.0.2, 3.0.3, 3.1.3, 3.1.4) makes
@@ -189,11 +188,30 @@ real run, not just fakes (the `gh` wire-shape + subprocess-lifecycle discipline 
       a follow-up slice (§11/1.8 contract change). Build failures keep the 1.6 path: surface at CI,
       route via §8.2.
 
-### Task 3.1.4 — LLM classifyFailure on Unknown  [ ]
+### Task 3.1.4 — LLM classifyFailure on Unknown  ✅ 2026-06-02
 
-- [ ] `Connector.classifyFailure` consulted **only** when `RuleBasedFailureClassifier` returns
-      low-confidence `Unknown` (§7.11 cost lever). Record `source: "llm"`.
-- [ ] `adapt.llmClassifierOnUnknown` gate; wall-clock-capped via the `ReviewerCall` boundary.
+- [x] `Connector.classifyFailure(FailureClassifierInput): IO[Classification]` consulted **only** when the rules
+      `RuleBasedFailureClassifier` returns `Unknown` (the §7.11 cost lever — the rules baseline handles every dogfood
+      case for free; the LLM tail pays a reviewer-call only for the genuinely ambiguous failure). A reviewer-side
+      one-shot mirroring `profileRepo` exactly: `failure-classifier.json` Native schema + `failure-classifier.{claude,
+      codex}.md` system prompts (in `assets/reviewer/`, registered in `AssetInstaller.ShippedAssets` +
+      `ConnectorFactory.reviewerAssets` + `ReviewerAssets.classifyFailure`), a stable `ReviewerPrompts.classifyFailureBody`
+      (renders the failing log + the profile's Known commands so the model can name a `suggested` kind the repo
+      actually has), and a `ReviewDecoders.failureClassification` decoder (reuses the `forge-core`
+      `FailureKind`/`CommandKind` `fromString` parsers so wire strings can't drift). The orchestrator's pure
+      `FailureRouter` gained `routeFrom(classification, …, source)`; `Orchestrator.maybeLlmClassify` consults the sensor,
+      re-routes its proposal through `routeFrom` with `source = "llm"`, and records `profile.failure_classified`
+      `source: "llm"` (the action already carried the field). The IO stays out of the pure router (the §8.2 "decision in
+      orchestrator, pure router" split). **Decision D6** below: a `Timeout`/adapter/process failure keeps the rules
+      `Escalate` — Forge never blocks a feature on a stalled sensor.
+- [x] Gated by `adapt.llmClassifierOnUnknown` (already in `AdaptConfig`, default `true`); wall-clock-capped via the
+      `ReviewerCall` boundary (`RealReviewerCall.classifyFailure` under the 3-min cap; `RetryingReviewerCall` shares the
+      `reviewRetries` process-failure budget). `adapt.enabled = false` ⇒ no profile ⇒ blind 1.6 fix-up (no consultation).
+      Tests: `FailureClassificationDecoderSuite` (9 — the decode + malformed Lefts), Claude+Codex `classifyFailure`
+      fake-CLI end-to-end, `RetryingReviewerCallSuite` (shares `reviewRetries`), `FailureRouterSuite` (`routeFrom`
+      source=llm + autofix degradation), `OrchestratorCiRoutingSuite` (e2e: rules-Unknown → LLM pins → local autofix,
+      `attempts` 0, `source=llm`; + LLM-Timeout → blind Escalate, `source=rules`), and the opt-in `forge-it`
+      `FailureClassifierSmokeSuite` (real Claude/Codex capture, `FORGE_IT_RUN_CLASSIFIER_SMOKE=1`).
 
 ### Tier 3 — the learning loop
 
@@ -208,12 +226,35 @@ real run, not just fakes (the `gh` wire-shape + subprocess-lifecycle discipline 
 ## 2. Order of work
 
 3.1.1 ✅ → 3.0.1 ✅ → 3.1.2 (code ✅; live re-run deferred — T5) → 3.0.2 ✅ → 3.1.3 (Format gate
-✅; Build gate deferred — D2) → 3.0.3 ✅ → **{3.1.4, 3.1.3-Build in any order} (next)** → 3.2.
+✅; Build gate deferred — D2) → 3.0.3 ✅ → 3.1.4 ✅ → **{3.1.3-Build (own slice — D2), 3.2} (next)**.
 Tier-1 closes the slice's exit criterion; Tier 2/3 can land incrementally behind it.
 
 ---
 
 ## 3. Status log
+
+- **2026-06-02 — Task 3.1.4 landed: the LLM `FailureClassifier` sensor consulted on rules-`Unknown` (the §7.11 cost
+  lever).** `Connector.classifyFailure(FailureClassifierInput): IO[Classification]` is a reviewer-side one-shot mirroring
+  `profileRepo` exactly — `failure-classifier.json` Native schema + `failure-classifier.{claude,codex}.md` prompts (in
+  `assets/reviewer/`, registered in `AssetInstaller.ShippedAssets` + `ConnectorFactory.reviewerAssets` +
+  `ReviewerAssets.classifyFailure`) + a stable `ReviewerPrompts.classifyFailureBody` (renders the failing log + the
+  profile's Known commands so the model can name a `suggested` kind the repo actually exposes) + a
+  `ReviewDecoders.failureClassification` decoder (reuses the `forge-core` `FailureKind`/`CommandKind` `fromString`
+  parsers so wire strings can't drift). It rides the existing `ReviewerCall`/`RealReviewerCall`/`RetryingReviewerCall`
+  wall-clock boundary (sharing the `reviewRetries` process-failure budget). The consultation is wired **only** on the
+  rules-`Unknown` path: the pure `FailureRouter` gained `routeFrom(classification, …, source)`, and the orchestrator's
+  `maybeLlmClassify` (gated on `adapt.llmClassifierOnUnknown`, default `true`) consults the sensor, re-routes its
+  proposal through `routeFrom` with `source = "llm"`, and emits `profile.failure_classified{source:"llm"}` (the §19
+  action already carried the field). The IO stays out of the pure router — the §8.2 "decision in orchestrator, pure
+  router, execution in SideEffects" split. **Decision D6**: a `Timeout`/adapter/process failure keeps the rules
+  `Escalate` — Forge never blocks a feature on a stalled sensor (it degrades to the safe human-escalation the rules
+  already chose). New tests: `FailureClassificationDecoderSuite` (9), Claude+Codex `classifyFailure` fake-CLI e2e,
+  `RetryingReviewerCallSuite` (shares `reviewRetries`), `FailureRouterSuite` (`routeFrom` source=llm + autofix
+  degradation), `OrchestratorCiRoutingSuite` (+2: rules-Unknown → LLM pins → local autofix, `attempts` 0, `source=llm`;
+  + LLM-Timeout → blind Escalate, `source=rules`), and the opt-in `forge-it` `FailureClassifierSmokeSuite`
+  (`FORGE_IT_RUN_CLASSIFIER_SMOKE=1`). Full build green (`forge-core` 424, `forge-agents` 227, `forge-app` 395,
+  `forge-it` compiles); `scalafmtCheckAll` clean. The Task 3.1.4 header is ticked; the roadmap §4 bullet stays
+  **unticked** (slice closes only after the §0 live re-run + the whole-section review).
 
 - **2026-06-02 — Task 3.0.3 landed: the `RepoProfiler` LLM sensor + `forge profile` command.** The first agentic
   *sense* that produces a profile (Tier 2 — it closes carry-forward T1's "profiles are hand-authored until 3.0.3").
@@ -418,6 +459,19 @@ id; the existing `(paths, config, args)` `StateChangingContext` covers it with n
 is selected from `config.mode` via `Role.pairFor` (there is no per-feature `Mode` at profile time). Revisit only if a repo
 wants to profile under a non-default mode without editing `config.json` (a `--mode` flag), or if concurrent `forge profile`
 + `forge run` should *not* contend on the one lock.
+
+### D6 — the LLM `classifyFailure` degrades to the rules `Escalate` on timeout/failure, and is consulted only on `Unknown` — open (1.7 §7.11/§8.2)
+
+§7.11 frames `classifyFailure` as the cost lever consulted when the rules baseline is low-confidence. Task 3.1.4 wires
+it on exactly the `Unknown` kind (which the rules baseline routes to `Escalate`) rather than on a confidence threshold —
+`Unknown` *is* the rules classifier's low-confidence sentinel (it lands there at 0.2), so the two are equivalent today
+and the kind-match is simpler/total. On the sensor side, a `ReviewerOutcome.Timeout` / adapter / process failure makes
+the orchestrator keep the **rules** `Escalate` (recording `source = "rules"`) rather than block the feature on a stalled
+sensor — the same "never block on a stall" stance the reviewer one-shots take. When the LLM *itself* returns `Unknown`,
+that routes to `Escalate` too, now stamped `source = "llm"` so the §19 audit shows the sensor was consulted. Revisit if
+a future rules classifier emits a genuine `confidence` band (not just `Unknown`) worth consulting the LLM on — that would
+make the gate a threshold rather than a kind-match. The `FailureClassifierInput` carries the full `RepoProfile` (so the
+prompt can list Known commands); revisit if that proves too large a prompt for a big multi-command profile.
 
 ## 5. Cross-references
 

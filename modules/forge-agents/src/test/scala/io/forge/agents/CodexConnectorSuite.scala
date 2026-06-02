@@ -662,7 +662,8 @@ class CodexConnectorSuite extends munit.FunSuite:
       designReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       refine = ReviewerAssets.PerMethod(schema, systemPrompt),
-      profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt)
+      profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt),
+      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = CodexConnector(
       binary = fakeCodex.toString,
@@ -701,7 +702,8 @@ class CodexConnectorSuite extends munit.FunSuite:
       designReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       refine = ReviewerAssets.PerMethod(schema, systemPrompt),
-      profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt)
+      profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt),
+      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = CodexConnector(
       binary = fakeCodex.toString,
@@ -717,6 +719,48 @@ class CodexConnectorSuite extends munit.FunSuite:
     assertEquals(profile.commands.map(_.kind.asString), Vector("format"))
     assert(profile.commands.head.autofix)
     assertEquals(profile.workflow.ciRequiredChecks, Vector("backend"))
+
+  test("classifyFailure end-to-end against a fake CLI: schema-conformant payload decoded to Classification"):
+    // The §7.11 FailureClassifier sensor rides the Codex reviewer one-shot path; verify it end-to-end (Task 3.1.4).
+    val classJson =
+      """{\"kind\":\"deterministic_fix\",\"confidence\":0.97,\"suggested\":\"format\",""" +
+        """\"evidence\":\"scalafmt: 1 files must be formatted\"}"""
+    val lines = Seq(
+      """{"type":"thread.started","thread_id":"019e5e65-1caf-7210-a79b-239db0bafb43"}""",
+      """{"type":"turn.started"}""",
+      s"""{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"$classJson"}}""",
+      """{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":5}}"""
+    )
+    val script = "#!/bin/sh\n" + lines.map(l => s"printf '%s\\n' '${l.replace("'", "'\\''")}'").mkString("\n") + "\n"
+    val fakeCodex = os.temp(contents = script, prefix = "fake-codex-classify-", suffix = ".sh", deleteOnExit = true)
+    os.perms.set(fakeCodex, "rwx------")
+    val schema = os.temp(contents = """{"type":"object"}""", prefix = "schema-", suffix = ".json", deleteOnExit = true)
+    val systemPrompt = os.temp(contents = "Classify the failure", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val assets = ReviewerAssets(
+      designReview = ReviewerAssets.PerMethod(schema, systemPrompt),
+      prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
+      refine = ReviewerAssets.PerMethod(schema, systemPrompt),
+      profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt),
+      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt)
+    )
+    val connector = CodexConnector(
+      binary = fakeCodex.toString,
+      model = model,
+      priceTable = emptyPrices,
+      sessionSettings = defaultSettings,
+      reviewerAssets = Some(assets)
+    )
+    val profile = io.forge.core.profile.RepoProfile.fromJson(
+      """{"schemaVersion":1,"buildTool":"sbt","commands":[],"commitIdentity":{"name":"x","email":"y"},
+        |"workflow":{"reviewRequired":true,"ciRequiredChecks":[],"branchModel":"trunk_based","mergeStrategy":"squash"}}""".stripMargin
+    )
+    val c = connector
+      .classifyFailure(
+        FailureClassifierInput(FeatureId("feat-1"), "ci", "scalafmt: 1 files must be formatted", profile)
+      )
+      .unsafeRunSync()
+    assertEquals(c.kind, io.forge.core.profile.FailureKind.DeterministicFix)
+    assertEquals(c.suggested, Some(io.forge.core.profile.CommandKind.Format))
 
   test("reviewer end-to-end against a fake CLI: non-zero exit surfaces as ReviewerProcessFailure"):
     val fakeCodex = os.temp(
@@ -736,7 +780,8 @@ class CodexConnectorSuite extends munit.FunSuite:
       designReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       refine = ReviewerAssets.PerMethod(schema, systemPrompt),
-      profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt)
+      profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt),
+      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = CodexConnector(
       binary = fakeCodex.toString,
@@ -760,7 +805,8 @@ class CodexConnectorSuite extends munit.FunSuite:
       designReview = ReviewerAssets.PerMethod(schemaDr, systemPrompt),
       prReview = ReviewerAssets.PerMethod(schemaPr, systemPrompt),
       refine = ReviewerAssets.PerMethod(schemaRf, systemPrompt),
-      profileRepo = ReviewerAssets.PerMethod(schemaRf, systemPrompt)
+      profileRepo = ReviewerAssets.PerMethod(schemaRf, systemPrompt),
+      classifyFailure = ReviewerAssets.PerMethod(schemaRf, systemPrompt)
     )
     // Each method's argv carries its own --output-schema path. Exercise the wiring via execArgv directly using the
     // settings the connector would build per-call.

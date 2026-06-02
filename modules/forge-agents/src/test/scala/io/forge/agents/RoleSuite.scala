@@ -34,6 +34,7 @@ class RoleSuite extends munit.FunSuite:
     def reviewPr(input: PrReviewInput): IO[PrReview] = notImplemented
     def refine(input: RefineInput): IO[RefineResult] = notImplemented
     def profileRepo(input: RepoProfilerInput): IO[RepoProfile] = notImplemented
+    def classifyFailure(input: FailureClassifierInput): IO[io.forge.core.profile.Classification] = notImplemented
     def costFrom(event: AgentEvent): Option[Cost] = None
 
   private val claude = TaggedConnector("claude")

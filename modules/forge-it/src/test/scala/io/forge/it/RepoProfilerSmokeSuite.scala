@@ -33,7 +33,8 @@ class RepoProfilerSmokeSuite extends munit.FunSuite:
   private val optIn: Boolean = sys.env.get("FORGE_IT_RUN_PROFILER_SMOKE").contains("1")
   private val claudeOnPath: Option[os.Path] = onPath("claude")
   private val codexOnPath: Option[os.Path] = onPath("codex")
-  private val claudeCanRun: Boolean = optIn && claudeOnPath.isDefined && !sys.env.get("FORGE_IT_SKIP_CLAUDE").contains("1")
+  private val claudeCanRun: Boolean =
+    optIn && claudeOnPath.isDefined && !sys.env.get("FORGE_IT_SKIP_CLAUDE").contains("1")
   private val codexCanRun: Boolean = optIn && codexOnPath.isDefined && !sys.env.get("FORGE_IT_SKIP_CODEX").contains("1")
 
   private val claudeModel: Option[String] = sys.env.get("FORGE_IT_CLAUDE_MODEL").filter(_.nonEmpty)
@@ -54,13 +55,16 @@ class RepoProfilerSmokeSuite extends munit.FunSuite:
       designReview = ReviewerAssets.PerMethod(schemas / "design-review.json", prompts / s"design-review.$cli.md"),
       prReview = ReviewerAssets.PerMethod(schemas / "code-review.json", prompts / s"code-review.$cli.md"),
       refine = ReviewerAssets.PerMethod(schemas / "refine.json", prompts / s"refine.$cli.md"),
-      profileRepo = ReviewerAssets.PerMethod(schemas / "repo-profile.json", prompts / s"repo-profile.$cli.md")
+      profileRepo = ReviewerAssets.PerMethod(schemas / "repo-profile.json", prompts / s"repo-profile.$cli.md"),
+      classifyFailure =
+        ReviewerAssets.PerMethod(schemas / "failure-classifier.json", prompts / s"failure-classifier.$cli.md")
     )
 
   private def loadPriceTable: PriceTable =
     val stream = getClass.getResourceAsStream("/prices.example.json")
     require(stream != null, "prices.example.json missing from classpath")
-    try upickle.default.read[PriceTable](scala.io.Source.fromInputStream(stream)(using scala.io.Codec("UTF-8")).mkString)
+    try
+      upickle.default.read[PriceTable](scala.io.Source.fromInputStream(stream)(using scala.io.Codec("UTF-8")).mkString)
     finally stream.close()
 
   /** This repo's own facts — `forge` is the canonical `sbt` repo the `forge.json` fixture describes. */
@@ -91,7 +95,11 @@ class RepoProfilerSmokeSuite extends munit.FunSuite:
   test("profileRepo (claude) on the forge repo decodes into a plausible RepoProfile".flaky):
     assume(claudeCanRun, "set FORGE_IT_RUN_PROFILER_SMOKE=1 with `claude` on PATH")
     val connector =
-      ClaudeConnector(binary = claudeOnPath.get.toString, reviewerAssets = Some(assetsFor("claude")), reviewerModel = claudeModel)
+      ClaudeConnector(
+        binary = claudeOnPath.get.toString,
+        reviewerAssets = Some(assetsFor("claude")),
+        reviewerModel = claudeModel
+      )
     new RealReviewerCall(connector).profileRepo(forgeInput, limits).unsafeRunSync() match
       case ReviewerOutcome.Settled(profile) => assertPlausible(profile)
       case other => fail(s"expected a settled RepoProfile, got $other")

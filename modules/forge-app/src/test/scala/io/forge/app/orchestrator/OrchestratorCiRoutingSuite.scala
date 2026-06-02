@@ -92,9 +92,17 @@ class OrchestratorCiRoutingSuite extends munit.FunSuite:
       mergeable = Some(true)
     )
 
-  private class RoutingSideEffects(piecePr: PrNumber, autofixCalls: AtomicInteger)
-      extends FakeSideEffects(PrNumber(100), _ => piecePr):
-    override def fetchFailingLog(runId: String): IO[Either[String, String]] = IO.pure(Right(scalafmtLog))
+  /** A failing log the rules classifier cannot pin (no scalafmt / rate-limit / compile markers) — drives the Task 3.1.4
+    * `Unknown` → LLM `classifyFailure` consultation path.
+    */
+  private val opaqueLog: String = "Process completed with exit code 1."
+
+  private class RoutingSideEffects(
+      piecePr: PrNumber,
+      autofixCalls: AtomicInteger,
+      failingLog: String = scalafmtLog
+  ) extends FakeSideEffects(PrNumber(100), _ => piecePr):
+    override def fetchFailingLog(runId: String): IO[Either[String, String]] = IO.pure(Right(failingLog))
     override def runLocalAutofixAndPush(
         feature: io.forge.core.fsm.Feature,
         piece: PieceId,
@@ -202,3 +210,93 @@ class OrchestratorCiRoutingSuite extends munit.FunSuite:
     assertEquals(out.manifest.pieces.find(_.id == p1).map(_.attempts), Some(1))
     val log = os.read(paths.featureLog(featureId))
     assert(!log.contains("\"profile.failure_classified\""), log)
+
+  tempFixture.test("rules-Unknown CI failure → LLM classifyFailure pins it → local autofix, source=llm"): root =>
+    // Task 3.1.4: the rules baseline returns Unknown on an opaque log; with adapt.llmClassifierOnUnknown the
+    // orchestrator consults the LLM, which pins it as a DeterministicFix → local scalafmtAll. attempts stays 0, and the
+    // §19 audit records source=llm.
+    val paths = new ForgePaths(repoRoot = root)
+    val autofixCalls = new AtomicInteger(0)
+
+    val llmClassification =
+      Classification(FailureKind.DeterministicFix, 0.92, Some(CommandKind.Format), "perceived drift")
+    val llmReviewer =
+      new FakeReviewerCall(
+        FakeReviewerCall.approveDesign,
+        ReviewerOutcome.Timeout,
+        FakeReviewerCall.refineNoChange,
+        classifyOutcome = IO.pure(ReviewerOutcome.Settled(llmClassification))
+      )
+
+    val out = (for
+      logImpl <- FileActionLog(paths)
+      watcher <- FakePRWatcher.make
+      _ <- watcher.offer(piecePr, snapshotResult(ciFailedSnapshot(piecePr)))
+      _ <- watcher.offer(piecePr, snapshotResult(ciReadySnapshot(piecePr)))
+      monitor <- FakeSessionMonitor.make()
+      orch = new Orchestrator(
+        new RoutingSideEffects(piecePr, autofixCalls, failingLog = opaqueLog),
+        monitor,
+        watcher,
+        llmReviewer,
+        new FileSpecStore(paths),
+        new FileManifestStore(paths),
+        logImpl,
+        new FileStateCache(paths),
+        paths,
+        testConfig,
+        profileStore = profileStoreOf(Some(scalafmtProfile))
+      )
+      out <- orch.drive(startFeature)
+    yield out).unsafeRunSync()
+
+    assert(out.state.isInstanceOf[FsmState.NeedsHumanIntervention], out.state.toString)
+    // The LLM pinned what the rules couldn't: the formatter ran once, no fix-up round consumed.
+    assertEquals(autofixCalls.get(), 1)
+    assertEquals(out.manifest.pieces.find(_.id == p1).map(_.attempts), Some(0))
+    val log = os.read(paths.featureLog(featureId))
+    assert(log.contains("\"route\":\"RunLocalCommand\""), log)
+    assert(log.contains("\"source\":\"llm\""), log)
+
+  tempFixture.test("rules-Unknown CI failure with LLM Timeout → blind escalate, attempts untouched, source not llm"):
+    root =>
+      // The safe degradation: when the LLM sensor stalls, the orchestrator keeps the rules Escalate rather than blocking.
+      // Unknown → Escalate routes to CiReadinessBlocked → NHI; no autofix, attempts stays 0, audit records source=rules.
+      val paths = new ForgePaths(repoRoot = root)
+      val autofixCalls = new AtomicInteger(0)
+
+      val llmTimeoutReviewer =
+        new FakeReviewerCall(
+          FakeReviewerCall.approveDesign,
+          ReviewerOutcome.Timeout,
+          FakeReviewerCall.refineNoChange,
+          classifyOutcome = IO.pure(ReviewerOutcome.Timeout)
+        )
+
+      val out = (for
+        logImpl <- FileActionLog(paths)
+        watcher <- FakePRWatcher.make
+        _ <- watcher.offer(piecePr, snapshotResult(ciFailedSnapshot(piecePr)))
+        monitor <- FakeSessionMonitor.make()
+        orch = new Orchestrator(
+          new RoutingSideEffects(piecePr, autofixCalls, failingLog = opaqueLog),
+          monitor,
+          watcher,
+          llmTimeoutReviewer,
+          new FileSpecStore(paths),
+          new FileManifestStore(paths),
+          logImpl,
+          new FileStateCache(paths),
+          paths,
+          testConfig,
+          profileStore = profileStoreOf(Some(scalafmtProfile))
+        )
+        out <- orch.drive(startFeature)
+      yield out).unsafeRunSync()
+
+      assert(out.state.isInstanceOf[FsmState.NeedsHumanIntervention], out.state.toString)
+      assertEquals(autofixCalls.get(), 0)
+      assertEquals(out.manifest.pieces.find(_.id == p1).map(_.attempts), Some(0))
+      val log = os.read(paths.featureLog(featureId))
+      assert(log.contains("\"route\":\"Escalate\""), log)
+      assert(log.contains("\"source\":\"rules\""), log)

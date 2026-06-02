@@ -49,7 +49,8 @@ class ReviewerCallSubprocessTimeoutSuite extends CatsEffectSuite:
       designReview = ReviewerAssets.PerMethod(schema, sys),
       prReview = ReviewerAssets.PerMethod(schema, sys),
       refine = ReviewerAssets.PerMethod(schema, sys),
-      profileRepo = ReviewerAssets.PerMethod(schema, sys)
+      profileRepo = ReviewerAssets.PerMethod(schema, sys),
+      classifyFailure = ReviewerAssets.PerMethod(schema, sys)
     )
 
   private def assertCapped(binary: os.Path): IO[Unit] =

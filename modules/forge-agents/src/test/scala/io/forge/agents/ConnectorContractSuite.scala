@@ -40,6 +40,7 @@ class ConnectorContractSuite extends munit.FunSuite:
     def reviewPr(input: PrReviewInput): IO[PrReview] = notImplemented
     def refine(input: RefineInput): IO[RefineResult] = notImplemented
     def profileRepo(input: RepoProfilerInput): IO[RepoProfile] = notImplemented
+    def classifyFailure(input: FailureClassifierInput): IO[io.forge.core.profile.Classification] = notImplemented
     def costFrom(event: AgentEvent): Option[Cost] = event match
       case AgentEvent.CostUpdate(c) => Some(c)
       case _ => None

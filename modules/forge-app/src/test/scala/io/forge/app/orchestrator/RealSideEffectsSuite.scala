@@ -298,6 +298,10 @@ class RealSideEffectsSuite extends munit.FunSuite:
     def refine(input: RefineInput): IO[RefineResult] = IO.raiseError(new NotImplementedError)
     def profileRepo(input: RepoProfilerInput): IO[io.forge.core.profile.RepoProfile] =
       IO.raiseError(new NotImplementedError)
+    def classifyFailure(
+        input: io.forge.agents.FailureClassifierInput
+    ): IO[io.forge.core.profile.Classification] =
+      IO.raiseError(new NotImplementedError)
     def schemaMechanism: SchemaMechanism = SchemaMechanism.Native
     def costFrom(event: AgentEvent): Option[Cost] = None
 

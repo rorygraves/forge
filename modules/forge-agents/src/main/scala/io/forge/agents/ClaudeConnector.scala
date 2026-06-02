@@ -166,6 +166,13 @@ final class ClaudeConnector(
       ReviewDecoders.repoProfile
     )
 
+  def classifyFailure(input: FailureClassifierInput): IO[io.forge.core.profile.Classification] =
+    runReviewer(
+      assets => assets.classifyFailure,
+      ReviewerPrompts.classifyFailureBody(input),
+      ReviewDecoders.failureClassification
+    )
+
   // --- telemetry ----
 
   def costFrom(event: AgentEvent): Option[Cost] = event match

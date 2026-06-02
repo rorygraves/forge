@@ -3,7 +3,7 @@ package io.forge.app.reviewer
 import cats.effect.{IO, Ref}
 import io.forge.agents.*
 import io.forge.core.{FeatureId, PieceId, PrNumber}
-import io.forge.core.profile.RepoProfile
+import io.forge.core.profile.{Classification, FailureKind, RepoProfile}
 import munit.CatsEffectSuite
 
 import scala.concurrent.duration.DurationInt
@@ -31,6 +31,7 @@ class RetryingReviewerCallSuite extends CatsEffectSuite:
       designScript: Ref[IO, List[ReviewerOutcome[DesignReview]]],
       prScript: Ref[IO, List[ReviewerOutcome[PrReview]]],
       refineScript: Ref[IO, List[ReviewerOutcome[RefineResult]]],
+      classifyScript: Ref[IO, List[ReviewerOutcome[Classification]]],
       val calls: Ref[IO, Int]
   ) extends ReviewerCall:
     private def pop[A](script: Ref[IO, List[ReviewerOutcome[A]]]): IO[ReviewerOutcome[A]] =
@@ -44,18 +45,24 @@ class RetryingReviewerCallSuite extends CatsEffectSuite:
     override def refine(input: RefineInput, l: ReviewerLimits): IO[ReviewerOutcome[RefineResult]] = pop(refineScript)
     override def profileRepo(input: RepoProfilerInput, l: ReviewerLimits): IO[ReviewerOutcome[RepoProfile]] =
       IO.raiseError(new IllegalStateException("ScriptedReviewerCall: profileRepo not scripted"))
+    override def classifyFailure(
+        input: FailureClassifierInput,
+        l: ReviewerLimits
+    ): IO[ReviewerOutcome[Classification]] = pop(classifyScript)
 
   private def scripted(
       design: List[ReviewerOutcome[DesignReview]] = Nil,
       pr: List[ReviewerOutcome[PrReview]] = Nil,
-      refine: List[ReviewerOutcome[RefineResult]] = Nil
+      refine: List[ReviewerOutcome[RefineResult]] = Nil,
+      classify: List[ReviewerOutcome[Classification]] = Nil
   ): IO[ScriptedReviewerCall] =
     for
       d <- Ref.of[IO, List[ReviewerOutcome[DesignReview]]](design)
       p <- Ref.of[IO, List[ReviewerOutcome[PrReview]]](pr)
       r <- Ref.of[IO, List[ReviewerOutcome[RefineResult]]](refine)
+      cl <- Ref.of[IO, List[ReviewerOutcome[Classification]]](classify)
       c <- Ref.of[IO, Int](0)
-    yield new ScriptedReviewerCall(d, p, r, c)
+    yield new ScriptedReviewerCall(d, p, r, cl, c)
 
   private def procFail[A]: ReviewerOutcome[A] = ReviewerOutcome.AdapterFailure(ReviewerProcessFailure("boom"))
 
@@ -124,6 +131,18 @@ class RetryingReviewerCallSuite extends CatsEffectSuite:
     yield
       assertEquals(out, refineNoChange)
       assertEquals(n, 3) // initial + 2 refine retries; reviewRetries=0 must not apply here
+
+  test("classifyFailure draws on reviewRetries (shares the reviewer one-shot budget)"):
+    val classification = Classification(FailureKind.Unknown, 0.4, None, "ambiguous")
+    val classifyInput = FailureClassifierInput(FeatureId("feat-1"), gate = "ci", failureLog = "boom", profile = null)
+    for
+      fake <- scripted(classify = List(procFail, procFail, ReviewerOutcome.Settled(classification)))
+      decorated = new RetryingReviewerCall(fake, reviewRetries = 2, refineRetries = 0)
+      out <- decorated.classifyFailure(classifyInput, limits)
+      n <- fake.calls.get
+    yield
+      assertEquals(out, ReviewerOutcome.Settled(classification): ReviewerOutcome[Classification])
+      assertEquals(n, 3) // initial + 2 review retries; refineRetries=0 must not apply here
 
   test("retry count of 0 is a transparent pass-through (one call, failure surfaced)"):
     for

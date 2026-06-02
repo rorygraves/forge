@@ -11,8 +11,9 @@ import io.forge.core.profile.{Classification, FailureClassifier, FailureRouting,
   * real dogfood log and replayable (the chosen [[Classification]] / route is recorded in §19
   * `profile.failure_classified`).
   *
-  * The classifier is the deterministic rules baseline today (Tier 1); the LLM `classifyFailure` consulted on `Unknown`
-  * is Tier 2 (`adapt.llmClassifierOnUnknown`), not wired here yet — so [[source]] is always `"rules"`.
+  * [[route]] uses the deterministic rules baseline ([[source]] `"rules"`); the LLM `classifyFailure` consulted on
+  * `Unknown` (Tier 2, `adapt.llmClassifierOnUnknown`) is wired orchestrator-side, which re-routes its proposal through
+  * [[routeFrom]] with [[source]] `"llm"` — the IO call stays out of this pure router (Task 3.1.4).
   */
 final class FailureRouter(classifier: FailureClassifier):
 
@@ -21,12 +22,26 @@ final class FailureRouter(classifier: FailureClassifier):
     * fix-up prompt rather than applying + committing it. The classification and the route are recorded either way.
     */
   def route(profile: RepoProfile, failureLog: String, adapt: AdaptConfig): RoutedFailure =
-    val classification = classifier.classify(failureLog, profile)
+    routeFrom(classifier.classify(failureLog, profile), profile, failureLog, adapt, source = "rules")
+
+  /** Route a [[Classification]] that *already exists* — used by the orchestrator to re-route from the LLM
+    * `classifyFailure` proposal when the rules baseline left the failure `Unknown` (Task 3.1.4, `source = "llm"`).
+    * Applies the same `adapt.autofix = false` degradation as [[route]], so an LLM-proposed `RunLocalCommand` honours
+    * the opt-out identically. Keeping the classification an explicit input (rather than re-classifying) is what lets
+    * the LLM tail and the rules baseline share one routing rule and one audit shape.
+    */
+  def routeFrom(
+      classification: Classification,
+      profile: RepoProfile,
+      failureLog: String,
+      adapt: AdaptConfig,
+      source: String
+  ): RoutedFailure =
     val routed = FailureRouting.route(classification, profile, failureLog)
     val effective = routed match
       case FixupRoute.RunLocalCommand(_) if !adapt.autofix => FixupRoute.DriverFixup(failureLog)
       case other => other
-    RoutedFailure(classification, effective, source = "rules")
+    RoutedFailure(classification, effective, source)
 
 /** The router's output: the sensor's [[Classification]], the deterministic [[FixupRoute]] the spine will act on, and
   * the classification `source` (`"rules"` | `"llm"`) recorded in §19 `profile.failure_classified`.

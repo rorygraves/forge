@@ -4,6 +4,7 @@ import cats.effect.IO
 import io.forge.agents.{
   DesignReview,
   DesignReviewInput,
+  FailureClassifierInput,
   PrReview,
   PrReviewInput,
   RefineInput,
@@ -11,7 +12,7 @@ import io.forge.agents.{
   RepoProfilerInput,
   ReviewerProcessFailure
 }
-import io.forge.core.profile.RepoProfile
+import io.forge.core.profile.{Classification, RepoProfile}
 
 /** §7.6 / §11.2 step 9 — the **process-failure retry** layer over a [[ReviewerCall]] (carry-forward **S4-5**).
   *
@@ -55,6 +56,13 @@ final class RetryingReviewerCall(
     */
   override def profileRepo(input: RepoProfilerInput, limits: ReviewerLimits): IO[ReviewerOutcome[RepoProfile]] =
     retrying(reviewRetries)(delegate.profileRepo(input, limits))
+
+  /** The §7.11 `FailureClassifier` shares the `reviewRetries` process-failure budget (a reviewer-side one-shot). */
+  override def classifyFailure(
+      input: FailureClassifierInput,
+      limits: ReviewerLimits
+  ): IO[ReviewerOutcome[Classification]] =
+    retrying(reviewRetries)(delegate.classifyFailure(input, limits))
 
   /** Re-issue `call` while it returns a retryable [[ReviewerProcessFailure]] and `remaining > 0`. `remaining` counts
     * *retries*, so the call is issued at most `remaining + 1` times.
