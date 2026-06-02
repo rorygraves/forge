@@ -14,9 +14,20 @@ that first; everything below is Claude-Code-specific.
   FailureClassifier / ConventionLearner) so Forge stops running blind on a repo.
   Architecture write-up: [`docs/design-rationale.md`](docs/design-rationale.md)
   **A5**; plan: [`docs/roadmap.md`](docs/roadmap.md) §4 (Phase 3 — Repo
-  Adaptation). The implementation contract opens next as `docs/forge-design-1.7.md`.
-- **Active implementation plan:** none — between slices. The most recent
-  closed audit trail is [`docs/design-2.1-tui.md`](docs/design-2.1-tui.md)
+  Adaptation). The implementation contract is
+  [`docs/forge-design-1.7.md`](docs/forge-design-1.7.md) — a focused Phase-3
+  revision (spine/senses; changed §3/§6/§7/§8/§11/§18/§19, the rest frozen at
+  1.6 per its standalone-by-freeze note).
+- **Active implementation plan:** [`docs/design-3.0.md`](docs/design-3.0.md)
+  (Slice 3.0/3.1 — Repo Adaptation, 🟡 open 2026-06-02). Tier-1 types +
+  deterministic routing **landed via the Phase-3 spike** (commit `16396d2`,
+  `io.forge.core.profile`: `RepoProfile`/`ProfileStore`/`contentHash` +
+  `RuleBasedFailureClassifier` + `FailureRouting`, proven against the real
+  dogfood-#2/#5 logs in `RepoProfileSpikeSuite`, `forge-core` 420/420). Next
+  gating Task 3.1.2: wire the live `gh run view --log-failed` → §8.2 classified
+  routing into §11.5 and re-run the dogfood-#2 case to measure the \$1.78
+  collapse on a real run. The most recent closed audit trail is
+  [`docs/design-2.1-tui.md`](docs/design-2.1-tui.md)
   (Slice 2.1 — Phase-2 TUI, ✅ closed 2026-06-01): read-only `forge tui
   <feature>` over the committed action log + state cache (Tasks 2.1.1–2.1.4,
   2.1.6, 2.1.7), with the termflow `0.4.0` wiring + repo-wide Scala 3.5.2→3.7.1
