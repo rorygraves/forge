@@ -120,3 +120,13 @@ trait SideEffects:
     * back to a driver fix up so the failure is never silently dropped.
     */
   def runLocalAutofixAndPush(feature: Feature, piece: PieceId, command: RepoCommand): IO[Either[String, Unit]]
+
+  /** §8.3 (Task 3.1.3) — the local format gate, shift-left: run the repo's `required` deterministic in-place `Format`
+    * autofix `commands` on the working tree BEFORE the §11.4-step-6 piece commit, so the driver's non-conformant output
+    * is rewritten in place and the eventual classify → commit picks up the conformant version — the piece commit is
+    * format-clean before it ever reaches CI (dogfood #3, zero round-trip; no PR exists yet, so there is nothing to
+    * amend or push here). The orchestrator only calls this with a non-empty, pre-filtered `commands` list and records
+    * the `profile.local_gate` audit action itself. Best-effort and additive: a `Left` (a formatter that exits non-zero,
+    * e.g. on a syntax error the build will also catch) is ignored by the caller and the commit proceeds exactly as 1.6.
+    */
+  def runLocalFormatGate(feature: Feature, piece: PieceId, commands: Vector[RepoCommand]): IO[Either[String, Unit]]

@@ -297,6 +297,19 @@ final class RealSideEffects(
       _ <- et(branchManager.pushCurrentBranch())(branchErr)
     yield ()).value
 
+  override def runLocalFormatGate(
+      feature: Feature,
+      piece: PieceId,
+      commands: Vector[RepoCommand]
+  ): IO[Either[String, Unit]] =
+    // §8.3 shift-left: run each required deterministic Format autofix command on the working tree, in place, before the
+    // piece commit. The driver's changes are already present uncommitted; the formatter rewrites them so the eventual
+    // classify → stage → commit (`classifyCommitOpenPr`) picks up the conformant version and the piece commit is
+    // format-clean before it reaches CI (dogfood #3). No commit/push here — there is no PR yet, so unlike the §8.2 CI
+    // autofix there is nothing to amend or force-push. Best-effort: commands run in order, short-circuiting to a Left on
+    // the first non-zero exit; the caller ignores the Left and proceeds (the failure, if real, surfaces at the CI gate).
+    commands.foldLeft(EitherT.pure[IO, String](()))((acc, cmd) => acc.flatMap(_ => runCommand(cmd.argv))).value
+
   /** Run a profile autofix or gate command argv in the repo root. A non-zero exit yields a Left with the tail of its
     * combined output so the caller can surface why the autofix failed before falling back to a driver fix-up.
     */

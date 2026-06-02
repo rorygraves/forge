@@ -192,6 +192,32 @@ class RealSideEffectsSuite extends munit.FunSuite:
     assert(calls.exists(_ == "git.commit(fix(feat): Piece p1)"), calls.mkString(" | "))
     assert(!calls.exists(_.startsWith("bm.createPr")), calls.mkString(" | "))
 
+  // --- runLocalFormatGate (§8.3 local gate — real command execution) --------
+
+  private def fmtCmd(argv: String*): io.forge.core.profile.RepoCommand =
+    import io.forge.core.profile.{CommandKind, Determinism, RepoCommand}
+    RepoCommand(CommandKind.Format, argv.toVector, Determinism.Deterministic, required = true, autofix = true)
+
+  tempFixture.test("runLocalFormatGate runs each command in the repo root → Right"): repo =>
+    val se = sut(repo)
+    val ev = se
+      .runLocalFormatGate(feature(FsmState.PieceImplementing(p1)), p1, Vector(fmtCmd("sh", "-c", "touch gate-ran")))
+      .unsafeRunSync()
+    assertEquals(ev, Right(()))
+    assert(os.exists(repo / "gate-ran"), "the format command must run in the repo root")
+
+  tempFixture.test("runLocalFormatGate short-circuits on a non-zero exit → Left, later commands skipped"): repo =>
+    val se = sut(repo)
+    val ev = se
+      .runLocalFormatGate(
+        feature(FsmState.PieceImplementing(p1)),
+        p1,
+        Vector(fmtCmd("sh", "-c", "exit 3"), fmtCmd("sh", "-c", "touch should-not-run"))
+      )
+      .unsafeRunSync()
+    assert(ev.isLeft, ev.toString)
+    assert(!os.exists(repo / "should-not-run"), "a command after a failing one must not run")
+
   // --- advancePieceBranch ---------------------------------------------------
 
   tempFixture.test("advancePieceBranch: syncBase + createPieceBranch → BranchCreated"): repo =>

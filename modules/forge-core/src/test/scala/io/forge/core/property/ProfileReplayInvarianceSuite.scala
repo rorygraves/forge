@@ -63,7 +63,24 @@ class ProfileReplayInvarianceSuite extends ScalaCheckSuite:
     val route = FailureRouting.route(classification, profile, log)
     FailureClassifiedAction.draft(FeatureId("ignored"), piece, "ci", classification, route, source = "rules")
 
-  property("R1 — profile.snapshot + profile.failure_classified are inert at replay (same final Feature)") {
+  /** §8.3 (Task 3.1.3) `profile.local_gate` — the orchestrator's local-format-gate audit record. A new `profile.*`
+    * kind, so R1 must prove it is inert at replay too (the orchestrator owns the draft; here we mirror its shape).
+    */
+  private val localGateDraft: PieceId => ActionDraft = piece =>
+    ActionDraft(
+      FeatureId("ignored"),
+      Some(piece),
+      actor = None,
+      role = None,
+      kind = "profile.local_gate",
+      payload = ujson.Obj(
+        "gate" -> ujson.Str("local"),
+        "kind" -> ujson.Str("format"),
+        "commands" -> ujson.Arr(ujson.Str("sbt scalafmtAll"))
+      )
+    )
+
+  property("R1 — profile.snapshot + profile.failure_classified + profile.local_gate are inert at replay") {
     forAll(Generators.genInitialFeature) { (seed: Feature) =>
       val run = FsmTrajectory.happyPath(seed)
       val baseDrafts = run.allDrafts
@@ -74,7 +91,8 @@ class ProfileReplayInvarianceSuite extends ScalaCheckSuite:
       // whole stream so `seq` stays strictly increasing.
       val augmented =
         ProfileSnapshot.draft(seed.id, profile) +:
-          (baseDrafts.headOption.toVector ++ Vector(classifiedDraft(piece)) ++ baseDrafts.drop(1))
+          (baseDrafts.headOption.toVector ++
+            Vector(localGateDraft(piece), classifiedDraft(piece)) ++ baseDrafts.drop(1))
 
       val seed0 = Feature.initial(seed.id, run.finalFeature.manifest)
       (Feature.foldEvents(seed0, stampDrafts(baseDrafts)), Feature.foldEvents(seed0, stampDrafts(augmented))) match

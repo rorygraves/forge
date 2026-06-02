@@ -252,6 +252,13 @@ object OrchestratorTestKit:
         command: io.forge.core.profile.RepoCommand
     ): IO[Either[String, Unit]] = IO.pure(Right(()))
 
+    // §8.3 — default: the local format gate is a no-op success. The local-gate suite subclasses to record the call.
+    override def runLocalFormatGate(
+        feature: Feature,
+        piece: PieceId,
+        commands: Vector[io.forge.core.profile.RepoCommand]
+    ): IO[Either[String, Unit]] = IO.pure(Right(()))
+
   // --- StateCache wrapper: records every saved state + runs an onSave hook (delivers merge snapshots on demand) ---
 
   final class HookStateCache(delegate: StateCache, onSave: Feature => IO[Unit]) extends StateCache:

@@ -149,13 +149,31 @@ real run, not just fakes (the `gh` wire-shape + subprocess-lifecycle discipline 
 - [ ] `forge profile <repo>` writes `.forge/profile.json` (human-reviewable committed diff).
       Validate its output against the hand-authored `szork`/`forge` fixtures.
 
-### Task 3.1.3 — local format/build gate, pre-PR (§8.3)  [ ]
+### Task 3.1.3 — local format gate, pre-PR (§8.3) — **Format landed; Build deferred** [ ]
 
-- [ ] In §11.4 step 6, after commit / before push: run the profile's `required` deterministic
-      gates locally; `Format` autofix amends the commit (kills dogfood #3 at the source, zero
-      round-trip); a local `Build` `CodeFix` routes to a pre-PR driver fix-up (no `attempts`
-      until a PR-side failure).
-- [ ] Gated by `adapt.localGate`; never runs `Heuristic` commands.
+- [x] **Format autofix gate (the dogfood-#3 collapse).** In the §11.4-step-6 path
+      (`ClassifyCommitOpenPr`), **before** the piece commit, run the profile's `required` /
+      `Deterministic` / in-place `autofix` `Format` commands on the working tree, so the driver's
+      non-conformant output is rewritten in place and the eventual classify → commit picks up the
+      conformant version — the piece commit is format-clean before it ever reaches CI, zero
+      round-trip, no `attempts`. Landed as `SideEffects.runLocalFormatGate` (executed via the
+      proven `runCommand` seam) + the orchestrator's `runLocalFormatGate` / `localFormatGateCommands`
+      (pure profile filter) wired into `runSettleEffect`'s `ClassifyCommitOpenPr` case (profile
+      threaded through `handleWinner` / `postSettleRecover`). A `profile.local_gate` audit action is
+      recorded (a no-op `Replay` projection — proven in `ProfileReplayInvarianceSuite` R1).
+      **Decision D1** (format-before-commit, not commit-then-`--amend`) and the §19 schema gap noted
+      in §4. Tests: `OrchestratorLocalGateSuite` (e2e: gate runs once pre-PR with the profile command,
+      `attempts` stays 0, action logged; unprofiled / `localGate = false` ⇒ gate never runs, nothing
+      logged) + `RealSideEffectsSuite` real-command-execution units (runs in repo root; short-circuits
+      on a non-zero exit). `forge-app` 384 / `forge-core` 424 green; `scalafmtCheckAll` clean.
+- [x] Gated by `adapt.localGate` (+ `adapt.autofix`); `Heuristic` commands are never run locally
+      (the `Deterministic` filter excludes them); `adapt.enabled = false` ⇒ `None` profile ⇒ no-op.
+- [ ] **Build gate — deferred (decision D2, see §4).** A local `Build` `CodeFix` "routes to a pre-PR
+      driver fix-up" needs new FSM machinery — the only fix-up states (`PieceCiFailed` / `PieceFixingUp`)
+      all carry a PR number; there is no pre-PR fix-up path. Doing it without that would *regress* vs
+      1.6 (where a build failure reaches CI and auto-routes to a fix-up with the full log). Deferred to
+      a follow-up slice (§11/1.8 contract change). Build failures keep the 1.6 path: surface at CI,
+      route via §8.2.
 
 ### Task 3.1.4 — LLM classifyFailure on Unknown  [ ]
 
@@ -175,13 +193,30 @@ real run, not just fakes (the `gh` wire-shape + subprocess-lifecycle discipline 
 
 ## 2. Order of work
 
-3.1.1 ✅ → 3.0.1 ✅ → 3.1.2 (code ✅; live re-run deferred — T5) → 3.0.2 ✅ → **{3.0.3, 3.1.3,
-3.1.4 in any order} (next)** → 3.2.
+3.1.1 ✅ → 3.0.1 ✅ → 3.1.2 (code ✅; live re-run deferred — T5) → 3.0.2 ✅ → 3.1.3 (Format gate
+✅; Build gate deferred — D2) → **{3.0.3, 3.1.4, 3.1.3-Build in any order} (next)** → 3.2.
 Tier-1 closes the slice's exit criterion; Tier 2/3 can land incrementally behind it.
 
 ---
 
 ## 3. Status log
+
+- **2026-06-02 — Task 3.1.3 Format gate landed (Build deferred): the §8.3 shift-left format gate, pre-PR.**
+  The dogfood-#3 collapse, killed at the source: in the §11.4-step-6 `ClassifyCommitOpenPr` path, **before** the
+  piece commit, the orchestrator runs the profile's `required` / `Deterministic` / in-place `autofix` `Format`
+  commands on the working tree (`SideEffects.runLocalFormatGate`, executed via the existing `runCommand` seam), so
+  the driver's non-conformant output is rewritten in place and the piece commit is format-clean before it ever
+  reaches CI — zero round-trip, no `attempts`. The decision (which commands; `adapt.localGate` / `adapt.autofix`
+  gating) is the pure orchestrator filter `localFormatGateCommands`; `profile` is threaded down through
+  `handleWinner` / `postSettleRecover` → `runSettleEffect` (matching the §8.2 "decision in orchestrator, execution
+  in SideEffects" split). A `profile.local_gate` audit action records each run (a no-op `Replay` projection —
+  `ProfileReplayInvarianceSuite` R1 extended to prove it). Unprofiled / `localGate = false` / `enabled = false` ⇒
+  empty command set ⇒ byte-identical 1.6 behaviour. New tests: `OrchestratorLocalGateSuite` (3, e2e collapse +
+  both 1.6 paths) and two `RealSideEffectsSuite` real-command units (runs in repo root; short-circuits on non-zero
+  exit). `forge-app` 384/384, `forge-core` 424/424; `scalafmtCheckAll` clean (no `RedundantBraces` crash this time).
+  **Build gate deferred** (decision D2): its "pre-PR driver fix-up" needs new FSM states the frozen §11 lacks, and
+  the shortcut regresses vs 1.6 — scoped out via `AskUserQuestion` and filed for a 1.8 slice. The Task 3.1.3 header
+  and the roadmap §4 bullet stay **unticked** until the Build gate lands (and the §0 live re-run, T5).
 
 - **2026-06-02 — Task 3.0.2 landed: profile resolved once, threaded as a read-only router input;
   replayability invariant under test.** `Orchestrator.resolveProfile` (gated on `adapt.enabled`)
@@ -290,6 +325,37 @@ sufficient validation for now). Two friction findings surfaced while attempting 
    this and unaffected.
 
 The roadmap §4 bullet and the Task 3.1.2 header stay **unticked** until the live collapse is measured.
+
+### D1 — the local Format gate runs format-before-commit, not commit-then-`git commit --amend` — open (1.7 §8.3/§11.4)
+
+§8.3 / §11.4-step-6 word the Format autofix as "**amends** the commit in place". The landed Task 3.1.3 instead runs
+the formatter on the working tree **before** the piece commit (in `runSettleEffect`'s `ClassifyCommitOpenPr` case,
+ahead of `sideEffects.classifyCommitOpenPr`), so the existing classify → stage → commit naturally folds the
+formatter's rewrites into the single piece commit. Result is identical to the amend outcome (one format-clean piece
+commit) with **less machinery**: no new `GitClient.amendNoEdit` seam, no second `style` commit (contrast the §8.2 CI
+path's T4 fresh-commit, which *must* add a commit because its target is already pushed — that rationale does not apply
+pre-push). Revisit only if a formatter that touches files *outside* the driver's change set (a whole-repo reformat in a
+repo with pre-existing violations) must be confined to the piece commit; today such stray changes enter the change set
+exactly as the §8.2 CI autofix already accepts via `git status`.
+
+### D2 — the §8.3 local **Build** gate is deferred; needs a pre-PR fix-up FSM path — open (scoped out 2026-06-02)
+
+§8.3 says a local `Build` `CodeFix` "routes straight to a **pre-PR driver fix-up**". The frozen §11 FSM has no such
+path: the only fix-up states (`PieceCiFailed` / `PieceFixingUp`) both carry a PR number, and `classifyCommitOpenPr`'s
+`Left` routes to NHI (`ResolveLocalImplementationChanges`), not a fix-up loop. Building a true pre-PR fix-up is a §11
+contract change (new state/events + a 1.7→1.8 revision), beyond a Tier-2 task; and the shortcut (gate a build failure →
+NHI pre-PR) would **regress** vs 1.6, where the same failure reaches CI and auto-routes to a fix-up with the full log
+(§8.2). So Task 3.1.3 shipped the Format gate only (the dogfood-#3 headline); Build failures keep the 1.6 path. Decided
+via `AskUserQuestion` (2026-06-02). Pick this up as its own slice when the pre-PR fix-up FSM path is designed.
+
+### D3 — `profile.local_gate` is a new §19 `profile.*` kind not yet enumerated in the 1.7 contract — open (1.7 §19)
+
+Task 3.1.3 emits a `profile.local_gate` action `{ gate: "local", kind: "format", commands: [...] }` to keep the local
+gate observable (TUI / `forge stats`), but the 1.7 §19 table lists only `profile.snapshot` / `profile.failure_classified`.
+It is a no-op `Replay` projection (the default branch; proven inert in `ProfileReplayInvarianceSuite` R1) and `forge
+stats` ignores unrecognised kinds, so it is safe today. Enumerate it in §19 in the next contract revision (and decide
+whether `forge stats` should fold it into the "fix-ups avoided" row — a pre-PR format fix is an even larger save than the
+§8.2 CI collapse, since the round never starts).
 
 ---
 

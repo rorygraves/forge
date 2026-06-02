@@ -22,10 +22,13 @@ import io.forge.core.log.ActionDraft
 import io.forge.core.manifest.{ManifestPatch, ManifestStore}
 import io.forge.core.pr.{PrState, ReviewDecision}
 import io.forge.core.profile.{
+  CommandKind,
+  Determinism,
   FailureClassifiedAction,
   FixupRoute,
   ProfileSnapshot,
   ProfileStore,
+  RepoCommand,
   RepoProfile,
   RuleBasedFailureClassifier
 }
@@ -137,7 +140,7 @@ final class Orchestrator(
         // `RestartRecovery` routed an in-flight session to NHI this is a no-op.
         recoverDrafts >> resolveProfile.flatMap { profile =>
           snapshotProfile(featureId, profile) >>
-            postSettleRecover(feature1, rebuilt.settledButUnadvanced).flatMap(driveWith(_, profile))
+            postSettleRecover(feature1, rebuilt.settledButUnadvanced, profile).flatMap(driveWith(_, profile))
         }
     }
 
@@ -173,14 +176,15 @@ final class Orchestrator(
     */
   private[orchestrator] def postSettleRecover(
       feature: Feature,
-      settled: Vector[RebuildState.SettledSession]
+      settled: Vector[RebuildState.SettledSession],
+      profile: Option[RepoProfile]
   ): IO[Feature] =
     settled.headOption match
       case None => IO.pure(feature)
       case Some(s) =>
         PostSettleSynthesis.plan(feature.state, MonitorOutcome.Settled(s.phase, SettleOutcome.Clean)).effect match
           case eff @ (SettleEffect.ClassifyCommitOpenPr | SettleEffect.ClassifyCommitPush) =>
-            runSettleEffect(feature, eff).flatMap(applyAndPersist(feature, _))
+            runSettleEffect(feature, eff, profile).flatMap(applyAndPersist(feature, _))
           case _ =>
             applyAndPersist(
               feature,
@@ -291,7 +295,7 @@ final class Orchestrator(
               IO.raiseError(new IllegalStateException(s"orchestrator: no event sources for state ${feature.state}"))
             else
               raceAll(sources.map(sourceIO(feature, active, _, profile, totalsRef)))
-                .flatMap(winner => handleWinner(feature, winner, driverRef, totalsRef))
+                .flatMap(winner => handleWinner(feature, winner, driverRef, totalsRef, profile))
                 .flatMap(f1 => loop(f1, profile, driverRef, totalsRef, justEntered = f1.state != feature.state))
           }
       }
@@ -687,6 +691,60 @@ final class Orchestrator(
       case _: FixupRoute.BackOff => IO.pure(None)
       case FixupRoute.Escalate(reason) => IO.pure(Some(FsmEvent.CiReadinessBlocked(piece, pr, reason)))
 
+  // ---------------------------------------------------------------------------
+  // §8.3 local format gate (shift-left, pre-PR — Task 3.1.3)
+  // ---------------------------------------------------------------------------
+
+  /** §8.3 — run the profile's `required` deterministic in-place `Format` autofix commands on the working tree BEFORE
+    * the §11.4-step-6 piece commit (the [[runSettleEffect]] `ClassifyCommitOpenPr` step), so the driver's
+    * non-conformant output is rewritten in place and the piece commit is format-clean before it ever reaches CI
+    * (dogfood #3, zero round-trip). Records a `profile.local_gate` audit action (a no-op `Replay` projection, like
+    * `ci.skipped`) when the gate runs. Best-effort and additive: the [[SideEffects.runLocalFormatGate]] result is
+    * ignored (`.void`) — a formatter that fails / changes nothing leaves the tree as-is and the commit proceeds exactly
+    * as 1.6 (the failure, if real, then surfaces at the CI gate and routes via §8.2). An empty command set (unprofiled
+    * / `adapt.localGate` off / no `Format` command) is a no-op, so the unprofiled path is byte-identical to 1.6.
+    */
+  private def runLocalFormatGate(feature: Feature, piece: PieceId, profile: Option[RepoProfile]): IO[Unit] =
+    localFormatGateCommands(profile) match
+      case Vector() => IO.unit
+      case commands =>
+        log.append(feature.id, localGateDraft(feature, piece, commands)) >>
+          sideEffects.runLocalFormatGate(feature, piece, commands).void
+
+  /** Pure resolver — the profile's `required`, `Deterministic`, in-place `autofix` `Format` commands, or empty when the
+    * local gate is off (`adapt.localGate` / `adapt.autofix`), the run is unprofiled, or the profile declares no such
+    * command (each ⇒ exact 1.6 behaviour). `Heuristic` commands (a test suite) are never run locally (§8.3): the
+    * `Deterministic` filter excludes them. `adapt.enabled = false` is already folded into a `None` profile by
+    * [[resolveProfile]], so it needs no separate check here.
+    */
+  private def localFormatGateCommands(profile: Option[RepoProfile]): Vector[RepoCommand] =
+    if !config.adapt.localGate || !config.adapt.autofix then Vector.empty
+    else
+      profile.toVector
+        .flatMap(_.commands)
+        .filter(c =>
+          c.kind == CommandKind.Format && c.required && c.autofix && c.determinism == Determinism.Deterministic
+        )
+
+  /** §8.3 / §19 — the local format gate's audit record: which deterministic autofix commands ran pre-PR. A new
+    * `profile.*` kind (the 1.7 §19 table enumerates only `profile.snapshot` / `profile.failure_classified`; this gap is
+    * filed in design-3.0 §4 for the next revision). A no-op `Replay` projection (default branch), consumed by `forge
+    * stats` / the TUI.
+    */
+  private def localGateDraft(feature: Feature, piece: PieceId, commands: Vector[RepoCommand]): ActionDraft =
+    ActionDraft(
+      feature.id,
+      Some(piece),
+      actor = None,
+      role = None,
+      kind = "profile.local_gate",
+      payload = ujson.Obj(
+        "gate" -> ujson.Str("local"),
+        "kind" -> ujson.Str("format"),
+        "commands" -> ujson.Arr(commands.map(c => ujson.Str(c.argv.mkString(" ")))*)
+      )
+    )
+
   private def ciSkippedDraft(feature: Feature, piece: PieceId, pr: PrNumber): ActionDraft =
     ActionDraft(
       feature.id,
@@ -885,7 +943,8 @@ final class Orchestrator(
       feature: Feature,
       winner: RaceResult,
       driverRef: Ref[IO, Option[ActiveSession]],
-      totalsRef: Ref[IO, CostTotals]
+      totalsRef: Ref[IO, CostTotals],
+      profile: Option[RepoProfile]
   ): IO[Feature] =
     winner match
       case RaceResult.FromMonitor(report) =>
@@ -919,7 +978,7 @@ final class Orchestrator(
                 // emitting an unactionable NHI. The marker is written as its own append, before the effect, so it is on
                 // disk for the whole window.
                 recordSettleMarker(feature, report, eff) >>
-                  runSettleEffect(feature, eff).flatMap(applyAndPersist(feature, _, auditDrafts))
+                  runSettleEffect(feature, eff, profile).flatMap(applyAndPersist(feature, _, auditDrafts))
           }
         }
 
@@ -936,7 +995,7 @@ final class Orchestrator(
 
       case RaceResult.FromUser(cmd) => applyAndPersist(feature, FsmEvent.UserCommandReceived(cmd))
 
-  private def runSettleEffect(feature: Feature, eff: SettleEffect): IO[FsmEvent] =
+  private def runSettleEffect(feature: Feature, eff: SettleEffect, profile: Option[RepoProfile]): IO[FsmEvent] =
     val resultIO: IO[Either[String, FsmEvent]] = eff match
       case SettleEffect.CoherencePostCheck => sideEffects.coherencePostCheck(feature)
       case SettleEffect.UpdateDesignAssets => sideEffects.updateDesignAssets(feature)
@@ -946,7 +1005,11 @@ final class Orchestrator(
           case other => IO.pure(Left(s"RepushDesignFeedback in unexpected state $other"))
       case SettleEffect.ClassifyCommitOpenPr =>
         feature.state match
-          case s: FsmState.PieceImplementing => sideEffects.classifyCommitOpenPr(feature, s.p)
+          // §8.3 (Task 3.1.3): run the local format gate on the working tree BEFORE the commit so the driver's output
+          // is rewritten in place and the piece commit is format-clean before it reaches CI (dogfood #3). The gate is a
+          // no-op when unprofiled / `adapt.localGate` off (exact 1.6 behaviour), so this preserves the unprofiled path.
+          case s: FsmState.PieceImplementing =>
+            runLocalFormatGate(feature, s.p, profile) >> sideEffects.classifyCommitOpenPr(feature, s.p)
           case other => IO.pure(Left(s"ClassifyCommitOpenPr in unexpected state $other"))
       case SettleEffect.ClassifyCommitPush =>
         feature.state match
