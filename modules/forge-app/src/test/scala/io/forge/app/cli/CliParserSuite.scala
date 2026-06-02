@@ -23,6 +23,14 @@ class CliParserSuite extends munit.FunSuite:
     assert(CliParser.phase1(List("abandon", "f")).exists(i => !i.needsConnector))
   }
 
+  test("phase1 classifies profile as a state-changing connector command (feature-less)") {
+    val Right(inv) = CliParser.phase1(List("profile")): @unchecked
+    assertEquals(inv.name, "profile")
+    assertEquals(inv.commandClass, CommandClass.StateChanging)
+    assert(inv.needsConnector)
+    assertEquals(inv.rest, Vector.empty)
+  }
+
   test("phase1 classifies read-only commands without a connector") {
     List("status", "tail", "rebuild-state", "stats", "tui").foreach { name =>
       val Right(inv) = CliParser.phase1(List(name)): @unchecked
@@ -65,6 +73,11 @@ class CliParserSuite extends munit.FunSuite:
     assertEquals(CliParser.phase2("spec", Vector("my-feat")), Right(ForgeCommand.Spec(FeatureId("my-feat"))))
     assertEquals(CliParser.phase2("run", Vector("my-feat")), Right(ForgeCommand.Run(FeatureId("my-feat"))))
     assertEquals(CliParser.phase2("abandon", Vector("my-feat")), Right(ForgeCommand.Abandon(FeatureId("my-feat"))))
+  }
+
+  test("phase2 builds the feature-less profile command (and it binds to no feature)") {
+    assertEquals(CliParser.phase2("profile", Vector.empty), Right(ForgeCommand.Profile))
+    assertEquals(CliParser.featureOf(ForgeCommand.Profile), None)
   }
 
   test("phase2 requires and validates the feature id") {

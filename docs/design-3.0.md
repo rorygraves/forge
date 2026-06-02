@@ -141,13 +141,27 @@ real run, not just fakes (the `gh` wire-shape + subprocess-lifecycle discipline 
       `io.forge.core.fsm` source references the `io.forge.core.profile` package (the FSM cannot
       read the profile even by accident — enforced at the type level).
 
-### Task 3.0.3 — RepoProfiler LLM role (forge-agents)  [ ]
+### Task 3.0.3 — RepoProfiler LLM role (forge-agents)  ✅ 2026-06-02
 
-- [ ] `Connector.profileRepo` + `~/.forge/schemas/repo-profile.json` Native schema + a
-      `ReviewDecoders`-style decoder, routed reviewer-side via `Role.pairFor` (§7.11). Capture a
-      real Claude/Codex structured-output sample before pinning the schema.
-- [ ] `forge profile <repo>` writes `.forge/profile.json` (human-reviewable committed diff).
-      Validate its output against the hand-authored `szork`/`forge` fixtures.
+- [x] `Connector.profileRepo` + `~/.forge/schemas/repo-profile.json` Native schema + a
+      `ReviewDecoders.repoProfile` decoder, routed reviewer-side via `Role.pairFor` (§7.11). Landed as a
+      reviewer-side one-shot mirroring `reviewDesign`/`reviewPr`/`refine`: `RepoProfilerInput` + `RepoFile`
+      (forge-agents), `ReviewerPrompts.repoProfileBody`, the `repo-profile.{claude,codex}.md` prompts +
+      `repo-profile.json` schema (in `assets/reviewer/`, registered in `AssetInstaller.ShippedAssets` +
+      `ConnectorFactory.reviewerAssets`), and `profileRepo` on the `Connector` trait + both connectors +
+      `ReviewerCall`/`RealReviewerCall`/`RetryingReviewerCall` (wall-clock-capped). **Decision D4** below:
+      `schemaVersion` is **not** in the LLM schema (Forge stamps `CurrentSchemaVersion` in the decoder — a
+      versioning concern, not an LLM judgment); `commitIdentity` *is* in the schema, defaulting to `forge[bot]`
+      via the prompt. The "real structured-output sample" is grounded two ways: the decoder is proven against
+      the committed `szork`/`forge` fixtures (`RepoProfileDecoderSuite`), and a live Claude/Codex capture is the
+      opt-in `forge-it` `RepoProfilerSmokeSuite` (`FORGE_IT_RUN_PROFILER_SMOKE=1`).
+- [x] `forge profile` writes `.forge/profile.json` (human-reviewable committed diff). Landed as the feature-less
+      state-changing command `ForgeCommand.Profile` → `ProfileCommand` (gathers `AGENTS.md`/`CLAUDE.md`/top-level
+      build files/`.github/workflows/*` into a `RepoProfilerInput`, picks the reviewer-side connector via
+      `Role.pairFor(config.mode, …)`, runs `profileRepo` under the 3-min cap, persists via `FileProfileStore`,
+      prints a summary). Validated against the fixtures: `RepoProfileDecoderSuite` proves the decoder reproduces
+      the exact `szork`/`forge` `RepoProfile` upickle deserialises; `ProfileCommandSuite` proves the
+      gather→perceive→persist pipeline end-to-end with a fake reviewer.
 
 ### Task 3.1.3 — local format gate, pre-PR (§8.3) — **Format landed; Build deferred** [ ]
 
@@ -194,12 +208,33 @@ real run, not just fakes (the `gh` wire-shape + subprocess-lifecycle discipline 
 ## 2. Order of work
 
 3.1.1 ✅ → 3.0.1 ✅ → 3.1.2 (code ✅; live re-run deferred — T5) → 3.0.2 ✅ → 3.1.3 (Format gate
-✅; Build gate deferred — D2) → **{3.0.3, 3.1.4, 3.1.3-Build in any order} (next)** → 3.2.
+✅; Build gate deferred — D2) → 3.0.3 ✅ → **{3.1.4, 3.1.3-Build in any order} (next)** → 3.2.
 Tier-1 closes the slice's exit criterion; Tier 2/3 can land incrementally behind it.
 
 ---
 
 ## 3. Status log
+
+- **2026-06-02 — Task 3.0.3 landed: the `RepoProfiler` LLM sensor + `forge profile` command.** The first agentic
+  *sense* that produces a profile (Tier 2 — it closes carry-forward T1's "profiles are hand-authored until 3.0.3").
+  `Connector.profileRepo(RepoProfilerInput): IO[RepoProfile]` is a reviewer-side one-shot mirroring
+  `reviewDesign`/`reviewPr`/`refine` exactly: a `repo-profile.json` Native schema (Claude `--json-schema`, Codex
+  `--output-schema`) + `repo-profile.{claude,codex}.md` system prompts (in `assets/reviewer/`, registered in
+  `AssetInstaller.ShippedAssets` + `ConnectorFactory.reviewerAssets`) + a stable `ReviewerPrompts.repoProfileBody` +
+  a `ReviewDecoders.repoProfile` decoder (reuses the `forge-core` enum `fromString` parsers so the accepted wire
+  strings can't drift from the model). It rides the existing `ReviewerCall`/`RealReviewerCall`/`RetryingReviewerCall`
+  wall-clock boundary. `forge profile` is a new **feature-less** state-changing command (`ForgeCommand.Profile` →
+  `ProfileCommand`): it gathers `AGENTS.md`/`CLAUDE.md`/top-level build files/`.github/workflows/*` into the input,
+  picks the **reviewer-side** connector via `Role.pairFor(config.mode, …)`, runs the sensor under the 3-min cap, and
+  writes the committed `.forge/profile.json` via `FileProfileStore`. Decisions **D4** (`schemaVersion` stamped by the
+  decoder, not asked of the LLM; `commitIdentity` in-schema with a `forge[bot]` default) and **D5** (`forge profile`
+  is feature-less but takes the process lock for its write). New tests: `RepoProfileDecoderSuite` (the decoder
+  reproduces the exact `szork`/`forge` `RepoProfile`s upickle deserialises, + malformed-input Lefts),
+  `ProfileCommandSuite` (gather→perceive→persist e2e with a fake reviewer; failure writes nothing), Claude+Codex
+  `profileRepo` fake-CLI end-to-end tests, `CliParserSuite` profile rows, and the opt-in `forge-it`
+  `RepoProfilerSmokeSuite` (real Claude/Codex capture, `FORGE_IT_RUN_PROFILER_SMOKE=1`). `forge-agents` 216,
+  `forge-app` 390, `forge-it` compiles; full build green, `scalafmtCheckAll` clean. The Task 3.0.3 header is ticked;
+  the roadmap §4 bullet stays **unticked** (slice closes only after the §0 live re-run + the whole-section review).
 
 - **2026-06-02 — Task 3.1.3 Format gate landed (Build deferred): the §8.3 shift-left format gate, pre-PR.**
   The dogfood-#3 collapse, killed at the source: in the §11.4-step-6 `ClassifyCommitOpenPr` path, **before** the
@@ -269,13 +304,17 @@ Tier-1 closes the slice's exit criterion; Tier 2/3 can land incrementally behind
 
 ## 4. Carry-forward / decisions opened
 
-### T1 — profiles are hand-authored fixtures until Task 3.0.3 — open
+### T1 — profiles are hand-authored fixtures until Task 3.0.3 — ✅ resolved 2026-06-02
 
-Tier 1 ships the `RepoProfile` *model* and consumes a committed `.forge/profile.json`, but the
-LLM `RepoProfiler` that *produces* one is Tier 2. Until 3.0.3, the dogfood re-run (3.1.2) uses a
-hand-authored profile (the `szork` fixture is exactly such a file). This is deliberate — A5's
-"determinism before any LLM": prove the routing collapse with a known-good profile before trusting
-a sensor to generate one.
+Tier 1 ships the `RepoProfile` *model* and consumes a committed `.forge/profile.json`; the LLM
+`RepoProfiler` that *produces* one landed in **Task 3.0.3** (`Connector.profileRepo` + `forge profile`).
+The dogfood re-run (3.1.2 / §0 exit) still uses a hand-authored profile — that is deliberate per A5's
+"determinism before any LLM": prove the routing collapse with a known-good profile before trusting a
+sensor's output. Now that the sensor exists, the residual is purely *validating a live-generated profile*:
+the deterministic decode is proven against the `szork`/`forge` fixtures, and a live Claude/Codex capture is
+the opt-in `forge-it` `RepoProfilerSmokeSuite` (it asserts the live structured output decodes into a
+plausible `RepoProfile`, not byte-equality with a fixture — the model's perception of a real repo is its
+own).
 
 ### T2 — `profile.snapshot` records hash + schemaVersion only, not the full profile — open (1.7 §19)
 
@@ -358,6 +397,27 @@ whether `forge stats` should fold it into the "fix-ups avoided" row — a pre-PR
 §8.2 CI collapse, since the round never starts).
 
 ---
+
+### D4 — `repo-profile.json` omits `schemaVersion` (decoder stamps it); `commitIdentity` is in-schema with a default — open (1.7 §6/§7.11)
+
+The §6 `RepoProfile` model carries `schemaVersion`, but the **`repo-profile.json` Native schema deliberately does not** —
+it is a Forge-internal versioning concern, not something the LLM should decide, so `ReviewDecoders.repoProfile` stamps
+`RepoProfile.CurrentSchemaVersion` regardless of (and ignoring) any `schemaVersion` the model emits. This keeps the sensor
+out of versioning and means a future schema bump never requires re-prompting; it is also why feeding a committed fixture
+(which has `schemaVersion`) back through the decoder round-trips. `commitIdentity` *is* in the schema (the model can read a
+repo-declared bot identity from CONTRIBUTING/workflows), but the prompt directs it to default to
+`forge[bot]`/`forge@users.noreply.github.com` when the repo is silent — matching the `szork` fixture. Revisit if a later
+revision wants the identity sourced from `config.json`/git config instead of perceived.
+
+### D5 — `forge profile` is a feature-less state-changing command that still takes the process lock — open (1.7 §15)
+
+`forge profile` writes the repo-level `.forge/profile.json`, so it is classed **state-changing** (it acquires the §13
+process lock for the write) but binds to **no feature** (`CliParser.featureOf(Profile) == None`, lock metadata carries no
+feature — the same shape `ReadOnly`/`UnlockForce` already use). It is the first state-changing command without a feature
+id; the existing `(paths, config, args)` `StateChangingContext` covers it with no new plumbing. The reviewer-side connector
+is selected from `config.mode` via `Role.pairFor` (there is no per-feature `Mode` at profile time). Revisit only if a repo
+wants to profile under a non-default mode without editing `config.json` (a `--mode` flag), or if concurrent `forge profile`
++ `forge run` should *not* contend on the one lock.
 
 ## 5. Cross-references
 

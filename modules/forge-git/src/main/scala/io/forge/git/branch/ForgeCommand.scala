@@ -50,6 +50,13 @@ object ForgeCommand:
   final case class Abandon(feature: FeatureId) extends ForgeCommand:
     val name = "abandon"
 
+  /** `forge profile` — the §7.11 `RepoProfiler` sensor, repo-level (no feature). Perceives the repo into a committed
+    * `.forge/profile.json` (Phase 3 / Task 3.0.3). State-changing (it writes the committed profile and holds the
+    * process lock for the write), but feature-less — [[io.forge.app.cli.CliParser.featureOf]] binds it to no feature.
+    */
+  case object Profile extends ForgeCommand:
+    val name = "profile"
+
   /** Slice 1.4 Task 1.4.9 I3: `Replay` (batch render-from-log) is cut in favour of `Tail` (live `.jsonl` tail), which
     * is what the §2.5 polish list / §15 command surface actually name. The old `Replay` placeholder had no §17 / §15
     * anchor. Filed as carry-forward **S4-2** in `design-rationale.md` (no v1.3 spec edit — §15 mentions "`replay`" only

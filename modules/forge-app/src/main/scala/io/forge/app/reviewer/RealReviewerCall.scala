@@ -9,8 +9,10 @@ import io.forge.agents.{
   PrReviewInput,
   RefineInput,
   RefineResult,
+  RepoProfilerInput,
   ReviewerError
 }
+import io.forge.core.profile.RepoProfile
 
 /** §7.9 wall-clock cap implementation. Each of the three methods runs the underlying `connector.review*` IO under
   * `.attempt` so [[ReviewerError]] subclasses become [[ReviewerOutcome.AdapterFailure]] (preserving sub-variant
@@ -45,6 +47,12 @@ final class RealReviewerCall(connector: Connector) extends ReviewerCall:
       limits: ReviewerLimits
   ): IO[ReviewerOutcome[RefineResult]] =
     runWithCap(limits, connector.refine(input))
+
+  override def profileRepo(
+      input: RepoProfilerInput,
+      limits: ReviewerLimits
+  ): IO[ReviewerOutcome[RepoProfile]] =
+    runWithCap(limits, connector.profileRepo(input))
 
   private def runWithCap[A](
       limits: ReviewerLimits,

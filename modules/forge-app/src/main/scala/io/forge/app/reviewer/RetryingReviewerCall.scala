@@ -8,8 +8,10 @@ import io.forge.agents.{
   PrReviewInput,
   RefineInput,
   RefineResult,
+  RepoProfilerInput,
   ReviewerProcessFailure
 }
+import io.forge.core.profile.RepoProfile
 
 /** §7.6 / §11.2 step 9 — the **process-failure retry** layer over a [[ReviewerCall]] (carry-forward **S4-5**).
   *
@@ -48,6 +50,11 @@ final class RetryingReviewerCall(
 
   override def refine(input: RefineInput, limits: ReviewerLimits): IO[ReviewerOutcome[RefineResult]] =
     retrying(refineRetries)(delegate.refine(input, limits))
+
+  /** The §7.11 sensor shares the `reviewRetries` process-failure budget (it is a reviewer-side one-shot, not a refine).
+    */
+  override def profileRepo(input: RepoProfilerInput, limits: ReviewerLimits): IO[ReviewerOutcome[RepoProfile]] =
+    retrying(reviewRetries)(delegate.profileRepo(input, limits))
 
   /** Re-issue `call` while it returns a retryable [[ReviewerProcessFailure]] and `remaining > 0`. `remaining` counts
     * *retries*, so the call is issued at most `remaining + 1` times.

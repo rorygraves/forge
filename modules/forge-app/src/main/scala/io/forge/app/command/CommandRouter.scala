@@ -20,6 +20,7 @@ object CommandRouter:
     case c: ForgeCommand.Reconcile => reconcile.run(ctx, c)
     case c: ForgeCommand.RefreshCache => refreshCache.run(ctx, c)
     case c: ForgeCommand.Abandon => abandon.run(ctx, c)
+    case ForgeCommand.Profile => profile.run(ctx)
     case c: ForgeCommand.ResumeAfterHumanPush => resume.run(ctx, c)
     case c: ForgeCommand.ResumeCommitHumanFix => resume.run(ctx, c)
     case c: ForgeCommand.ResumeRunFixup => resume.run(ctx, c)

@@ -77,3 +77,23 @@ final case class RefineResult(
     reason: String,
     patchJson: Option[String]
 )
+
+// --- RepoProfiler (§7.11 sensor) ----
+
+/** One file the `RepoProfiler` sensor reads to perceive the repo, packaged for the prompt body. `path` is repo-relative
+  * (e.g. `build.sbt`, `.github/workflows/ci.yml`) so the model can reason about *where* a convention is declared.
+  */
+final case class RepoFile(path: String, content: String)
+
+/** §7.11 `RepoProfiler` input — the repo facts the sensor reads to produce a [[io.forge.core.profile.RepoProfile]]: the
+  * agent docs (`AGENTS.md` / `CLAUDE.md`), the build files, and the CI workflow files. Repo-level (no feature),
+  * mirroring [[io.forge.core.profile.ProfileStore]]. The connector renders these into a stable prompt body
+  * ([[ReviewerPrompts.repoProfileBody]]) and decodes the structured reply via [[ReviewDecoders.repoProfile]].
+  */
+final case class RepoProfilerInput(
+    repoName: String,
+    agentsDoc: Option[String],
+    claudeDoc: Option[String],
+    buildFiles: Vector[RepoFile],
+    workflowFiles: Vector[RepoFile]
+)

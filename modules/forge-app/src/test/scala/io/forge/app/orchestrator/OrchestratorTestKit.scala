@@ -13,6 +13,7 @@ import io.forge.agents.{
   RefineInput,
   RefineOutcome as AgentRefineOutcome,
   RefineResult,
+  RepoProfilerInput,
   ReviewVerdict
 }
 import io.forge.app.config.ForgeConfig
@@ -20,6 +21,7 @@ import io.forge.app.monitor.{MonitorOutcome, MonitorReport, SessionMonitor}
 import io.forge.app.reviewer.{ReviewerCall, ReviewerLimits, ReviewerOutcome}
 import io.forge.core.*
 import io.forge.core.cost.CostTotals
+import io.forge.core.profile.RepoProfile
 import io.forge.core.fsm.{Feature, FsmEvent, FsmState, SessionPhase, SettleOutcome}
 import io.forge.core.log.{Action, ActionDraft, ActionLog}
 import io.forge.core.manifest.{Manifest, ManifestStore, Piece, PieceStatus}
@@ -181,6 +183,10 @@ object OrchestratorTestKit:
       IO.pure(prOutcome)
     override def refine(input: RefineInput, limits: ReviewerLimits): IO[ReviewerOutcome[RefineResult]] =
       IO.pure(refineOutcome)
+    override def profileRepo(input: RepoProfilerInput, limits: ReviewerLimits): IO[ReviewerOutcome[RepoProfile]] =
+      IO.raiseError(
+        new IllegalStateException("FakeReviewerCall: profileRepo not configured (out-of-band command path)")
+      )
 
   object FakeReviewerCall:
     val approveDesign: ReviewerOutcome[DesignReview] =

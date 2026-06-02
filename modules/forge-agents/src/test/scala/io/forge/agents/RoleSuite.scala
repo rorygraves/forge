@@ -4,6 +4,7 @@ import cats.effect.IO
 import fs2.Stream
 import io.forge.core.{Mode, QuestionMechanism, SchemaMechanism}
 import io.forge.core.cost.Cost
+import io.forge.core.profile.RepoProfile
 
 class RoleSuite extends munit.FunSuite:
 
@@ -32,6 +33,7 @@ class RoleSuite extends munit.FunSuite:
     def reviewDesign(input: DesignReviewInput): IO[DesignReview] = notImplemented
     def reviewPr(input: PrReviewInput): IO[PrReview] = notImplemented
     def refine(input: RefineInput): IO[RefineResult] = notImplemented
+    def profileRepo(input: RepoProfilerInput): IO[RepoProfile] = notImplemented
     def costFrom(event: AgentEvent): Option[Cost] = None
 
   private val claude = TaggedConnector("claude")

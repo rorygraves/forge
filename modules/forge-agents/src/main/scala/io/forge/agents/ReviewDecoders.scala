@@ -1,6 +1,16 @@
 package io.forge.agents
 
 import io.forge.core.{Question, QuestionSeverity}
+import io.forge.core.profile.{
+  BranchModel,
+  CommandKind,
+  CommitIdentity,
+  Determinism,
+  MergeStrategy,
+  RepoCommand,
+  RepoProfile,
+  WorkflowProfile
+}
 import ujson.Value
 
 /** Decode the structured JSON the reviewer CLIs return into Forge's Scala domain types. The shape mirrors
@@ -79,7 +89,100 @@ object ReviewDecoders:
           case _ => Right(None) // drop any stray patch on non-update outcomes
     yield RefineResult(outcome, reason, patchJson)
 
+  /** `repo-profile.json` (§7.11 `RepoProfiler`):
+    * {{{
+    *   {
+    *     "buildTool": string,
+    *     "commands": [{ "kind", "argv": [string], "determinism", "required": bool, "autofix": bool }],
+    *     "commitIdentity": { "name", "email" },
+    *     "workflow": { "reviewRequired": bool, "ciRequiredChecks": [string], "branchModel", "mergeStrategy" }
+    *   }
+    * }}}
+    *
+    * `schemaVersion` is **not** in the schema — it is a Forge-internal versioning concern, not an LLM judgment, so the
+    * decoder stamps [[RepoProfile.CurrentSchemaVersion]]. This is why feeding a committed `.forge/profile.json` fixture
+    * (which carries `schemaVersion`) back through this decoder round-trips: the field is ignored on the way in and
+    * re-stamped from the current constant. The enum parses reuse the `forge-core` `fromString` helpers so the accepted
+    * wire strings can never drift from the model.
+    */
+  def repoProfile(v: Value): Either[String, RepoProfile] =
+    for
+      obj <- objectOrLeft(v, "repo-profile root")
+      buildTool <- stringOrLeft(obj.get("buildTool"), "buildTool")
+      commands <- repoCommands(obj.get("commands"))
+      identity <- commitIdentity(obj.get("commitIdentity"))
+      workflow <- workflowProfile(obj.get("workflow"))
+    yield RepoProfile(RepoProfile.CurrentSchemaVersion, buildTool, commands, identity, workflow)
+
+  private def repoCommands(v: Option[Value]): Either[String, Vector[RepoCommand]] =
+    v match
+      case None => Right(Vector.empty)
+      case Some(value) =>
+        value.arrOpt.toRight(s"'commands' expected JSON array, got ${shapeName(value)}").flatMap { arr =>
+          arr.iterator.zipWithIndex
+            .foldLeft[Either[String, Vector[RepoCommand]]](Right(Vector.empty)) {
+              case (Left(e), _) => Left(e)
+              case (Right(acc), (item, idx)) => repoCommand(item, idx).map(acc :+ _)
+            }
+        }
+
+  private def repoCommand(v: Value, idx: Int): Either[String, RepoCommand] =
+    objectOrLeft(v, s"commands[$idx]").flatMap { obj =>
+      for
+        kindStr <- stringOrLeft(obj.get("kind"), s"commands[$idx].kind")
+        kind <- CommandKind.fromString(kindStr).left.map(e => s"commands[$idx].kind: $e")
+        argv <- stringArray(obj.get("argv"), s"commands[$idx].argv")
+        detStr <- stringOrLeft(obj.get("determinism"), s"commands[$idx].determinism")
+        determinism <- Determinism.fromString(detStr).left.map(e => s"commands[$idx].determinism: $e")
+        required <- boolOrLeft(obj.get("required"), s"commands[$idx].required")
+        autofix <- boolOrLeft(obj.get("autofix"), s"commands[$idx].autofix")
+      yield RepoCommand(kind, argv, determinism, required, autofix)
+    }
+
+  private def commitIdentity(v: Option[Value]): Either[String, CommitIdentity] =
+    v.toRight("missing required field 'commitIdentity'").flatMap { value =>
+      objectOrLeft(value, "commitIdentity").flatMap { obj =>
+        for
+          name <- stringOrLeft(obj.get("name"), "commitIdentity.name")
+          email <- stringOrLeft(obj.get("email"), "commitIdentity.email")
+        yield CommitIdentity(name, email)
+      }
+    }
+
+  private def workflowProfile(v: Option[Value]): Either[String, WorkflowProfile] =
+    v.toRight("missing required field 'workflow'").flatMap { value =>
+      objectOrLeft(value, "workflow").flatMap { obj =>
+        for
+          reviewRequired <- boolOrLeft(obj.get("reviewRequired"), "workflow.reviewRequired")
+          ciRequiredChecks <- stringArray(obj.get("ciRequiredChecks"), "workflow.ciRequiredChecks")
+          branchStr <- stringOrLeft(obj.get("branchModel"), "workflow.branchModel")
+          branchModel <- BranchModel.fromString(branchStr).left.map(e => s"workflow.branchModel: $e")
+          mergeStr <- stringOrLeft(obj.get("mergeStrategy"), "workflow.mergeStrategy")
+          mergeStrategy <- MergeStrategy.fromString(mergeStr).left.map(e => s"workflow.mergeStrategy: $e")
+        yield WorkflowProfile(reviewRequired, ciRequiredChecks, branchModel, mergeStrategy)
+      }
+    }
+
   // --- field helpers ----
+
+  private def boolOrLeft(v: Option[Value], field: String): Either[String, Boolean] =
+    v.flatMap(_.boolOpt).toRight(s"missing or non-boolean required field '$field'")
+
+  /** A required JSON array of strings. A missing array defaults to empty (additive-schema tolerance), but a present
+    * non-array — or one whose elements aren't strings — is an error.
+    */
+  private def stringArray(v: Option[Value], field: String): Either[String, Vector[String]] =
+    v match
+      case None => Right(Vector.empty)
+      case Some(value) =>
+        value.arrOpt.toRight(s"'$field' expected JSON array, got ${shapeName(value)}").flatMap { arr =>
+          arr.iterator.zipWithIndex
+            .foldLeft[Either[String, Vector[String]]](Right(Vector.empty)) {
+              case (Left(e), _) => Left(e)
+              case (Right(acc), (item, idx)) =>
+                item.strOpt.toRight(s"$field[$idx]: expected string, got ${shapeName(item)}").map(acc :+ _)
+            }
+        }
 
   private def objectOrLeft(v: Value, ctx: String): Either[String, collection.mutable.Map[String, Value]] =
     v.objOpt.toRight(s"$ctx: expected JSON object, got ${shapeName(v)}")

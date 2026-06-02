@@ -47,7 +47,7 @@ object CliError:
   case object NoCommand extends CliError:
     def message: String =
       "no command given; expected one of: " +
-        "new, spec, run, status, resume, reconcile, refresh-cache, abandon, rebuild-state, unlock, tail, stats, tui"
+        "new, spec, run, status, resume, reconcile, refresh-cache, abandon, profile, rebuild-state, unlock, tail, stats, tui"
 
   final case class UnknownCommand(name: String) extends CliError:
     def message: String = s"unknown command '$name'"
@@ -97,6 +97,7 @@ object CliParser:
   private def commandClassOf(name: String): Either[CliError, (CommandClass, Boolean)] =
     name match
       case "new" | "spec" | "run" | "resume" | "reconcile" => Right((CommandClass.StateChanging, true))
+      case "profile" => Right((CommandClass.StateChanging, true))
       case "refresh-cache" | "abandon" => Right((CommandClass.StateChanging, false))
       case "status" | "tail" | "rebuild-state" | "stats" | "tui" => Right((CommandClass.ReadOnly, false))
       case "unlock" => Right((CommandClass.UnlockForce, false))
@@ -112,6 +113,7 @@ object CliParser:
       case "reconcile" => featureOnly(name, rest).map(ForgeCommand.Reconcile(_))
       case "refresh-cache" => featureOnly(name, rest).map(ForgeCommand.RefreshCache(_))
       case "abandon" => featureOnly(name, rest).map(ForgeCommand.Abandon(_))
+      case "profile" => Right(ForgeCommand.Profile)
       case "resume" => parseResume(rest)
       case "status" => Right(ForgeCommand.ReadOnly(ReadOnlyKind.Status))
       case "tail" => Right(ForgeCommand.ReadOnly(ReadOnlyKind.Tail))
@@ -147,6 +149,7 @@ object CliParser:
     case ForgeCommand.Reconcile(f) => Some(f)
     case ForgeCommand.RefreshCache(f) => Some(f)
     case ForgeCommand.Abandon(f) => Some(f)
+    case ForgeCommand.Profile => None
     case ForgeCommand.ResumeAfterHumanPush(f, _) => Some(f)
     case ForgeCommand.ResumeCommitHumanFix(f, _) => Some(f)
     case ForgeCommand.ResumeRunFixup(f, _) => Some(f)

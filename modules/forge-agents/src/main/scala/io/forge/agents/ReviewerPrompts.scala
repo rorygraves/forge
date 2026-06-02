@@ -56,3 +56,26 @@ object ReviewerPrompts:
        |## manifest.json
        |${input.manifestJson.stripLineEnd}
        |""".stripMargin
+
+  /** §7.11 `RepoProfiler` body — packages the agent docs, build files, and CI workflow files under stable headers the
+    * `repo-profile.<cli>.md` system prompt refers to. A missing doc is rendered as an explicit "(none)" rather than
+    * omitted, so the model can tell "absent" from "I forgot to include it".
+    */
+  def repoProfileBody(input: RepoProfilerInput): String =
+    def doc(label: String, content: Option[String]): String =
+      val body = content.map(_.stripLineEnd).filter(_.nonEmpty).getOrElse("(none)")
+      s"## $label\n$body"
+    def files(label: String, fs: Vector[RepoFile]): String =
+      if fs.isEmpty then s"## $label\n(none)"
+      else
+        val rendered = fs
+          .map(f => s"### ${f.path}\n${f.content.stripLineEnd}")
+          .mkString("\n\n")
+        s"## $label\n$rendered"
+    List(
+      s"## Repo\n${input.repoName}",
+      doc("AGENTS.md", input.agentsDoc),
+      doc("CLAUDE.md", input.claudeDoc),
+      files("Build files", input.buildFiles),
+      files("CI workflow files", input.workflowFiles)
+    ).mkString("\n\n") + "\n"

@@ -34,6 +34,8 @@ final class RealBranchManager(
       case ForgeCommand.ReadOnly(_) => IO.pure(PreflightReport(Vector.empty))
       case ForgeCommand.UnlockForce => IO.pure(PreflightReport(Vector.empty))
       case ForgeCommand.Abandon(_) => IO.pure(PreflightReport(Vector.empty))
+      // `forge profile` only writes `.forge/profile.json` (repo-level, no worktree/branch state); nothing to preflight.
+      case ForgeCommand.Profile => IO.pure(PreflightReport(Vector.empty))
 
   override def syncBase(base: BranchName): IO[Either[BranchError, BaseSnapshot]] =
     git.fastForwardBase(base).map {

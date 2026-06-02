@@ -3,6 +3,7 @@ package io.forge.app.reviewer
 import cats.effect.{IO, Ref}
 import io.forge.agents.*
 import io.forge.core.{FeatureId, PieceId, PrNumber}
+import io.forge.core.profile.RepoProfile
 import munit.CatsEffectSuite
 
 import scala.concurrent.duration.DurationInt
@@ -41,6 +42,8 @@ class RetryingReviewerCallSuite extends CatsEffectSuite:
       pop(designScript)
     override def prReview(input: PrReviewInput, l: ReviewerLimits): IO[ReviewerOutcome[PrReview]] = pop(prScript)
     override def refine(input: RefineInput, l: ReviewerLimits): IO[ReviewerOutcome[RefineResult]] = pop(refineScript)
+    override def profileRepo(input: RepoProfilerInput, l: ReviewerLimits): IO[ReviewerOutcome[RepoProfile]] =
+      IO.raiseError(new IllegalStateException("ScriptedReviewerCall: profileRepo not scripted"))
 
   private def scripted(
       design: List[ReviewerOutcome[DesignReview]] = Nil,

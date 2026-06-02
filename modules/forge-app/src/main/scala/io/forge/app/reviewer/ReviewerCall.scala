@@ -1,7 +1,16 @@
 package io.forge.app.reviewer
 
 import cats.effect.IO
-import io.forge.agents.{DesignReview, DesignReviewInput, PrReview, PrReviewInput, RefineInput, RefineResult}
+import io.forge.agents.{
+  DesignReview,
+  DesignReviewInput,
+  PrReview,
+  PrReviewInput,
+  RefineInput,
+  RefineResult,
+  RepoProfilerInput
+}
+import io.forge.core.profile.RepoProfile
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -30,6 +39,12 @@ trait ReviewerCall:
   def designReview(input: DesignReviewInput, limits: ReviewerLimits): IO[ReviewerOutcome[DesignReview]]
   def prReview(input: PrReviewInput, limits: ReviewerLimits): IO[ReviewerOutcome[PrReview]]
   def refine(input: RefineInput, limits: ReviewerLimits): IO[ReviewerOutcome[RefineResult]]
+
+  /** §7.11 `RepoProfiler` sensor under the same wall-clock cap as the reviewer one-shots. Repo-level (out-of-band
+    * `forge profile`), so unlike the reviewer methods it is not part of the feature loop — but it shares the boundary
+    * so the same "kill on stall" backstop and [[ReviewerOutcome]] surface apply.
+    */
+  def profileRepo(input: RepoProfilerInput, limits: ReviewerLimits): IO[ReviewerOutcome[RepoProfile]]
 
 /** §7.9 reviewer / refine wall-clock cap. Per-call only; no per-call cost cap (see [[ReviewerCall]] docstring and
   * carry-forward S4-3). The orchestrator (Task 1.4.10) populates this from `.forge/config.json` §18 reviewer settle

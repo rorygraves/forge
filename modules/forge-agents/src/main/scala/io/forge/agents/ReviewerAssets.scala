@@ -18,7 +18,8 @@ package io.forge.agents
 final case class ReviewerAssets(
     designReview: ReviewerAssets.PerMethod,
     prReview: ReviewerAssets.PerMethod,
-    refine: ReviewerAssets.PerMethod
+    refine: ReviewerAssets.PerMethod,
+    profileRepo: ReviewerAssets.PerMethod
 )
 
 object ReviewerAssets:

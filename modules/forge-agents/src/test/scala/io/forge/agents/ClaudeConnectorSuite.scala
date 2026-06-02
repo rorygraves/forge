@@ -490,7 +490,8 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     val assets = ReviewerAssets(
       designReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
-      refine = ReviewerAssets.PerMethod(schema, systemPrompt)
+      refine = ReviewerAssets.PerMethod(schema, systemPrompt),
+      profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = ClaudeConnector(binary = fakeClaude.toString, reviewerAssets = Some(assets))
     val review = connector
@@ -499,6 +500,45 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     assertEquals(review.verdict, ReviewVerdict.Approve)
     assertEquals(review.summary, "All good.")
     assertEquals(review.blockers, Vector.empty[ReviewBlocker])
+
+  test("profileRepo end-to-end against a fake CLI: schema-conformant envelope decoded to RepoProfile"):
+    // The §7.11 RepoProfiler sensor rides the same reviewer one-shot path; verify it end-to-end with a fake CLI
+    // emitting a repo-profile-shaped structured_output (Task 3.0.3).
+    val envelope =
+      """{"type":"result","subtype":"success","is_error":false,"structured_output":
+        |{"buildTool":"sbt",
+        |"commands":[{"kind":"format","argv":["sbt","scalafmtAll"],"determinism":"deterministic","required":true,"autofix":true}],
+        |"commitIdentity":{"name":"forge[bot]","email":"forge@users.noreply.github.com"},
+        |"workflow":{"reviewRequired":true,"ciRequiredChecks":["backend","frontend"],"branchModel":"trunk_based","mergeStrategy":"squash"}}}""".stripMargin
+        .replace("\n", " ")
+    val fakeClaude = os.temp(
+      contents = s"""#!/bin/sh
+                    |cat <<'JSON'
+                    |$envelope
+                    |JSON
+                    |""".stripMargin,
+      prefix = "fake-claude-profile-",
+      suffix = ".sh",
+      deleteOnExit = true
+    )
+    os.perms.set(fakeClaude, "rwx------")
+    val schema = os.temp(contents = """{"type":"object"}""", prefix = "schema-", suffix = ".json", deleteOnExit = true)
+    val systemPrompt = os.temp(contents = "Profile the repo", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val assets = ReviewerAssets(
+      designReview = ReviewerAssets.PerMethod(schema, systemPrompt),
+      prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
+      refine = ReviewerAssets.PerMethod(schema, systemPrompt),
+      profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt)
+    )
+    val connector = ClaudeConnector(binary = fakeClaude.toString, reviewerAssets = Some(assets))
+    val profile = connector
+      .profileRepo(RepoProfilerInput("szork", None, None, Vector.empty, Vector.empty))
+      .unsafeRunSync()
+    assertEquals(profile.buildTool, "sbt")
+    assertEquals(profile.commands.map(_.kind.asString), Vector("format"))
+    assert(profile.commands.head.autofix)
+    assertEquals(profile.workflow.ciRequiredChecks, Vector("backend", "frontend"))
+    assertEquals(profile.commitIdentity.name, "forge[bot]")
 
   test("reviewer end-to-end against a fake CLI: Claude 2.1.153 `result`-string envelope decoded to DesignReview"):
     // Fake `claude` echoing the *current* (2.1.153) envelope shape: no structured_output field; the schema-conformant
@@ -524,7 +564,8 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     val assets = ReviewerAssets(
       designReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
-      refine = ReviewerAssets.PerMethod(schema, systemPrompt)
+      refine = ReviewerAssets.PerMethod(schema, systemPrompt),
+      profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = ClaudeConnector(binary = fakeClaude.toString, reviewerAssets = Some(assets))
     val review = connector
@@ -558,7 +599,8 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     val assets = ReviewerAssets(
       designReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
-      refine = ReviewerAssets.PerMethod(schema, systemPrompt)
+      refine = ReviewerAssets.PerMethod(schema, systemPrompt),
+      profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = ClaudeConnector(binary = fakeClaude.toString, reviewerAssets = Some(assets))
     val review = connector
@@ -584,7 +626,8 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     val assets = ReviewerAssets(
       designReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
-      refine = ReviewerAssets.PerMethod(schema, systemPrompt)
+      refine = ReviewerAssets.PerMethod(schema, systemPrompt),
+      profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = ClaudeConnector(binary = fakeClaude.toString, reviewerAssets = Some(assets))
     val r = connector.reviewDesign(DesignReviewInput(FeatureId("feat-1"), 1, "x")).attempt.unsafeRunSync()

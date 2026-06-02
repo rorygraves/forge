@@ -5,6 +5,7 @@ import fs2.Stream
 import io.forge.agents.*
 import io.forge.core.{QuestionMechanism, SchemaMechanism}
 import io.forge.core.cost.Cost
+import io.forge.core.profile.RepoProfile
 
 /** Minimal [[Connector]] for [[ReviewerCall]] unit tests. Each of the three reviewer methods is backed by a
   * programmable `IO` so individual cases can install `IO.never` (timeout), `IO.pure(x)` (clean settle), or
@@ -19,6 +20,7 @@ final class FakeReviewerConnector(
     designReviewIO: IO[DesignReview],
     prReviewIO: IO[PrReview],
     refineIO: IO[RefineResult],
+    profileRepoIO: IO[RepoProfile],
     val cancelled: Ref[IO, Boolean]
 ) extends Connector:
 
@@ -53,6 +55,8 @@ final class FakeReviewerConnector(
     prReviewIO.onCancel(cancelled.set(true))
   override def refine(input: RefineInput): IO[RefineResult] =
     refineIO.onCancel(cancelled.set(true))
+  override def profileRepo(input: RepoProfilerInput): IO[RepoProfile] =
+    profileRepoIO.onCancel(cancelled.set(true))
 
   override def costFrom(event: AgentEvent): Option[Cost] = None
 
@@ -60,8 +64,9 @@ object FakeReviewerConnector:
   def make(
       designReviewIO: IO[DesignReview] = IO.raiseError(new IllegalStateException("designReviewIO not programmed")),
       prReviewIO: IO[PrReview] = IO.raiseError(new IllegalStateException("prReviewIO not programmed")),
-      refineIO: IO[RefineResult] = IO.raiseError(new IllegalStateException("refineIO not programmed"))
+      refineIO: IO[RefineResult] = IO.raiseError(new IllegalStateException("refineIO not programmed")),
+      profileRepoIO: IO[RepoProfile] = IO.raiseError(new IllegalStateException("profileRepoIO not programmed"))
   ): IO[FakeReviewerConnector] =
     Ref.of[IO, Boolean](false).map { cancelled =>
-      new FakeReviewerConnector(designReviewIO, prReviewIO, refineIO, cancelled)
+      new FakeReviewerConnector(designReviewIO, prReviewIO, refineIO, profileRepoIO, cancelled)
     }

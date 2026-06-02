@@ -3,6 +3,7 @@ package io.forge.agents
 import cats.effect.IO
 import io.forge.core.{QuestionMechanism, SchemaMechanism}
 import io.forge.core.cost.Cost
+import io.forge.core.profile.RepoProfile
 
 /** §7.1 — driver + reviewer over a single CLI.
   *
@@ -86,6 +87,17 @@ trait Connector:
 
   /** Refine the plan after a piece merges (§14.3). */
   def refine(input: RefineInput): IO[RefineResult]
+
+  // --- sensor methods (§7.11, Phase 3) ----
+
+  /** `RepoProfiler` sensor (§7.11): perceive the repo (build tool, gate commands tiered by determinism, workflow,
+    * commit identity) into a [[RepoProfile]]. A reviewer-side one-shot exactly like the review methods — Native schema
+    * (`~/.forge/schemas/repo-profile.json`) + `repo-profile.<cli>.md` system prompt + a [[ReviewDecoders.repoProfile]]
+    * decode. Run out-of-band (`forge profile`), never mid-feature; the profile it produces is a versioned input the FSM
+    * consumes deterministically (§11.0). The output is wall-clock-capped orchestrator-side via the `ReviewerCall`
+    * boundary.
+    */
+  def profileRepo(input: RepoProfilerInput): IO[RepoProfile]
 
   /** Schema enforcement (§7.4/§7.5). */
   def schemaMechanism: SchemaMechanism

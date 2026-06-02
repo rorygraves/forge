@@ -14,6 +14,7 @@ import io.forge.agents.{
   PrReviewInput,
   RefineInput,
   RefineResult,
+  RepoProfilerInput,
   StreamingSession
 }
 import io.forge.app.config.ForgeConfig
@@ -295,6 +296,8 @@ class RealSideEffectsSuite extends munit.FunSuite:
     def reviewDesign(input: DesignReviewInput): IO[DesignReview] = IO.raiseError(new NotImplementedError)
     def reviewPr(input: PrReviewInput): IO[PrReview] = IO.raiseError(new NotImplementedError)
     def refine(input: RefineInput): IO[RefineResult] = IO.raiseError(new NotImplementedError)
+    def profileRepo(input: RepoProfilerInput): IO[io.forge.core.profile.RepoProfile] =
+      IO.raiseError(new NotImplementedError)
     def schemaMechanism: SchemaMechanism = SchemaMechanism.Native
     def costFrom(event: AgentEvent): Option[Cost] = None
 

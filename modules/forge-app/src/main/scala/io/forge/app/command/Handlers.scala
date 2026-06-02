@@ -277,6 +277,10 @@ object abandon:
   def run(ctx: StateChangingContext, command: ForgeCommand.Abandon): IO[ExitCode] =
     AbandonFeature.execute(ctx.paths, ctx.config, command.feature)
 
+object profile:
+  def run(ctx: StateChangingContext): IO[ExitCode] =
+    ProfileCommand.execute(ctx.paths, ctx.config)
+
 // --- read-only (Task 1.4.13) ------------------------------------------------------
 
 object status:

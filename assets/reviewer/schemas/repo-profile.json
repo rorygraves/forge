@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://forge.io/schemas/repo-profile.json",
+  "title": "RepoProfile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["buildTool", "commands", "commitIdentity", "workflow"],
+  "properties": {
+    "buildTool": {
+      "type": "string",
+      "description": "The primary build tool, e.g. 'sbt', 'gradle', 'npm', 'cargo'."
+    },
+    "commands": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/command" }
+    },
+    "commitIdentity": { "$ref": "#/$defs/commitIdentity" },
+    "workflow": { "$ref": "#/$defs/workflow" }
+  },
+  "$defs": {
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "argv", "determinism", "required", "autofix"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["format", "lint", "build", "test", "typecheck"]
+        },
+        "argv": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "The command split into argv tokens, e.g. ['sbt', 'scalafmtAll']."
+        },
+        "determinism": {
+          "type": "string",
+          "enum": ["deterministic", "heuristic"],
+          "description": "'deterministic' = re-running is a pure function of the working tree (a formatter, codegen); 'heuristic' = interpreting the outcome needs judgment (a test could be a bug, a flake, or an env issue)."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether this gate must pass before a change can merge."
+        },
+        "autofix": {
+          "type": "boolean",
+          "description": "True when running the command mutates the working tree to remediate the failure (a formatter rewrites files). Only deterministic + autofix commands are safe for Forge to run itself without a driver turn."
+        }
+      }
+    },
+    "commitIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "email"],
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reviewRequired", "ciRequiredChecks", "branchModel", "mergeStrategy"],
+      "properties": {
+        "reviewRequired": {
+          "type": "boolean",
+          "description": "Whether the repo requires PR review before merge."
+        },
+        "ciRequiredChecks": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Names of the CI checks that must be green to merge (e.g. ['backend', 'frontend'])."
+        },
+        "branchModel": {
+          "type": "string",
+          "enum": ["trunk_based", "git_flow"]
+        },
+        "mergeStrategy": {
+          "type": "string",
+          "enum": ["squash", "merge", "rebase"]
+        }
+      }
+    }
+  }
+}

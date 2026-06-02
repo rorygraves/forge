@@ -5,6 +5,7 @@ import cats.effect.unsafe.implicits.global
 import fs2.Stream
 import io.forge.core.{QuestionMechanism, SchemaMechanism}
 import io.forge.core.cost.Cost
+import io.forge.core.profile.RepoProfile
 
 /** Smoke test — verifies the §7.1 trait shape is concrete enough to implement without unimplemented members. Every
   * method here returns a failing IO; the point is the compile-time signature check.
@@ -38,6 +39,7 @@ class ConnectorContractSuite extends munit.FunSuite:
     def reviewDesign(input: DesignReviewInput): IO[DesignReview] = notImplemented
     def reviewPr(input: PrReviewInput): IO[PrReview] = notImplemented
     def refine(input: RefineInput): IO[RefineResult] = notImplemented
+    def profileRepo(input: RepoProfilerInput): IO[RepoProfile] = notImplemented
     def costFrom(event: AgentEvent): Option[Cost] = event match
       case AgentEvent.CostUpdate(c) => Some(c)
       case _ => None

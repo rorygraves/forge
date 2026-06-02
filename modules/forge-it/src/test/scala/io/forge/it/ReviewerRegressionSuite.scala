@@ -150,7 +150,8 @@ class ReviewerRegressionSuite extends munit.FunSuite:
     ReviewerAssets(
       designReview = ReviewerAssets.PerMethod(schemas / "design-review.json", prompts / s"design-review.$reviewer.md"),
       prReview = ReviewerAssets.PerMethod(schemas / "code-review.json", prompts / s"code-review.$reviewer.md"),
-      refine = ReviewerAssets.PerMethod(schemas / "refine.json", prompts / s"refine.$reviewer.md")
+      refine = ReviewerAssets.PerMethod(schemas / "refine.json", prompts / s"refine.$reviewer.md"),
+      profileRepo = ReviewerAssets.PerMethod(schemas / "repo-profile.json", prompts / s"repo-profile.$reviewer.md")
     )
 
   private def loadPriceTable: PriceTable =

@@ -4,6 +4,7 @@ import cats.effect.IO
 import cats.syntax.all.*
 import io.forge.core.{QuestionMechanism, SchemaMechanism}
 import io.forge.core.cost.Cost
+import io.forge.core.profile.RepoProfile
 import ujson.Value
 
 import scala.concurrent.duration.*
@@ -154,6 +155,15 @@ final class ClaudeConnector(
       assets => assets.refine,
       ReviewerPrompts.refineBody(input),
       ReviewDecoders.refineResult
+    )
+
+  // --- sensor methods (§7.11) ----
+
+  def profileRepo(input: RepoProfilerInput): IO[RepoProfile] =
+    runReviewer(
+      assets => assets.profileRepo,
+      ReviewerPrompts.repoProfileBody(input),
+      ReviewDecoders.repoProfile
     )
 
   // --- telemetry ----
