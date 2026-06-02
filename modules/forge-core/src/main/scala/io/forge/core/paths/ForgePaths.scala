@@ -52,6 +52,14 @@ final class ForgePaths(val repoRoot: os.Path, val home: os.Path = os.home):
   /** `.forge/config.json` — per-repo configuration (§18). Missing file ⇒ §18 defaults apply. */
   val configFile: os.Path = repoForgeDir / "config.json"
 
+  /** `.forge/profile.json` — committed per-repo adaptation profile (Phase 3 / design-rationale A5). A single repo-level
+    * [[io.forge.core.profile.RepoProfile]] (build tool, gate commands tiered by determinism, commit identity, workflow
+    * shape), snapshotted + hashed into the action log per run (§19 `profile.snapshot`) so `Fsm.transition` stays
+    * replayable against the profile-as-of-that-run. Committed (not gitignored) — it is a versioned input, mutated only
+    * *between* runs by the agentic sensors, never mid-transition.
+    */
+  val profileFile: os.Path = repoForgeDir / "profile.json"
+
   /** `.forge/overrides/` — per-key config override directory (§18 "per-repo overrides under `.forge/overrides/`"). */
   val overridesDir: os.Path = repoForgeDir / "overrides"
 

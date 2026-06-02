@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "buildTool": "sbt",
+  "commands": [
+    {
+      "kind": "format",
+      "argv": ["sbt", "scalafmtAll"],
+      "determinism": "deterministic",
+      "required": true,
+      "autofix": true
+    },
+    {
+      "kind": "build",
+      "argv": ["sbt", "compile"],
+      "determinism": "deterministic",
+      "required": true,
+      "autofix": false
+    },
+    {
+      "kind": "test",
+      "argv": ["sbt", "test"],
+      "determinism": "heuristic",
+      "required": true,
+      "autofix": false
+    }
+  ],
+  "commitIdentity": {
+    "name": "forge[bot]",
+    "email": "forge@users.noreply.github.com"
+  },
+  "workflow": {
+    "reviewRequired": true,
+    "ciRequiredChecks": ["backend", "frontend"],
+    "branchModel": "trunk_based",
+    "mergeStrategy": "squash"
+  }
+}

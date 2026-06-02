@@ -144,8 +144,8 @@ object RebuildState:
     *
     *   - `InteractiveSpec` → `(Spec, None)`
     *   - `DesignReviewing(round)` with `round > 1` / `DesignPrFeedback(_, _)` → `(DesignRevision, None)`
-    *     (`DesignReviewing(1)` is a fresh reviewer one-shot with no live driver → empty; its only `piece=None`
-    *      spawn is the already-completed interactive spec session — see `driverKeyFor`)
+    *     (`DesignReviewing(1)` is a fresh reviewer one-shot with no live driver → empty; its only `piece=None` spawn is
+    *     the already-completed interactive spec session — see `driverKeyFor`)
     *   - `PieceImplementing(p)` → `(Implement, Some(p))`
     *   - `PieceFixingUp(p, _, _)` → `(Fixup, Some(p))`
     *   - any other state → no driver session is live, so the result is empty.

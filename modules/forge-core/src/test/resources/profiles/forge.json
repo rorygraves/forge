@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "buildTool": "sbt",
+  "commands": [
+    {
+      "kind": "format",
+      "argv": ["sbt", "scalafmtAll"],
+      "determinism": "deterministic",
+      "required": true,
+      "autofix": true
+    },
+    {
+      "kind": "build",
+      "argv": ["sbt", "compile"],
+      "determinism": "deterministic",
+      "required": true,
+      "autofix": false
+    },
+    {
+      "kind": "test",
+      "argv": ["sbt", "test"],
+      "determinism": "heuristic",
+      "required": true,
+      "autofix": false
+    }
+  ],
+  "commitIdentity": {
+    "name": "Rory Graves",
+    "email": "rory.graves@fieldmark.co.uk"
+  },
+  "workflow": {
+    "reviewRequired": true,
+    "ciRequiredChecks": [],
+    "branchModel": "trunk_based",
+    "mergeStrategy": "squash"
+  }
+}
