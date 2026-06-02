@@ -26,6 +26,7 @@ import io.forge.core.profile.{
   FixupRoute,
   ProfileSnapshot,
   ProfileStore,
+  RepoProfile,
   RuleBasedFailureClassifier
 }
 import io.forge.core.review.{DesignReviewVerdict, PrReviewVerdict, RefineVerdict}
@@ -134,21 +135,29 @@ final class Orchestrator(
         // transition persisted is recovered by re-running the idempotent §11 side effect, NOT re-spawned. Mutually
         // exclusive with the in-flight path above (the same tail spawn is either marked settled or not), so when
         // `RestartRecovery` routed an in-flight session to NHI this is a no-op.
-        recoverDrafts >> snapshotProfile(featureId) >>
-          postSettleRecover(feature1, rebuilt.settledButUnadvanced).flatMap(drive)
+        recoverDrafts >> resolveProfile.flatMap { profile =>
+          snapshotProfile(featureId, profile) >>
+            postSettleRecover(feature1, rebuilt.settledButUnadvanced).flatMap(driveWith(_, profile))
+        }
     }
 
-  /** §11.0 — load the committed profile and append a `profile.snapshot` binding this run to its `contentHash`. A `None`
-    * (unprofiled) is a no-op (1.6). Gated by `adapt.enabled`; a malformed `profile.json` propagates as an error per
-    * §6.5 (it is committed source of truth, not a rebuildable cache).
+  /** §11.0 — resolve the committed profile **once** per run (Task 3.0.2). `None` when `adapt.enabled` is false (pure
+    * 1.6 behaviour) or the repo is unprofiled; a malformed `profile.json` propagates as an error per §6.5 (it is
+    * committed source of truth, not a rebuildable cache). The resolved value is threaded as a **read-only input** to
+    * the §8.2 router (see [[routeCiFailure]]) — `Fsm.transition` never reads `ProfileStore`, so a replay reproduces the
+    * run without consulting any profile (the replayability invariant; `profile.snapshot` / `profile.failure_classified`
+    * are audit-only no-op projections in `Replay`).
     */
-  private def snapshotProfile(featureId: io.forge.core.FeatureId): IO[Unit] =
-    if !config.adapt.enabled then IO.unit
-    else
-      profileStore.load().flatMap {
-        case Some(profile) => log.append(featureId, ProfileSnapshot.draft(featureId, profile)).void
-        case None => IO.unit
-      }
+  private def resolveProfile: IO[Option[RepoProfile]] =
+    if !config.adapt.enabled then IO.pure(None) else profileStore.load()
+
+  /** §11.0 — append a `profile.snapshot` binding this run to the resolved profile's `contentHash`, so a replay uses the
+    * profile-as-of-this-run. A `None` (unprofiled / `adapt.enabled = false`) is a no-op (1.6).
+    */
+  private def snapshotProfile(featureId: io.forge.core.FeatureId, profile: Option[RepoProfile]): IO[Unit] =
+    profile match
+      case Some(p) => log.append(featureId, ProfileSnapshot.draft(featureId, p)).void
+      case None => IO.unit
 
   /** roadmap §3.5 Unit B — the effectful post-settle recovery step. For a [[RebuildState.SettledSession]] whose driver
     * phase maps to a recoverable piece-driver effect (`ClassifyCommitOpenPr` / `ClassifyCommitPush`), re-run that
@@ -238,15 +247,21 @@ final class Orchestrator(
         else persistTransition(f1, drafts) >> drive(f1).map(Orchestrator.CommandOutcome.Driven.apply)
 
   /** Drive a feature from the given state to a loop-terminal state. Exposed for the J5 e2e suites, which construct the
-    * starting `Feature` directly rather than seeding a full action-log history through `run`.
+    * starting `Feature` directly rather than seeding a full action-log history through `run`. Resolves the profile
+    * itself (Task 3.0.2) so a direct-`drive` caller routes against the committed profile exactly as `run` does; `run`
+    * uses [[driveWith]] directly to reuse the profile it already resolved for the `profile.snapshot`.
     */
   private[orchestrator] def drive(feature: Feature): IO[Feature] =
+    resolveProfile.flatMap(driveWith(feature, _))
+
+  /** [[drive]] with the run's already-resolved profile threaded in as a read-only input to the §8.2 router. */
+  private def driveWith(feature: Feature, profile: Option[RepoProfile]): IO[Feature] =
     if isLoopTerminal(feature.state) then IO.pure(feature)
     else
       for
         driverRef <- Ref.of[IO, Option[ActiveSession]](None)
         totalsRef <- Ref.of[IO, CostTotals](CostTotals.zero)
-        out <- loop(feature, driverRef, totalsRef, justEntered = true)
+        out <- loop(feature, profile, driverRef, totalsRef, justEntered = true)
       yield out
 
   // ---------------------------------------------------------------------------
@@ -255,6 +270,7 @@ final class Orchestrator(
 
   private def loop(
       feature: Feature,
+      profile: Option[RepoProfile],
       driverRef: Ref[IO, Option[ActiveSession]],
       totalsRef: Ref[IO, CostTotals],
       justEntered: Boolean
@@ -266,7 +282,7 @@ final class Orchestrator(
       entry.flatMap {
         // An entry-hook-synthesized event: apply, persist, then re-run the entry hook (steps chain).
         case Some(event) =>
-          applyAndPersist(feature, event).flatMap(f1 => loop(f1, driverRef, totalsRef, justEntered = true))
+          applyAndPersist(feature, event).flatMap(f1 => loop(f1, profile, driverRef, totalsRef, justEntered = true))
         // No entry event: race the selected sources, then recurse with justEntered = state-changed.
         case None =>
           driverRef.get.flatMap { active =>
@@ -274,9 +290,9 @@ final class Orchestrator(
             if sources.isEmpty then
               IO.raiseError(new IllegalStateException(s"orchestrator: no event sources for state ${feature.state}"))
             else
-              raceAll(sources.map(sourceIO(feature, active, _, totalsRef)))
+              raceAll(sources.map(sourceIO(feature, active, _, profile, totalsRef)))
                 .flatMap(winner => handleWinner(feature, winner, driverRef, totalsRef))
-                .flatMap(f1 => loop(f1, driverRef, totalsRef, justEntered = f1.state != feature.state))
+                .flatMap(f1 => loop(f1, profile, driverRef, totalsRef, justEntered = f1.state != feature.state))
           }
       }
 
@@ -458,6 +474,7 @@ final class Orchestrator(
       feature: Feature,
       active: Option[ActiveSession],
       src: EventSource,
+      profile: Option[RepoProfile],
       totalsRef: Ref[IO, CostTotals]
   ): IO[RaceResult] =
     src match
@@ -479,16 +496,16 @@ final class Orchestrator(
               new IllegalStateException(s"Monitor source selected with no active session in ${feature.state}")
             )
 
-      case EventSource.Watcher(pr) => watcherIO(feature, pr)
+      case EventSource.Watcher(pr) => watcherIO(feature, pr, profile)
       case EventSource.Reviewer(method) => reviewerIO(feature, method)
       case EventSource.Repl => IO.never // bidirectional `forge spec` REPL — Task 1.4.13
       case EventSource.UserQa => userInput.map(RaceResult.FromUser.apply)
 
-  private def watcherIO(feature: Feature, pr: PrNumber): IO[RaceResult] =
+  private def watcherIO(feature: Feature, pr: PrNumber, profile: Option[RepoProfile]): IO[RaceResult] =
     // §8: PieceAwaitingCi runs the CI-readiness gate (overlay promotion + discovery window + stableGreenPolls); the
     // other watcher states consume one poll snapshot and hand it straight to the FSM.
     feature.state match
-      case s: FsmState.PieceAwaitingCi => pieceCiWatcherIO(feature, s.p, pr)
+      case s: FsmState.PieceAwaitingCi => pieceCiWatcherIO(feature, s.p, pr, profile)
       case _ => plainWatcherIO(feature, pr)
 
   private def plainWatcherIO(feature: Feature, pr: PrNumber): IO[RaceResult] =
@@ -518,7 +535,12 @@ final class Orchestrator(
     * a fix-up and declare premature readiness. Elapsed time uses `IO.monotonic` (deterministic under `TestControl`).
     * The overlay is fetched once per gate visit (it is cache-first inside `BranchManager`).
     */
-  private def pieceCiWatcherIO(feature: Feature, piece: PieceId, pr: PrNumber): IO[RaceResult] =
+  private def pieceCiWatcherIO(
+      feature: Feature,
+      piece: PieceId,
+      pr: PrNumber,
+      profile: Option[RepoProfile]
+  ): IO[RaceResult] =
     sideEffects.requiredChecksOverlay(feature).flatMap {
       case Left(reason) =>
         IO.pure(RaceResult.FromWatcher(FsmEvent.HarnessError(s"required-checks overlay failed: $reason")))
@@ -538,7 +560,7 @@ final class Orchestrator(
               case _: PollResult.Snapshot => baselineRef.get.flatMap(baselineStore.save(feature.id, pr, _))
               case _ => IO.unit
             }
-            .evalMap(ciPollToEvent(feature, piece, pr, overlay, gateRef, _))
+            .evalMap(ciPollToEvent(feature, piece, pr, overlay, gateRef, profile, _))
             .unNone
             .head
             .compile
@@ -552,6 +574,7 @@ final class Orchestrator(
       pr: PrNumber,
       overlay: RequiredChecksOverlay,
       gateRef: Ref[IO, CiGate],
+      profile: Option[RepoProfile],
       result: PollResult
   ): IO[Option[FsmEvent]] =
     result match
@@ -567,7 +590,7 @@ final class Orchestrator(
                 gateRef.set(gate.copy(gateEnteredAt = Some(enteredAt), disc = next)).as(None)
               case CiDecision.Forward(rollup) =>
                 if CiReadiness.isFailure(rollup) then
-                  routeCiFailure(feature, piece, pr, rollup, decoded.snapshot, gateRef, gate)
+                  routeCiFailure(feature, piece, pr, rollup, decoded.snapshot, gateRef, gate, profile)
                 else
                   val auditSkipped =
                     if ciPolicy == CiPolicy.None then log.append(feature.id, ciSkippedDraft(feature, piece, pr)).void
@@ -600,38 +623,38 @@ final class Orchestrator(
       rollup: io.forge.core.pr.CheckRollup,
       snapshot: io.forge.core.pr.PrSnapshot,
       gateRef: Ref[IO, CiGate],
-      gate: CiGate
+      gate: CiGate,
+      profile: Option[RepoProfile]
   ): IO[Option[FsmEvent]] =
     val blindFixup: IO[Option[FsmEvent]] =
       IO.pure(Some(FsmEvent.PrSnapshotUpdated(piece, snapshot.copy(requiredChecks = rollup))))
     val runId = CiReadiness.firstFailingCheck(rollup).flatMap(_.runId)
-    if !config.adapt.enabled then blindFixup
-    else
-      profileStore.load().flatMap {
-        case None => blindFixup
-        case Some(profile) =>
-          runId match
-            case None => blindFixup // no Actions run id on the failing check — can't fetch the log; route blind.
-            case Some(id) =>
-              sideEffects.fetchFailingLog(id).flatMap {
-                case Left(_) => blindFixup // gh fetch failed; don't strand the failure — route blind.
-                case Right(failureLog) =>
-                  val routed = failureRouter.route(profile, failureLog, config.adapt)
-                  val classifiedDraft =
-                    FailureClassifiedAction
-                      .draft(feature.id, piece, "ci", routed.classification, routed.route, routed.source)
-                  log.append(feature.id, classifiedDraft) >> act(
-                    feature,
-                    piece,
-                    pr,
-                    snapshot,
-                    rollup,
-                    gateRef,
-                    gate,
-                    routed.route
-                  )
-              }
-      }
+    // `profile` is the run's read-only input (Task 3.0.2): `None` when unprofiled OR `adapt.enabled = false`
+    // (`resolveProfile` folds the disable into a `None`), so the blind 1.6 fix-up covers both.
+    profile match
+      case None => blindFixup
+      case Some(p) =>
+        runId match
+          case None => blindFixup // no Actions run id on the failing check — can't fetch the log; route blind.
+          case Some(id) =>
+            sideEffects.fetchFailingLog(id).flatMap {
+              case Left(_) => blindFixup // gh fetch failed; don't strand the failure — route blind.
+              case Right(failureLog) =>
+                val routed = failureRouter.route(p, failureLog, config.adapt)
+                val classifiedDraft =
+                  FailureClassifiedAction
+                    .draft(feature.id, piece, "ci", routed.classification, routed.route, routed.source)
+                log.append(feature.id, classifiedDraft) >> act(
+                  feature,
+                  piece,
+                  pr,
+                  snapshot,
+                  rollup,
+                  gateRef,
+                  gate,
+                  routed.route
+                )
+            }
 
   /** Act on the deterministic [[FixupRoute]] (the §8.2 row table). `blindFixup`-shaped events re-use the existing
     * `PrSnapshotUpdated` → Failed path so the FSM owns `attempts`; `RunLocalCommand` / `Retry` / `BackOff` never touch

@@ -121,13 +121,25 @@ real run, not just fakes (the `gh` wire-shape + subprocess-lifecycle discipline 
 
 ### Tier 2 — self-sufficiency
 
-### Task 3.0.2 — profile load + snapshot at feature start (§11.0)  [ ]
+### Task 3.0.2 — profile load + snapshot at feature start (§11.0)  ✅ 2026-06-02
 
-- [ ] At orchestrator startup (post-lock, pre-first-transition): `ProfileStore.load()`; on
+- [x] At orchestrator startup (post-lock, pre-first-transition): `ProfileStore.load()`; on
       `Some`, append `profile.snapshot` and thread the `RepoProfile` as a read-only input to the
-      router; on `None`, run unprofiled (1.6 behaviour).
-- [ ] Assert `Fsm.transition` never reads `ProfileStore` (profile reaches it only as input) —
-      the replayability invariant. Property/round-trip test.
+      router; on `None`, run unprofiled (1.6 behaviour). Landed as `Orchestrator.resolveProfile`
+      (gated on `adapt.enabled`, resolved **once** per run); `run` emits the snapshot from the
+      resolved value and hands it to a new `driveWith(feature, profile)` which threads
+      `Option[RepoProfile]` down `loop → sourceIO → watcherIO → pieceCiWatcherIO → ciPollToEvent →
+      routeCiFailure`. `routeCiFailure` no longer re-loads per failure — the `profileStore.load()`
+      and the `!adapt.enabled` short-circuit it carried in 3.1.2 are now folded into the single
+      resolve (a disabled run resolves to `None` → blind 1.6 fix-up). `drive` resolves the profile
+      itself so the direct-`drive` e2e callers (incl. `OrchestratorCiRoutingSuite`) are unchanged.
+- [x] Assert `Fsm.transition` never reads `ProfileStore` (profile reaches it only as input) —
+      the replayability invariant. `ProfileReplayInvarianceSuite` (forge-core): **R1** a happy-path
+      trajectory with `profile.snapshot` + `profile.failure_classified` injected folds to the
+      identical final `Feature` as without them (both are audit-only no-op projections in
+      `Replay`'s default branch); **R2** a `ForgePathsSuite`-style source sweep that no
+      `io.forge.core.fsm` source references the `io.forge.core.profile` package (the FSM cannot
+      read the profile even by accident — enforced at the type level).
 
 ### Task 3.0.3 — RepoProfiler LLM role (forge-agents)  [ ]
 
@@ -163,12 +175,30 @@ real run, not just fakes (the `gh` wire-shape + subprocess-lifecycle discipline 
 
 ## 2. Order of work
 
-3.1.1 ✅ → 3.0.1 ✅ → **3.1.2 (gating, next)** → 3.0.2 → {3.0.3, 3.1.3, 3.1.4 in any order} → 3.2.
+3.1.1 ✅ → 3.0.1 ✅ → 3.1.2 (code ✅; live re-run deferred — T5) → 3.0.2 ✅ → **{3.0.3, 3.1.3,
+3.1.4 in any order} (next)** → 3.2.
 Tier-1 closes the slice's exit criterion; Tier 2/3 can land incrementally behind it.
 
 ---
 
 ## 3. Status log
+
+- **2026-06-02 — Task 3.0.2 landed: profile resolved once, threaded as a read-only router input;
+  replayability invariant under test.** `Orchestrator.resolveProfile` (gated on `adapt.enabled`)
+  loads the committed profile **once** per run; `run` emits `profile.snapshot` from that value and
+  passes it to the new `driveWith(feature, profile)`, which threads `Option[RepoProfile]` down
+  `loop → sourceIO → watcherIO → pieceCiWatcherIO → ciPollToEvent → routeCiFailure`. This removes
+  the per-failure `profileStore.load()` (and the redundant `!adapt.enabled` short-circuit) that
+  3.1.2 carried inside `routeCiFailure` — a disabled run now resolves to `None` and takes the
+  blind 1.6 fix-up by the same code path as an unprofiled run. `drive` resolves the profile itself
+  so direct-`drive` e2e callers are behaviour-identical. New `ProfileReplayInvarianceSuite`
+  (forge-core): **R1** round-trip — a happy-path trajectory with `profile.snapshot` +
+  `profile.failure_classified` injected folds to the identical final `Feature` as without them
+  (both are audit-only no-op projections in `Replay`'s default branch); **R2** structural guard —
+  a `ForgePathsSuite`-style sweep that no `io.forge.core.fsm` source references the
+  `io.forge.core.profile` package, so `Fsm.transition` cannot read `ProfileStore` even by accident.
+  `forge-core` 424/424; `OrchestratorCiRoutingSuite` / `FailureRouterSuite` unchanged green;
+  `scalafmtCheckAll` clean.
 
 - **2026-06-02 — Task 3.1.2 code landed (orchestrator wiring + tests); live dogfood re-run
   pending.** Captured the real `gh run view --log-failed` fixture
