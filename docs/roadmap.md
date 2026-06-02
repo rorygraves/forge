@@ -488,6 +488,13 @@ reviewer-code) ship with v1 placeholders. After ~5–10 real features:
 revise based on observed failure modes, not on lab fixtures. Track
 prompt diffs in git; they're load-bearing for behaviour.
 
+> **Observed-failure-mode log (feeds this section):** dogfood run #1 =
+> [`slice-4/mvp-friction.md`](slice-4/mvp-friction.md) (`image-creds-dedup`);
+> dogfood run #2 = [`dogfood/extract-media-network-config.md`](dogfood/extract-media-network-config.md)
+> (2026-06-02) — surfaced the implement-driver-doesn't-format and
+> fix-up-hand-formats prompt items (#3/#4 there), plus a fixed `spec→run`
+> restart-recovery regression and small resilience gaps.
+
 ### 3.4 OSS-readiness scaffolding
 
 - README that's actually useful to a stranger.
