@@ -228,6 +228,39 @@ stay in `forge-core` (the spine consumes them); the LLM sensors become `forge-ag
 methods invoked reviewer-side. Tasks 3.0.3 / 3.1.4 / 3.2 implement the `forge-agents` side; no move of
 the spiked core types is needed.
 
+### T4 — `RunLocalCommand` makes a fresh `style(...)` commit, not a `git commit --amend` — open
+
+§8.2 row 1 / §8.3 say the autofix result is *amended* into the piece commit. The landed
+`RealSideEffects.runLocalAutofixAndPush` instead makes a **fresh** `style(<feature>): <argv>` commit
+(reusing the existing `git.stage` + `git.commit` + `pushCurrentBranch` seams) rather than adding a
+`git commit --amend` + force-push-with-lease. Rationale: szork-style **squash-merge** collapses the
+extra commit on merge (so main history is identical to the amend outcome), it needs no force-push and
+so no lease race, and it is an honest auditable record of the autofix. The behavioural contract is
+met exactly — no driver turn, no LLM, no `attempts` increment. Revisit if a non-squash (merge/rebase)
+repo wants the single-commit history; that would add a `GitClient.amendNoEdit` seam + force-push.
+
+### T5 — live `szork` dogfood re-run deferred; spec-phase findings — open (the §0 exit criterion)
+
+The Task 3.1.2 **code** landed + is proven end-to-end against the *real* captured `gh run view
+--log-failed` scalafmt log (`OrchestratorCiRoutingSuite`: profiled CI failure → local `scalafmtAll`,
+`attempts` stays 0, `profile.failure_classified{route:RunLocalCommand}` logged; unprofiled → blind
+fix-up increments `attempts`). The **live** re-run on `llm4s/szork` — the §0 exit criterion and the
+last unchecked Task 3.1.2 box — is deferred (decision 2026-06-02: accept the real-fixture e2e test as
+sufficient validation for now). Two friction findings surfaced while attempting it, worth a follow-up:
+
+1. **Headless `forge run` from `Drafting` enters the spec phase and can hit the 300s `specTimeoutSec`
+   cap** (`SettleTimeout(Spec)` → NHI) for a non-trivial decomposition. The `SpecRepl` docstring
+   claims headless `run` "never enters the spec phase", but `Orchestrator`'s `Drafting` entry hook
+   does `launchSpec`; either the spec cap needs a headless-friendly default or the docstring/contract
+   needs reconciling. (szork carried no `specTimeoutSec`, so it took the 300s default.)
+2. **`forge spec` (the interactive REPL) can't be driven from a non-TTY** — the spec driver issues an
+   `AskUserQuestion` mid-decomposition, so piped stdin mis-routes. The live re-run therefore needs a
+   human at the REPL (as the prior dogfoods did), or a longer headless spec cap with the driver
+   defaulting its own clarifying answers. The `RunLocalCommand` collapse itself is downstream of all
+   this and unaffected.
+
+The roadmap §4 bullet and the Task 3.1.2 header stay **unticked** until the live collapse is measured.
+
 ---
 
 ## 5. Cross-references
