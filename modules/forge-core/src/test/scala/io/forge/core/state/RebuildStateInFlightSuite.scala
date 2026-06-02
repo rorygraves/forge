@@ -89,6 +89,17 @@ class RebuildStateInFlightSuite extends munit.FunSuite:
       Vector(RebuildState.InFlightSession(SessionPhase.Spec, "spec-sess", None))
     )
 
+  test("DesignReviewing(round=1) + completed spec spawn(piece=None) → empty (spec→run handoff, no false in-flight)"):
+    // Regression (found dogfooding 2026-06-01): the spec REPL records a `driver.spawn` (piece=None) at `/done`,
+    // landing the feature in DesignReviewing(1). On the next `forge run`, rebuilding here is a *fresh reviewer
+    // one-shot* — no live streaming driver — so that completed spec spawn must NOT be read as an in-flight
+    // design-revision driver (which synthesized a false NeedsHumanIntervention(ReopenDesign) and stranded the run).
+    // The "session-id log durability" fix (2026-05-31) introduced the spec spawn; before it the log had no spawn
+    // and this projection was trivially empty. Only round > 1 resumes a live revision driver (see the round=2 test).
+    val log = Vector(spawnAction(1, "claude", "spec-sess", None))
+    assertEquals(RebuildState.inFlightSessions(log, feature(FsmState.DesignReviewing(round = 1))), Vector.empty)
+    assertEquals(RebuildState.settledButUnadvanced(log, feature(FsmState.DesignReviewing(round = 1))), Vector.empty)
+
   test("DesignReviewing + resume(piece=None) → DesignRevision in-flight session uses newSessionId"):
     val log = Vector(
       spawnAction(1, "claude", "spec-sess", None),

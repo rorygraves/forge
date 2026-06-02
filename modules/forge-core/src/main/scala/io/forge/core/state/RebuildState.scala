@@ -143,7 +143,9 @@ object RebuildState:
     * exactly one `SessionPhase`):
     *
     *   - `InteractiveSpec` → `(Spec, None)`
-    *   - `DesignReviewing(_)` / `DesignPrFeedback(_, _)` → `(DesignRevision, None)`
+    *   - `DesignReviewing(round)` with `round > 1` / `DesignPrFeedback(_, _)` → `(DesignRevision, None)`
+    *     (`DesignReviewing(1)` is a fresh reviewer one-shot with no live driver → empty; its only `piece=None`
+    *      spawn is the already-completed interactive spec session — see `driverKeyFor`)
     *   - `PieceImplementing(p)` → `(Implement, Some(p))`
     *   - `PieceFixingUp(p, _, _)` → `(Fixup, Some(p))`
     *   - any other state → no driver session is live, so the result is empty.
@@ -194,7 +196,14 @@ object RebuildState:
   private def driverKeyFor(state: FsmState): Option[(SessionPhase, Option[PieceId])] =
     state match
       case FsmState.InteractiveSpec => Some((SessionPhase.Spec, None))
-      case _: FsmState.DesignReviewing => Some((SessionPhase.DesignRevision, None))
+      // `DesignReviewing(1)` is a fresh reviewer one-shot — the orchestrator runs no streaming driver there
+      // (`Orchestrator.runEntryHook`: only `round > 1` resumes a revision driver after request_changes). The one
+      // `piece=None` spawn the log carries at round 1 is the *completed* interactive spec session, which the spec
+      // REPL records as a `driver.spawn` at `/done`. Keying round 1 to the design phase misread that finished spawn
+      // as a live design-revision driver and synthesized a false `NeedsHumanIntervention(ReopenDesign)` on the
+      // spec→run handoff. So only `round > 1` carries a recoverable in-flight design session; at `round > 1` the
+      // later revision `driver.resume` is the tail spawn anyway, shadowing the spec spawn.
+      case s: FsmState.DesignReviewing if s.round > 1 => Some((SessionPhase.DesignRevision, None))
       case _: FsmState.DesignPrFeedback => Some((SessionPhase.DesignRevision, None))
       case s: FsmState.PieceImplementing => Some((SessionPhase.Implement, Some(s.p)))
       case s: FsmState.PieceFixingUp => Some((SessionPhase.Fixup, Some(s.p)))
