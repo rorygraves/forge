@@ -4,6 +4,7 @@ import cats.effect.IO
 import io.forge.agents.{DesignReviewInput, PrReviewInput, RefineInput}
 import io.forge.core.{PieceId, PrNumber}
 import io.forge.core.fsm.{Feature, FsmEvent}
+import io.forge.core.profile.RepoCommand
 import io.forge.git.branch.protection.RequiredChecksOverlay
 import io.forge.git.worktree.WorktreeSafety
 
@@ -106,3 +107,16 @@ trait SideEffects:
     * `Deny` → `Left` (the loop maps it to `HarnessError` → `RunAnotherFixup`).
     */
   def classifyCommitPush(feature: Feature, piece: PieceId, pr: PrNumber): IO[Either[String, FsmEvent]]
+
+  /** §8.2 — pull the real failing log for the run, ANSI stripped. This is what the FailureRouter classifies so it sees
+    * the real scalafmt error line rather than the gh pr checks summary; see dogfood number four. A Left reason on a gh
+    * failure means the caller falls back to the 1.6 blind fix up.
+    */
+  def fetchFailingLog(runId: String): IO[Either[String, String]]
+
+  /** §8.2 row 1 — run the repo's own deterministic in place autofix command such as sbt scalafmtAll, commit its result
+    * on the piece branch, and push. No driver turn, no LLM, no attempts increment; this is the dogfood number two
+    * collapse. A Left reason when the command fails, rewrites nothing, or the push is rejected means the caller falls
+    * back to a driver fix up so the failure is never silently dropped.
+    */
+  def runLocalAutofixAndPush(feature: Feature, piece: PieceId, command: RepoCommand): IO[Either[String, Unit]]

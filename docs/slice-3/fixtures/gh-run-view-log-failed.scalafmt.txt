@@ -1,0 +1,20 @@
+backend	Check formatting	﻿2026-06-01T22:34:50.7608977Z ##[group]Run sbt scalafmtCheckAll
+backend	Check formatting	2026-06-01T22:34:50.7609322Z ^[[36;1msbt scalafmtCheckAll^[[0m
+backend	Check formatting	2026-06-01T22:34:50.7636820Z shell: /usr/bin/bash -e {0}
+backend	Check formatting	2026-06-01T22:34:50.7637101Z env:
+backend	Check formatting	2026-06-01T22:34:50.7637444Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.11-10/x64
+backend	Check formatting	2026-06-01T22:34:50.7637976Z   JAVA_HOME_21_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.11-10/x64
+backend	Check formatting	2026-06-01T22:34:50.7638375Z ##[endgroup]
+backend	Check formatting	2026-06-01T22:34:52.2494483Z ^[[0m[^[[0m^[[0minfo^[[0m] ^[[0m^[[0mwelcome to sbt 1.11.0 (Eclipse Adoptium Java 21.0.11)^[[0m
+backend	Check formatting	2026-06-01T22:34:52.9566263Z ^[[0m[^[[0m^[[0minfo^[[0m] ^[[0m^[[0mloading settings for project szork-build from plugins.sbt...^[[0m
+backend	Check formatting	2026-06-01T22:34:53.5919357Z ^[[0m[^[[0m^[[0minfo^[[0m] ^[[0m^[[0mloading project definition from /home/runner/work/szork/szork/project^[[0m
+backend	Check formatting	2026-06-01T22:34:54.5564577Z ^[[0m[^[[0m^[[0minfo^[[0m] ^[[0m^[[0mloading settings for project root from build.sbt...^[[0m
+backend	Check formatting	2026-06-01T22:34:54.7415103Z ^[[0m[^[[0m^[[0minfo^[[0m] ^[[0m^[[0mset current project to szork (in build file:/home/runner/work/szork/szork/)^[[0m
+backend	Check formatting	2026-06-01T22:34:55.9913664Z ^[[0m[^[[0m^[[0minfo^[[0m] ^[[0m^[[0mscalafmt: Checking 45 Scala sources (/home/runner/work/szork/szork)...^[[0m
+backend	Check formatting	2026-06-01T22:34:55.9920346Z ^[[0m[^[[0m^[[0minfo^[[0m] ^[[0m^[[0mscalafmt: Checking 15 Scala sources (/home/runner/work/szork/szork)...^[[0m
+backend	Check formatting	2026-06-01T22:34:58.0325519Z ^[[0m[^[[0m^[[33mwarn^[[0m] ^[[0m^[[0mscalafmt: /home/runner/work/szork/szork/src/main/scala/org/llm4s/szork/api/MediaNetworkConfig.scala isn't formatted properly!^[[0m
+backend	Check formatting	2026-06-01T22:35:00.3203318Z ^[[0m[^[[0m^[[31merror^[[0m] ^[[0m^[[0mscalafmt: 1 files must be formatted (/home/runner/work/szork/szork)^[[0m
+backend	Check formatting	2026-06-01T22:35:00.3231720Z ^[[0m[^[[0m^[[31merror^[[0m] ^[[0m^[[0m(Compile / ^[[31mscalafmtCheck^[[0m) scalafmt: 1 files must be formatted (/home/runner/work/szork/szork)^[[0m
+backend	Check formatting	2026-06-01T22:35:00.3267787Z ^[[0m[^[[0m^[[31merror^[[0m] ^[[0m^[[0mTotal time: 5 s, completed Jun 1, 2026, 10:35:00 PM^[[0m
+backend	Check formatting	2026-06-01T22:35:00.6845613Z ^[[0J
+backend	Check formatting	2026-06-01T22:35:00.6859042Z ##[error]Process completed with exit code 1.

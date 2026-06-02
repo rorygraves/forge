@@ -8,10 +8,11 @@ import io.forge.core.{PieceId, PrNumber, Sha}
 import io.forge.core.fsm.{Feature, FsmEvent, SessionPhase, SettleOutcome}
 import io.forge.core.manifest.Piece
 import io.forge.core.paths.ForgePaths
-import io.forge.core.pr.{CheckRollup, PrSnapshot, PrState}
+import io.forge.core.pr.{CheckResult, CheckRollup, PrSnapshot, PrState}
+import io.forge.core.profile.RepoCommand
 import io.forge.git.branch.{BranchError, BranchManager}
 import io.forge.git.branch.protection.RequiredChecksOverlay
-import io.forge.git.cli.{GhClient, GhError, GitClient, GitError, StatusEntry}
+import io.forge.git.cli.{CommitResult, GhClient, GhError, GitClient, GitError, StatusEntry}
 import io.forge.git.worktree.{WorktreeSafety, WorktreeSafetyClassifier}
 import io.forge.specs.{
   ChangeCollector,
@@ -115,14 +116,42 @@ final class RealSideEffects(
     feature.manifest.pieces.find(_.id == piece).flatMap(_.prNumber) match
       case None => IO.unit // no PR yet (CI-failed before PR open is not a real path); nothing to report
       case Some(pr) =>
-        gh.prChecks(pr).flatMap { res =>
-          val report = res.fold(e => s"(could not fetch CI checks via gh: ${e.message})", _.trim)
-          IO.blocking(
-            os.write.over(failuresFile(feature.id, piece), failuresMd(piece, pr, report), createFolders = true)
+        for
+          checksRes <- gh.prChecks(pr)
+          checks = checksRes.fold(e => s"(could not fetch CI checks via gh: ${e.message})", _.trim)
+          // dogfood number four: also pipe the real failing-step log from gh run view log-failed so the fix-up driver
+          // sees the actual scalafmt error, not just the gh pr checks summary. Best-effort.
+          log <- failingRunLog(pr)
+          _ <- IO.blocking(
+            os.write.over(failuresFile(feature.id, piece), failuresMd(piece, pr, checks, log), createFolders = true)
           )
-        }
+        yield ()
 
-  private def failuresMd(piece: PieceId, pr: PrNumber, checksReport: String): String =
+  /** Best-effort fetch of the failing Actions run's log-failed output for the piece PR: read the PR's
+    * statusCheckRollup, find the first failed check's actions run id, then pull and ANSI strip its log. None on any
+    * gap, such as no PR snapshot, no failed Actions check, or a gh failure; the failures.md then carries only the gh pr
+    * checks summary, exactly as 1.6.
+    */
+  private def failingRunLog(pr: PrNumber): IO[Option[String]] =
+    gh.prView(pr, Vector("statusCheckRollup")).flatMap {
+      case Left(_) => IO.pure(None)
+      case Right(json) =>
+        RealSideEffects.failingRunId(json) match
+          case None => IO.pure(None)
+          case Some(runId) => gh.runViewLogFailed(runId).map(_.toOption.map(GhClient.stripAnsi))
+    }
+
+  private def failuresMd(piece: PieceId, pr: PrNumber, checksReport: String, failingLog: Option[String]): String =
+    val logSection = failingLog.map(_.trim).filter(_.nonEmpty) match
+      case Some(l) =>
+        s"""
+           |Failing step log (`gh run view --log-failed`):
+           |
+           |```
+           |$l
+           |```
+           |""".stripMargin
+      case None => ""
     s"""# Piece ${piece.value} — failures to address (PR #${pr.value})
        |
        |These CI checks on the piece's PR did not pass (`gh pr checks`):
@@ -130,7 +159,7 @@ final class RealSideEffects(
        |```
        |$checksReport
        |```
-       |
+       |$logSection
        |Make the smallest change that makes the failing check(s) pass. For a formatting
        |check, run the project's formatter on the changed files (a targeted format is
        |fine — do NOT run the full test suite). Then stop; Forge commits and re-runs CI.
@@ -234,6 +263,51 @@ final class RealSideEffects(
           _ <- et(git.commit(s"fix(${feature.id.value}): ${p.title}"))(gitErr)
           _ <- et(branchManager.pushCurrentBranch())(branchErr)
         yield settled(SessionPhase.Fixup)).value
+
+  // --- §8.2 classified failure routing --------------------------------------
+
+  override def fetchFailingLog(runId: String): IO[Either[String, String]] =
+    gh.runViewLogFailed(runId).map(_.left.map(ghErr).map(GhClient.stripAnsi))
+
+  override def runLocalAutofixAndPush(
+      feature: Feature,
+      piece: PieceId,
+      command: RepoCommand
+  ): IO[Either[String, Unit]] =
+    // §8.2 row 1: run the repo's own formatter/codegen, commit its output on the piece branch, push. A separate
+    // style commit, rather than an amend, is used deliberately: szork-style squash-merge collapses it on merge, it
+    // needs no force-push and so no lease race, and it is an honest, auditable record of the autofix. It is NOT a
+    // fix-up round: no driver, no LLM, no attempts increment, since the loop never transitions on a Right here.
+    (for
+      _ <- runCommand(command.argv)
+      status <- et(git.status())(gitErr)
+      changedPaths = status.map(_.path).distinct
+      _ <- EitherT.cond[IO](
+        changedPaths.nonEmpty,
+        (),
+        s"autofix '${command.argv.mkString(" ")}' rewrote nothing — the failure is not a formatting issue"
+      )
+      _ <- et(git.stage(changedPaths))(gitErr)
+      committed <- et(git.commit(s"style(${feature.id.value}): ${command.argv.mkString(" ")}"))(gitErr)
+      _ <- EitherT.cond[IO](
+        committed == CommitResult.Committed,
+        (),
+        s"autofix '${command.argv.mkString(" ")}' staged no commit"
+      )
+      _ <- et(branchManager.pushCurrentBranch())(branchErr)
+    yield ()).value
+
+  /** Run a profile autofix or gate command argv in the repo root. A non-zero exit yields a Left with the tail of its
+    * combined output so the caller can surface why the autofix failed before falling back to a driver fix-up.
+    */
+  private def runCommand(argv: Vector[String]): EitherT[IO, String, Unit] =
+    EitherT(IO.blocking {
+      val res = os.proc(argv).call(cwd = paths.repoRoot, check = false, stderr = os.Pipe, stdout = os.Pipe)
+      if res.exitCode == 0 then Right(())
+      else
+        val tail = (res.out.text() + res.err.text()).takeRight(500).trim
+        Left(s"local command '${argv.mkString(" ")}' failed (exit ${res.exitCode}): $tail")
+    })
 
   // --- D3-3 worktree-safety classification ----------------------------------
 
@@ -473,6 +547,29 @@ final class RealSideEffects(
   private def branchErr(e: BranchError): String = e.message
 
 object RealSideEffects:
+
+  /** Wire-level statusCheckRollup conclusion values that count as a failure, mirroring CheckConclusion and
+    * CiReadiness.isBad; kept as raw strings so the helper can scan the gh JSON without a full decode.
+    */
+  private val BadConclusions: Set[String] =
+    Set("FAILURE", "TIMED_OUT", "CANCELLED", "STARTUP_FAILURE", "ACTION_REQUIRED")
+
+  /** First failed Actions check's run id from a gh pr view statusCheckRollup payload: the actions run id segment of its
+    * detailsUrl. None when the rollup is absent, has no failed Actions CheckRun, or that check carries no parseable run
+    * id.
+    */
+  def failingRunId(json: ujson.Value): Option[String] =
+    json.objOpt
+      .flatMap(_.get("statusCheckRollup"))
+      .flatMap(_.arrOpt)
+      .flatMap { arr =>
+        arr.iterator
+          .flatMap(_.objOpt)
+          .find(o => o.get("conclusion").flatMap(_.strOpt).exists(BadConclusions.contains))
+          .flatMap(_.get("detailsUrl"))
+          .flatMap(_.strOpt)
+          .flatMap(CheckResult.runIdFrom)
+      }
 
   /** Pure projection of `git status --porcelain -z [--ignored]` rows into the [[FileChange]] set the
     * [[ChangeCollector]] classifies. `gitIgnored` carries the `!!` bit §10.1 rule 4 needs (the classifier is git-less).

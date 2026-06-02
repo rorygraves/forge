@@ -24,6 +24,18 @@ enum FixupRoute:
   /** Unclassifiable — escalate to a human (NeedsHumanIntervention). */
   case Escalate(reason: String)
 
+object FixupRoute:
+  /** Stable label for the §19 `profile.failure_classified.route` field and the `forge stats` fold (a `RunLocalCommand`
+    * is a fix-up round that did not happen). Matches the enum case name.
+    */
+  extension (r: FixupRoute)
+    def label: String = r match
+      case _: FixupRoute.RunLocalCommand => "RunLocalCommand"
+      case _: FixupRoute.DriverFixup => "DriverFixup"
+      case FixupRoute.Retry => "Retry"
+      case _: FixupRoute.BackOff => "BackOff"
+      case _: FixupRoute.Escalate => "Escalate"
+
 /** The deterministic routing rule from a [[Classification]] plus the [[RepoProfile]] to a [[FixupRoute]]. Total. */
 object FailureRouting:
 

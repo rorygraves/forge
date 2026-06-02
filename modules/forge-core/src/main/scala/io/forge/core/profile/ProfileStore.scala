@@ -17,6 +17,15 @@ trait ProfileStore:
   /** Atomically persist the profile to `.forge/profile.json`. */
   def save(profile: RepoProfile): IO[Unit]
 
+object ProfileStore:
+  /** A no-op store that reports "no profile" and discards saves. The default for code paths that have no profile seam
+    * wired (e.g. the orchestrator e2e suites that don't exercise Phase-3 routing) — an unprofiled run is exactly 1.6
+    * behaviour (§11.0).
+    */
+  val none: ProfileStore = new ProfileStore:
+    def load(): IO[Option[RepoProfile]] = IO.pure(None)
+    def save(profile: RepoProfile): IO[Unit] = IO.unit
+
 /** File-backed [[ProfileStore]] over `.forge/profile.json`, atomic + durable exactly as `FileStateCache` (sibling temp
   * + `SYNC`, `ATOMIC_MOVE`, parent-dir fsync).
   *

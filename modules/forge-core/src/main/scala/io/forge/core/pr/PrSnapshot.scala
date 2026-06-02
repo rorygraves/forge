@@ -156,12 +156,33 @@ object CheckConclusion:
     s => fromString(s).fold(msg => throw IllegalArgumentException(msg), identity)
   )
 
-/** One observed CI check on a PR. */
+/** One observed CI check on a PR.
+  *
+  * `detailsUrl` is the check's `statusCheckRollup[].detailsUrl` (`…/actions/runs/<runId>/job/<jobId>` for an Actions
+  * CheckRun, `None` for a non-Actions StatusContext). Phase 3 (§8.2) reads the `<runId>` segment off the *failing*
+  * check so it can pull the real failing log via `gh run view <runId> --log-failed` and classify it — the dogfood-#4
+  * ask. Added last with a default so existing positional constructions and older `manifest.json` snapshots that omit it
+  * still decode.
+  */
 final case class CheckResult(
     name: String,
     state: CheckState,
-    conclusion: Option[CheckConclusion]
-) derives ReadWriter
+    conclusion: Option[CheckConclusion],
+    detailsUrl: Option[String] = None
+) derives ReadWriter:
+
+  /** The GitHub Actions run id embedded in [[detailsUrl]] (`…/actions/runs/<runId>/…`), if this check is an Actions
+    * CheckRun. `None` for a non-Actions status context (no `runs/<id>` segment) or an absent `detailsUrl`.
+    */
+  def runId: Option[String] = detailsUrl.flatMap(CheckResult.runIdFrom)
+
+object CheckResult:
+  private val RunIdPattern: scala.util.matching.Regex = """/actions/runs/(\d+)(?:/|$)""".r
+
+  /** Extract the `<runId>` from an Actions `detailsUrl`; `None` if the URL carries no `/actions/runs/<digits>` segment.
+    */
+  def runIdFrom(detailsUrl: String): Option[String] =
+    RunIdPattern.findFirstMatchIn(detailsUrl).map(_.group(1))
 
 /** §6 / §8 — aggregated CI rollup. `required` lists the checks the §8 policy considers required (branch-protection
   * union overlay); `observed` is the rest. The orchestrator's `CiPolicy` decision logic combines them — `forge-core`

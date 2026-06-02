@@ -219,7 +219,9 @@ object PrSnapshotDecoder:
           name <- decodeCheckName(o, pathPrefix)
           state <- decodeCheckState(o, pathPrefix)
           conclusion <- decodeCheckConclusion(o, pathPrefix)
-        yield CheckResult(name, state, conclusion)
+        // §8.2: keep `detailsUrl` so the failing-check run id (`…/actions/runs/<id>/…`) is available for
+        // `gh run view --log-failed`. Absent / non-string ⇒ None (a StatusContext has no detailsUrl); never an error.
+        yield CheckResult(name, state, conclusion, detailsUrl = nonNullField(o, "detailsUrl").flatMap(_.strOpt))
 
   /** CheckRun shape carries `name`; StatusContext carries `context`. Accept either. */
   private def decodeCheckName(o: Obj, pathPrefix: String): Either[DecodeError, String] =

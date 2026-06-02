@@ -344,8 +344,10 @@ class RealSideEffectsSuite extends munit.FunSuite:
       checks: String = "backend\tfail\t1m\thttps://x/runs/1\n",
       prForBranchResult: Either[GhError, Option[PrNumber]] = Right(None)
   ) extends GhClient:
+    // Default to an empty statusCheckRollup so `writeFailures`'s best-effort `gh run view --log-failed` fetch resolves
+    // to None (the failures.md then carries only the `gh pr checks` summary, as in 1.6).
     def prView(pr: PrNumber, fields: Vector[String]): IO[Either[GhError, ujson.Value]] =
-      IO.raiseError(new NotImplementedError)
+      IO.pure(Right(ujson.Obj("statusCheckRollup" -> ujson.Arr())))
     def prCreate(title: String, body: String, base: BranchName, head: BranchName): IO[Either[GhError, PrNumber]] =
       IO.raiseError(new NotImplementedError)
     def prUpdateBranch(pr: PrNumber): IO[Either[GhError, Unit]] = IO.pure(Right(()))
@@ -353,6 +355,7 @@ class RealSideEffectsSuite extends munit.FunSuite:
     def apiBranchProtection(base: BranchName): IO[Either[GhError, Option[ujson.Value]]] = IO.pure(Right(None))
     def prChecks(pr: PrNumber): IO[Either[GhError, String]] = IO.pure(Right(checks))
     def prForBranch(head: BranchName): IO[Either[GhError, Option[PrNumber]]] = IO.pure(prForBranchResult)
+    def runViewLogFailed(runId: String): IO[Either[GhError, String]] = IO.pure(Right(""))
 
   private final class FakeSpecStore(design: String, pieceSpecs: Map[PieceId, String]) extends SpecStore:
     def loadManifest(feature: FeatureId): IO[Either[SpecStoreError, Manifest]] =

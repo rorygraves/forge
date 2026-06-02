@@ -43,7 +43,8 @@ final case class ForgeConfig(
     claude: ClaudeConfig = ClaudeConfig(),
     codex: CodexConfig = CodexConfig(),
     settle: SettleConfig = SettleConfig(),
-    github: GithubConfig = GithubConfig()
+    github: GithubConfig = GithubConfig(),
+    adapt: AdaptConfig = AdaptConfig()
 ) derives ReadWriter
 
 object ForgeConfig:
@@ -95,6 +96,20 @@ final case class SettleConfig(
     designRevisionTimeoutSec: Int = 600,
     implementTimeoutSec: Int = 1800,
     fixupTimeoutSec: Int = 900
+) derives ReadWriter
+
+/** §18 `adapt` block (Phase 3 — repo adaptation, forge-design-1.7 §18). Every default is chosen so an unprofiled or
+  * default-config repo behaves exactly as 1.6 plus the safe, free local autofix. `enabled = false` disables every
+  * Phase-3 seam (pure 1.6 behaviour). The `RepoProfile` itself is **not** here — it lives in its own committed
+  * `.forge/profile.json` (§6.5) because it is sensor-produced, versioned, and hashed per run, unlike the hand-edited
+  * config.
+  */
+final case class AdaptConfig(
+    enabled: Boolean = true,
+    localGate: Boolean = true,
+    autofix: Boolean = true,
+    llmClassifierOnUnknown: Boolean = true,
+    conventionLearner: Boolean = true
 ) derives ReadWriter
 
 /** §18 `github` block. */

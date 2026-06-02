@@ -36,6 +36,15 @@ object CiReadiness:
       true
     case _ => false
 
+  /** §8.2 — true when a forwarded rollup represents a *required-check failure* (mirrors `Fsm.ciOutcome == Failed`). The
+    * orchestrator branches on this to run the Phase-3 classified routing before handing the snapshot to the FSM.
+    */
+  def isFailure(rollup: CheckRollup): Boolean = rollup.required.exists(_.conclusion.exists(isBad))
+
+  /** §8.2 — the first failing required check in a rollup (the one whose run log the classifier reads). */
+  def firstFailingCheck(rollup: CheckRollup): Option[CheckResult] =
+    rollup.required.find(_.conclusion.exists(isBad))
+
   private def isSuccess(c: CheckResult): Boolean = c.conclusion.contains(CheckConclusion.Success)
 
   def evaluate(

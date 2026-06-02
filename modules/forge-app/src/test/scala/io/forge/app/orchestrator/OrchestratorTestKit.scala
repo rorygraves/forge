@@ -243,6 +243,15 @@ object OrchestratorTestKit:
     override def classifyCommitPush(feature: Feature, piece: PieceId, pr: PrNumber): IO[Either[String, FsmEvent]] =
       IO.pure(Right(FsmEvent.Settled(SessionPhase.Fixup, SettleOutcome.Clean)))
 
+    // §8.2 — defaults: no failing log, autofix is a no-op success. Routing suites subclass to inject a real log and to
+    // record the autofix call (e.g. assert `attempts` stays 0 on a RunLocalCommand).
+    override def fetchFailingLog(runId: String): IO[Either[String, String]] = IO.pure(Right(""))
+    override def runLocalAutofixAndPush(
+        feature: Feature,
+        piece: PieceId,
+        command: io.forge.core.profile.RepoCommand
+    ): IO[Either[String, Unit]] = IO.pure(Right(()))
+
   // --- StateCache wrapper: records every saved state + runs an onSave hook (delivers merge snapshots on demand) ---
 
   final class HookStateCache(delegate: StateCache, onSave: Feature => IO[Unit]) extends StateCache:

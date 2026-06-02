@@ -27,7 +27,8 @@ final class FakeGhClient private (
     prDiffFn: PrNumber => IO[Either[GhError, String]],
     apiBranchProtectionFn: BranchName => IO[Either[GhError, Option[ujson.Value]]],
     prChecksFn: PrNumber => IO[Either[GhError, String]],
-    prForBranchFn: BranchName => IO[Either[GhError, Option[PrNumber]]]
+    prForBranchFn: BranchName => IO[Either[GhError, Option[PrNumber]]],
+    runViewLogFailedFn: String => IO[Either[GhError, String]]
 ) extends GhClient:
 
   override def prView(pr: PrNumber, fields: Vector[String]): IO[Either[GhError, ujson.Value]] = prViewFn(pr)
@@ -50,6 +51,8 @@ final class FakeGhClient private (
 
   override def prForBranch(head: BranchName): IO[Either[GhError, Option[PrNumber]]] = prForBranchFn(head)
 
+  override def runViewLogFailed(runId: String): IO[Either[GhError, String]] = runViewLogFailedFn(runId)
+
 object FakeGhClient:
 
   private def notConfigured[A](method: String): IO[Either[GhError, A]] =
@@ -66,7 +69,9 @@ object FakeGhClient:
         notConfigured("apiBranchProtection"),
       private val prChecksFn: PrNumber => IO[Either[GhError, String]] = (_: PrNumber) => notConfigured("prChecks"),
       private val prForBranchFn: BranchName => IO[Either[GhError, Option[PrNumber]]] = (_: BranchName) =>
-        notConfigured("prForBranch")
+        notConfigured("prForBranch"),
+      private val runViewLogFailedFn: String => IO[Either[GhError, String]] = (_: String) =>
+        notConfigured("runViewLogFailed")
   ):
     def prView(fn: PrNumber => IO[Either[GhError, ujson.Value]]): Builder = copy(prViewFn = fn)
     def prView(response: Either[GhError, ujson.Value]): Builder = prView(_ => IO.pure(response))
@@ -109,6 +114,9 @@ object FakeGhClient:
     def prForBranch(response: Either[GhError, Option[PrNumber]]): Builder = prForBranch(_ => IO.pure(response))
     def prForBranch(pr: Option[PrNumber]): Builder = prForBranch(Right(pr))
 
+    def runViewLogFailed(fn: String => IO[Either[GhError, String]]): Builder = copy(runViewLogFailedFn = fn)
+    def runViewLogFailed(log: String): Builder = runViewLogFailed(_ => IO.pure(Right(log)))
+
     def build: FakeGhClient =
       new FakeGhClient(
         prViewFn,
@@ -117,7 +125,8 @@ object FakeGhClient:
         prDiffFn,
         apiBranchProtectionFn,
         prChecksFn,
-        prForBranchFn
+        prForBranchFn,
+        runViewLogFailedFn
       )
 
   def builder: Builder = Builder()

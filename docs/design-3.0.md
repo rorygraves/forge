@@ -99,13 +99,20 @@ The step that turns the spike's unit proof into a real run. Risk: the §11.5 fai
 `attempts` accounting, and the gh log fetch are all live-CLI / FSM-touching — exercise with a
 real run, not just fakes (the `gh` wire-shape + subprocess-lifecycle discipline applies).
 
-- [ ] Plumb `gh run view <runId> --log-failed` into the §11.5 failed-check edge (capture a real
-      fixture first — `docs/slice-3/fixtures/` — before writing the parse).
-- [ ] Insert §8.2 classified routing in place of the blind "any required check failed →
-      `attempts += 1` → fix-up": `RunLocalCommand` amends + pushes + re-polls with **no**
-      `attempts` increment; `DriverFixup` writes the full-log `<p>.failures.md` and increments;
-      `BackOff`/`Retry`/`Escalate` per §8.2.
-- [ ] Emit `profile.failure_classified` (§19) before acting; replay reuses the recorded route.
+- [x] Plumb `gh run view <runId> --log-failed` into the §11.5 failed-check edge (real fixture
+      captured first — `docs/slice-3/fixtures/gh-run-view-log-failed.scalafmt.txt`, the actual
+      dogfood-#2 scalafmt failure). `CheckResult.detailsUrl` + `runId` extractor (forge-core);
+      `GhClient.runViewLogFailed` + `stripAnsi` (forge-git); `writeFailures` now folds the full
+      failing log into `<p>.failures.md` for every fix-up path (kills dogfood #4 universally).
+- [x] Insert §8.2 classified routing in place of the blind "any required check failed →
+      `attempts += 1` → fix-up": a `FailureRouter` (forge-app) over the rules classifier, wired
+      into `pieceCiWatcherIO`. `RunLocalCommand` runs the autofix + pushes + keeps polling with
+      **no** `attempts` increment; `DriverFixup`/`Escalate` fall back to the existing Failed →
+      `PieceCiFailed` edge; `Retry`/`BackOff` keep polling. Unprofiled / `adapt.enabled = false`
+      keeps the exact 1.6 blind fix-up. Profile loaded + `profile.snapshot` emitted at feature
+      start (§11.0, the minimal Task 3.0.2 load path came along since routing needs it).
+- [x] Emit `profile.failure_classified` (§19) before acting; `forge stats` folds a "fix-ups
+      avoided" row from `route == "RunLocalCommand"`.
 - [ ] Re-run `extract-media-network-config` (or an equivalent format-gated feature) on `szork`
       with a hand-authored `.forge/profile.json`; confirm the scalafmt CI failure routes to a
       local `scalafmtAll`, `attempts` stays 0, and `forge stats` shows the avoided round.
@@ -162,6 +169,23 @@ Tier-1 closes the slice's exit criterion; Tier 2/3 can land incrementally behind
 ---
 
 ## 3. Status log
+
+- **2026-06-02 — Task 3.1.2 code landed (orchestrator wiring + tests); live dogfood re-run
+  pending.** Captured the real `gh run view --log-failed` fixture
+  (`docs/slice-3/fixtures/gh-run-view-log-failed.scalafmt.txt`, the actual dogfood-#2 scalafmt
+  failure) before writing any parse. Added `CheckResult.detailsUrl` + `runId` extractor and
+  `GhClient.runViewLogFailed` + `stripAnsi`; the `FailureRouter` (forge-app) wraps the rules
+  classifier + `FailureRouting.route`, wired into `pieceCiWatcherIO`: a profiled scalafmt CI
+  failure routes to a local `sbt scalafmtAll` with **no `attempts` increment**, an unprofiled /
+  `adapt.enabled = false` run keeps the exact 1.6 blind fix-up. Profile loaded + `profile.snapshot`
+  emitted at feature start (§11.0); `profile.failure_classified` recorded before acting; `forge
+  stats` folds a "fix-ups avoided" row. `writeFailures` now also folds the full failing log into
+  `<p>.failures.md` for every fix-up path (dogfood #4, universal). New tests:
+  `OrchestratorCiRoutingSuite` (the collapse end-to-end with scripted fakes: `attempts` stays 0 +
+  `RunLocalCommand` logged, vs the unprofiled blind path incrementing `attempts`), `FailureRouterSuite`,
+  decoder `detailsUrl`/`runId` + `stripAnsi` units. Full build green (`scalafmtAll` clean — same
+  3.8.3 `RedundantBraces` "next on empty iterator" doc-comment crash as the spike, reworded per
+  [[reference-scalafmt-redundantbraces-crash]]). Remaining for the §0 exit: the live `szork` re-run.
 
 - **2026-06-02 — Tasks 3.1.1 + 3.0.1 landed via the Phase-3 spike (commit `16396d2`) — Tier-1
   types complete.** Built the deterministic `io.forge.core.profile` package runnable-first and

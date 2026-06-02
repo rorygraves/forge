@@ -72,6 +72,11 @@ final class RealGhClient(repoRoot: os.Path, env: Map[String, String] = Map.empty
       Right(res.out.text())
     }
 
+  override def runViewLogFailed(runId: String): IO[Either[GhError, String]] =
+    // `gh run view <id> --log-failed` exits 0 for a finished run and writes the failed steps' logs to stdout, so the
+    // ordinary exit-code classifier applies (rate-limit / 404 / transient still surface as GhError on a non-zero exit).
+    invoke(Vector("gh", "run", "view", runId, "--log-failed"))
+
   override def apiBranchProtection(base: BranchName): IO[Either[GhError, Option[ujson.Value]]] =
     invoke(Vector("gh", "api", RealGhClient.branchProtectionApiPath(base))).map(RealGhClient.mapApiBranchProtection)
 

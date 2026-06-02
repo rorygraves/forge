@@ -89,7 +89,12 @@ object StatsReport:
         * explains why the timeline crosses NHI boundaries. Surfaced as a footnote so a multi-resume run reads as
         * recovered, not stuck.
         */
-      resumeCount: Int
+      resumeCount: Int,
+      /** §8.2 / Phase 3 — `profile.failure_classified` events that routed to `RunLocalCommand`: a CI failure remedied
+        * by the repo's own deterministic autofix (e.g. `sbt scalafmtAll`) **without** a driver fix-up round. Each one
+        * is a fix-up round that did not happen — the dogfood-#2 collapse, measured. Surfaced as a footnote.
+        */
+      fixupsAvoided: Int
   ):
     /** Total bracketed (closed) human-wait across all kinds. Excludes any [[unclosedWaitKind]] interval (no end ⇒ no
       * measurable duration).
@@ -190,7 +195,9 @@ object StatsReport:
       costAvailable = costUpdates.nonEmpty || summedUsd > 0,
       waitMsByKind = waits.byKind,
       unclosedWaitKind = waits.open.map(_._2),
-      resumeCount = actions.count(_.kind == "audit.resume_from_nhi")
+      resumeCount = actions.count(_.kind == "audit.resume_from_nhi"),
+      fixupsAvoided =
+        actions.count(a => a.kind == "profile.failure_classified" && routeOf(a).contains("RunLocalCommand"))
     )
 
   /** Accumulator for the [[foldWaits]] walk: closed wait time per kind, plus the one currently-open interval (if any).
@@ -300,7 +307,15 @@ object StatsReport:
             "(timeline recovered in place, not truncated)."
         )
       else Vector.empty
-    durationNote ++ costNote ++ waitNote ++ resumeNote
+    val fixupsAvoidedNote =
+      if summary.fixupsAvoided > 0 then
+        val plural = if summary.fixupsAvoided == 1 then "round" else "rounds"
+        Vector(
+          s"  note: ${summary.fixupsAvoided} fix-up $plural avoided — a CI failure was remedied by the repo's own " +
+            "deterministic autofix (Phase 3 §8.2), with no driver fix-up turn."
+        )
+      else Vector.empty
+    durationNote ++ costNote ++ waitNote ++ resumeNote ++ fixupsAvoidedNote
 
   /** Human label for a wait kind (the [[WaitOrder]] mapping); falls back to the raw tag for an unrecognised kind. */
   private def waitLabel(kind: String): String =
@@ -349,6 +364,10 @@ object StatsReport:
 
   private def featureTotalUsdOf(a: Action): Option[BigDecimal] =
     a.payload.objOpt.flatMap(_.get("featureTotalUsd")).flatMap(_.numOpt).map(BigDecimal(_))
+
+  /** `profile.failure_classified.route` (§19) — the deterministic [[io.forge.core.profile.FixupRoute]] label. */
+  private def routeOf(a: Action): Option[String] =
+    a.payload.objOpt.flatMap(_.get("route")).flatMap(_.strOpt)
 
   /** The wait kind of an `enter` marker on an `fsm.transition` payload (`{ wait: { edge: "enter", kind } }`), or `None`
     * for a `leave` marker or a transition that is not a human-wait boundary (Task 2.0.4).

@@ -87,6 +87,29 @@ class PrSnapshotDecoderSuite extends munit.FunSuite:
         assertEquals(snap.reviewDecision, Some(ReviewDecision.ReviewRequired))
       case other => fail(s"expected Right, got $other")
 
+  test("§8.2: a CheckRun's detailsUrl is captured and its Actions run id extracted"):
+    val json = ujson.read("""{
+      "number": 7, "state": "OPEN", "mergedAt": null, "mergeCommit": null,
+      "reviewDecision": null, "mergeable": "MERGEABLE", "comments": [], "reviews": [],
+      "commits": [ { "oid": "abc1234567890abc1234567890abc1234567890a" } ],
+      "statusCheckRollup": [
+        { "__typename": "CheckRun", "name": "backend", "status": "COMPLETED", "conclusion": "FAILURE",
+          "detailsUrl": "https://github.com/llm4s/szork/actions/runs/26786101936/job/78962117741" },
+        { "__typename": "CheckRun", "name": "frontend", "status": "COMPLETED", "conclusion": "SUCCESS" }
+      ]
+    }""")
+    PrSnapshotDecoder.decode(json, PollBaseline.empty, DefaultBot) match
+      case Right(DecodedSnapshot(snap, _, _)) =>
+        val backend = snap.requiredChecks.observed.find(_.name == "backend").getOrElse(fail("backend check missing"))
+        assertEquals(
+          backend.detailsUrl,
+          Some("https://github.com/llm4s/szork/actions/runs/26786101936/job/78962117741")
+        )
+        assertEquals(backend.runId, Some("26786101936"))
+        // A check with no detailsUrl ⇒ None (never an error).
+        assertEquals(snap.requiredChecks.observed.find(_.name == "frontend").flatMap(_.detailsUrl), None)
+      case other => fail(s"expected Right, got $other")
+
   test("open-changes-requested: comments AND reviews fold into unseenComments"):
     decodeFixture("open-changes-requested.json") match
       case Right(DecodedSnapshot(snap, _, next)) =>

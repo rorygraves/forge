@@ -118,3 +118,27 @@ class PrSnapshotSuite extends munit.FunSuite:
       mergeable = None
     )
     roundTrip(snap)
+
+  test("CheckResult.runId — extracts the Actions run id from detailsUrl (and None otherwise)"):
+    assertEquals(
+      CheckResult.runIdFrom("https://github.com/llm4s/szork/actions/runs/26786101936/job/78962117741"),
+      Some("26786101936")
+    )
+    assertEquals(CheckResult.runIdFrom("https://github.com/o/r/actions/runs/42"), Some("42"))
+    assertEquals(CheckResult.runIdFrom("https://example.com/no/run/here"), None)
+    assertEquals(
+      CheckResult(
+        "backend",
+        CheckState.Completed,
+        Some(CheckConclusion.Failure),
+        Some(".../actions/runs/9/job/1")
+      ).runId,
+      Some("9")
+    )
+    assertEquals(CheckResult("ci", CheckState.Completed, Some(CheckConclusion.Success)).runId, None)
+
+  test("CheckResult — round-trips with and without detailsUrl (back-compat default)"):
+    roundTrip(
+      CheckResult("backend", CheckState.Completed, Some(CheckConclusion.Failure), Some("https://x/runs/3/job/1"))
+    )
+    roundTrip(CheckResult("ci", CheckState.Completed, Some(CheckConclusion.Success)))

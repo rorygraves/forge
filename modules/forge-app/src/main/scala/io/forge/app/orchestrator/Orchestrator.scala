@@ -21,6 +21,13 @@ import io.forge.core.fsm.{
 import io.forge.core.log.ActionDraft
 import io.forge.core.manifest.{ManifestPatch, ManifestStore}
 import io.forge.core.pr.{PrState, ReviewDecision}
+import io.forge.core.profile.{
+  FailureClassifiedAction,
+  FixupRoute,
+  ProfileSnapshot,
+  ProfileStore,
+  RuleBasedFailureClassifier
+}
 import io.forge.core.review.{DesignReviewVerdict, PrReviewVerdict, RefineVerdict}
 import io.forge.core.state.{RebuildState, StateCache}
 import io.forge.git.branch.protection.{OverlaySource, RequiredChecksOverlay}
@@ -58,7 +65,11 @@ import scala.util.Try
 /** §8 per-`PieceAwaitingCi`-visit CI-gate state, local to one `pieceCiWatcherIO` call: `gateEnteredAt` is the monotonic
   * stamp of the first poll (the discovery-window anchor), and `disc` carries `CiReadiness`'s consecutive-green count.
   */
-private final case class CiGate(gateEnteredAt: Option[FiniteDuration], disc: CiDiscoveryState)
+private final case class CiGate(
+    gateEnteredAt: Option[FiniteDuration],
+    disc: CiDiscoveryState,
+    autofixApplied: Boolean = false
+)
 private object CiGate:
   val initial: CiGate = CiGate(None, CiDiscoveryState.initial)
 
@@ -73,10 +84,16 @@ final class Orchestrator(
     cache: StateCache,
     paths: io.forge.core.paths.ForgePaths,
     config: ForgeConfig,
-    userInput: IO[UserCommand] = IO.never
+    userInput: IO[UserCommand] = IO.never,
+    profileStore: ProfileStore = ProfileStore.none
 ):
 
   private val fsmConfig = FsmConfig(config.maxDesignReviewRounds, config.maxFixupRounds)
+
+  /** §8.2 deterministic failure router over the Tier-1 rules classifier. Consulted on a CI-gate failure when a profile
+    * is present and `adapt.enabled` (§11.5); an unprofiled / disabled run keeps the 1.6 blind fix-up.
+    */
+  private val failureRouter = new FailureRouter(new RuleBasedFailureClassifier)
 
   /** v1 reviewer wall-clock cap (Task 1.4.7). The per-method config knob is carry-forward **S4-5** (Task 1.4.9
     * ForgeConfig deferral); until then the 3-minute cap is hard-wired here as it is in the reviewer-call wiring.
@@ -110,12 +127,28 @@ final class Orchestrator(
         val (feature1, drafts1) = resumeIfRunRecoverable(feature0)
         val drafts = drafts0 ++ drafts1
         val recoverDrafts = if drafts.nonEmpty then persistTransition(feature1, drafts) else IO.unit
+        // §11.0: bind the run to the committed RepoProfile (snapshot its hash into the log) before the first
+        // transition, so a replay uses the profile-as-of-this-run. Emitted once per run; an unprofiled / disabled run
+        // skips it and behaves exactly as 1.6.
         // Post-settle recovery (roadmap §3.5 Unit B): a piece driver that settled clean but crashed before its
         // transition persisted is recovered by re-running the idempotent §11 side effect, NOT re-spawned. Mutually
         // exclusive with the in-flight path above (the same tail spawn is either marked settled or not), so when
         // `RestartRecovery` routed an in-flight session to NHI this is a no-op.
-        recoverDrafts >> postSettleRecover(feature1, rebuilt.settledButUnadvanced).flatMap(drive)
+        recoverDrafts >> snapshotProfile(featureId) >>
+          postSettleRecover(feature1, rebuilt.settledButUnadvanced).flatMap(drive)
     }
+
+  /** §11.0 — load the committed profile and append a `profile.snapshot` binding this run to its `contentHash`. A `None`
+    * (unprofiled) is a no-op (1.6). Gated by `adapt.enabled`; a malformed `profile.json` propagates as an error per
+    * §6.5 (it is committed source of truth, not a rebuildable cache).
+    */
+  private def snapshotProfile(featureId: io.forge.core.FeatureId): IO[Unit] =
+    if !config.adapt.enabled then IO.unit
+    else
+      profileStore.load().flatMap {
+        case Some(profile) => log.append(featureId, ProfileSnapshot.draft(featureId, profile)).void
+        case None => IO.unit
+      }
 
   /** roadmap §3.5 Unit B — the effectful post-settle recovery step. For a [[RebuildState.SettledSession]] whose driver
     * phase maps to a recoverable piece-driver effect (`ClassifyCommitOpenPr` / `ClassifyCommitPush`), re-run that
@@ -531,16 +564,105 @@ final class Orchestrator(
             val elapsed = now - enteredAt
             CiReadiness.evaluate(ciPolicy, config.ci, overlay, decoded.snapshot, gate.disc, elapsed) match
               case CiDecision.KeepPolling(next) =>
-                gateRef.set(CiGate(Some(enteredAt), next)).as(None)
+                gateRef.set(gate.copy(gateEnteredAt = Some(enteredAt), disc = next)).as(None)
               case CiDecision.Forward(rollup) =>
-                val auditSkipped =
-                  if ciPolicy == CiPolicy.None then log.append(feature.id, ciSkippedDraft(feature, piece, pr)).void
-                  else IO.unit
-                auditSkipped.as(Some(FsmEvent.PrSnapshotUpdated(piece, decoded.snapshot.copy(requiredChecks = rollup))))
+                if CiReadiness.isFailure(rollup) then
+                  routeCiFailure(feature, piece, pr, rollup, decoded.snapshot, gateRef, gate)
+                else
+                  val auditSkipped =
+                    if ciPolicy == CiPolicy.None then log.append(feature.id, ciSkippedDraft(feature, piece, pr)).void
+                    else IO.unit
+                  auditSkipped.as(
+                    Some(FsmEvent.PrSnapshotUpdated(piece, decoded.snapshot.copy(requiredChecks = rollup)))
+                  )
               case CiDecision.Blocked(reason) =>
                 IO.pure(Some(FsmEvent.CiReadinessBlocked(piece, pr, reason)))
           }
         }
+
+  /** §8.2 classified routing on a required-check failure. Falls back to the 1.6 blind fix-up (emit the Failed
+    * `PrSnapshotUpdated` so the FSM does `attempts += 1` → `PieceCiFailed`) when the run is unprofiled, `adapt` is
+    * disabled, the failing run id can't be recovered, or the log fetch fails — Phase 3 never blocks an unprofiled repo.
+    * When it does route, it appends `profile.failure_classified` (§19) **before** acting, so replay reuses the recorded
+    * perception.
+    *
+    *   - `RunLocalCommand` → run the autofix, amend+push, keep polling (NO `attempts` increment). Guarded by
+    *     `gate.autofixApplied` so a failure that recurs after the autofix degrades to a driver fix-up rather than
+    *     looping; an autofix that fails / changes nothing degrades likewise.
+    *   - `DriverFixup` → the existing Failed path (`attempts += 1`); the full failing log is in `<p>.failures.md`.
+    *   - `Retry` / `BackOff` → keep polling (no `attempts` increment).
+    *   - `Escalate` → `CiReadinessBlocked` → NeedsHumanIntervention.
+    */
+  private def routeCiFailure(
+      feature: Feature,
+      piece: PieceId,
+      pr: PrNumber,
+      rollup: io.forge.core.pr.CheckRollup,
+      snapshot: io.forge.core.pr.PrSnapshot,
+      gateRef: Ref[IO, CiGate],
+      gate: CiGate
+  ): IO[Option[FsmEvent]] =
+    val blindFixup: IO[Option[FsmEvent]] =
+      IO.pure(Some(FsmEvent.PrSnapshotUpdated(piece, snapshot.copy(requiredChecks = rollup))))
+    val runId = CiReadiness.firstFailingCheck(rollup).flatMap(_.runId)
+    if !config.adapt.enabled then blindFixup
+    else
+      profileStore.load().flatMap {
+        case None => blindFixup
+        case Some(profile) =>
+          runId match
+            case None => blindFixup // no Actions run id on the failing check — can't fetch the log; route blind.
+            case Some(id) =>
+              sideEffects.fetchFailingLog(id).flatMap {
+                case Left(_) => blindFixup // gh fetch failed; don't strand the failure — route blind.
+                case Right(failureLog) =>
+                  val routed = failureRouter.route(profile, failureLog, config.adapt)
+                  val classifiedDraft =
+                    FailureClassifiedAction
+                      .draft(feature.id, piece, "ci", routed.classification, routed.route, routed.source)
+                  log.append(feature.id, classifiedDraft) >> act(
+                    feature,
+                    piece,
+                    pr,
+                    snapshot,
+                    rollup,
+                    gateRef,
+                    gate,
+                    routed.route
+                  )
+              }
+      }
+
+  /** Act on the deterministic [[FixupRoute]] (the §8.2 row table). `blindFixup`-shaped events re-use the existing
+    * `PrSnapshotUpdated` → Failed path so the FSM owns `attempts`; `RunLocalCommand` / `Retry` / `BackOff` never touch
+    * `attempts` (they return `None`, keeping the watch stream polling in-place after the side effect).
+    */
+  private def act(
+      feature: Feature,
+      piece: PieceId,
+      pr: PrNumber,
+      snapshot: io.forge.core.pr.PrSnapshot,
+      rollup: io.forge.core.pr.CheckRollup,
+      gateRef: Ref[IO, CiGate],
+      gate: CiGate,
+      route: FixupRoute
+  ): IO[Option[FsmEvent]] =
+    val driverFixup: IO[Option[FsmEvent]] =
+      IO.pure(Some(FsmEvent.PrSnapshotUpdated(piece, snapshot.copy(requiredChecks = rollup))))
+    route match
+      case FixupRoute.RunLocalCommand(command) =>
+        if gate.autofixApplied then driverFixup // already autofixed once this gate visit; the failure recurred.
+        else
+          sideEffects.runLocalAutofixAndPush(feature, piece, command).flatMap {
+            case Right(()) =>
+              // No FSM transition: the amend+push re-triggers CI; keep polling this same gate (attempts untouched).
+              gateRef.update(_.copy(autofixApplied = true)).as(None)
+            case Left(_) => driverFixup // autofix failed / changed nothing — let a driver fix it (with the full log).
+          }
+      case _: FixupRoute.DriverFixup => driverFixup
+      case FixupRoute.Retry => IO.pure(None)
+      case _: FixupRoute.BackOff => IO.pure(None)
+      case FixupRoute.Escalate(reason) => IO.pure(Some(FsmEvent.CiReadinessBlocked(piece, pr, reason)))
 
   private def ciSkippedDraft(feature: Feature, piece: PieceId, pr: PrNumber): ActionDraft =
     ActionDraft(

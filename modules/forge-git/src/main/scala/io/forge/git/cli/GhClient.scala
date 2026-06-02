@@ -57,3 +57,24 @@ trait GhClient:
     * `Right(None)`, not an error.
     */
   def prForBranch(head: BranchName): IO[Either[GhError, Option[PrNumber]]]
+
+  /** Runs gh with the run-view log-failed flags: the raw log of just the failed steps of an Actions run. Phase 3 §8.2
+    * pipes this into the FailureClassifier so it sees the real scalafmt error line rather than the gh pr checks
+    * summary; see dogfood number four. It is also written into the piece failures.md for a DriverFixup. The runId is
+    * the actions run id segment off the failing check's detailsUrl; see io.forge.core.pr.CheckResult.runId. The log
+    * lines are tab-prefixed and carry ANSI colour codes that GhClient.stripAnsi cleans.
+    */
+  def runViewLogFailed(runId: String): IO[Either[GhError, String]]
+
+object GhClient:
+  // ANSI CSI escape sequences: ESC, then a bracket, then params, then a final byte. Covers both the SGR colour codes
+  // and the cursor or erase codes that gh log lines carry.
+  private val AnsiPattern: scala.util.matching.Regex = "\\u001b\\[[0-9;?]*[ -/]*[@-~]".r
+
+  /** Byte-order mark gh sometimes prefixes to a log line; dropped alongside the ANSI escapes. */
+  private val Bom: String = "﻿"
+
+  /** Strip ANSI SGR and cursor escape sequences from a captured log so the classifier markers and the failures.md
+    * driver context read as plain text.
+    */
+  def stripAnsi(s: String): String = AnsiPattern.replaceAllIn(s, "").replace(Bom, "")

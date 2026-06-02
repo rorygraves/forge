@@ -60,6 +60,7 @@ object OrchestratorBuilder:
       val changeCollector = new DefaultChangeCollector
       val manifestStore = new FileManifestStore(paths)
       val stateCache = new FileStateCache(paths)
+      val profileStore = new io.forge.core.profile.FileProfileStore(paths)
       val (reviewRetries, refineRetries) = retryBudgets(mode, config)
       val reviewer = new RetryingReviewerCall(new RealReviewerCall(connector), reviewRetries, refineRetries)
       val monitor = new RealSessionMonitor
@@ -75,7 +76,8 @@ object OrchestratorBuilder:
         log,
         stateCache,
         paths,
-        config
+        config,
+        profileStore = profileStore
       )
       (orchestrator, log)
 
