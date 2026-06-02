@@ -28,6 +28,41 @@
 **Rejected:** Higher-level LLM routing — implicit in the abandoned role-abstraction direction.
 **In v1.1:** §22.
 
+### A5. Deterministic spine + agentic senses (the Phase-3 direction change, 2026-06-02)
+**Status:** Architecture direction adopted 2026-06-02 after two dogfood runs. Roadmap home: §4 (Phase 3 — Repo Adaptation). Implementation contract opens as `forge-design-1.7.md`. This entry is the durable "why".
+
+**Decision.** Forge is *not* "procedural OR agentic". It is a **deterministic spine** — where the work is about trust, money, irreversibility, audit, and recovery — surrounded by **agentic senses** at the edges, where the work is perception, judgment, and adaptation. The spine keeps deciding/recording and is the only thing that touches irreversible actions; new LLM **sensors** only *perceive and propose* structured, validated output the core consumes.
+
+| Stays procedural / deterministic (the spine) | Becomes agentic / LLM (the senses) |
+|---|---|
+| §11 lifecycle, `Fsm.transition` | Profiling a repo (build tool, gate commands, conventions) |
+| Merge gates, budget caps, push/PR/merge | Interpreting a CI/build failure → `{deterministic-fix, code-fix, flaky, env}` |
+| Action log, state cache, replay, restart recovery | Distilling recurring review feedback into conventions |
+| "What state am I in, what's persisted" | Deciding how to satisfy this repo's gates |
+
+**Rule of thumb:** the LLM may perceive and propose; only the deterministic core decides and records, and only it touches irreversible actions. A free-roaming top-level agent that commits/pushes/merges on its own judgment would throw away the auditability and bounded-cost properties that make Forge trustworthy — that is the one move to avoid (continuous with [[A4]]).
+
+**Motivating evidence (two bugs, two halves of the answer).**
+- *Spine = the case for determinism.* The dogfood-#2 `spec→run` false-NHI ([finding #1](dogfood/extract-media-network-config.md)) was a subtle restart-recovery projection bug — found and fixed in one session by reading one pure function (`RebuildState.driverKeyFor`) and replaying a log. If orchestration were an LLM "deciding what to do next", that bug would be a non-reproducible ghost: undebuggable, un-unit-testable, un-fixable in 20 minutes. The determinism is *why* the system is fixable.
+- *Senses = the case for adaptation.* Dogfood #2's `forge stats` recorded **$0.73 of real implement work, then $1.78 / 12 min / 2 fix-up rounds** to fix a scalafmt-formatting issue the driver could have avoided (findings #3/#4). No procedural code can know every repo's formatter/lint/test/build commands across Scala/sbt, Node/npm, Python, Go without accreting brittle, combinatorial CI-YAML heuristics. That is perception, and it belongs in an agentic sensor.
+
+**The three sensors.**
+- **RepoProfiler** (first encounter / on CLAUDE.md or CI change): CLAUDE.md + AGENTS.md + CI config + build files + README → a structured `RepoProfile` (build tool; format/lint/build/test/typecheck commands tiered by determinism + tagged required/optional; commit identity; merge strategy; workflow shape).
+- **FailureClassifier**: failure log → `{kind, confidence, suggestedAction}`. The core routes deterministically — `deterministic-fix` → Forge runs the tool itself (no driver turn); `code-fix` → driver with the **real failing log**; `flaky`/`env`/`rate-limit` → retry or back-off-and-poll. The efficiency win: the formatter case becomes a ~2s local step, not a paid fix-up round.
+- **ConventionLearner** (post-run/periodic): mines failure→remedy patterns + recurring reviewer comments → profile deltas + an optional **proposed PR to the repo's own CLAUDE.md**, human-approved.
+
+**How learning coexists with determinism (the subtle part).** Learning threatens replayability only if it lives *inside* `transition`. Keep it at the edges: the `RepoProfile` is a **versioned input** to the core (like config), snapshotted/hashed into the action log per run (new §19 `profile.snapshot` action). A replay uses the *profile-as-of-that-run*, so `Fsm.transition` stays pure-given-inputs and fully replayable. Learning mutates the profile *between* runs (profiling, post-run distillation), never mid-transition. You get adaptation **and** keep "pure FSM + replayable log + reconstructable cost".
+
+**Profile home — committed, not gitignored (decided 2026-06-02).** `.forge/profile.json` is committed per-repo, so it is reviewable in PRs and shared across machines/workstreams, and the RepoProfiler/ConventionLearner propose edits via PR — the same human-approval path as CLAUDE.md, which serves the self-reflective goal. *Rejected:* a gitignored runtime artifact rebuilt on demand (cleaner "one source of truth = CLAUDE.md" story, but the profile isn't reviewable and must be re-derived per machine/workstream); a forge-only config the human edits directly (loses the "improve the repo's own docs" loop). The committed-file choice does **not** weaken determinism: the per-run **hash** in the log, not the file's mutability, is what pins replay. (Note the contrast with [[B2]] — the *state cache* is rejected from commit because it is a rebuildable projection of the log; the *profile* is a human-curated input, so it commits like config, and is fingerprinted into the log rather than rebuilt from it.)
+
+**The honest hard edge (two depths of adaptation).**
+1. *Command-level* (this repo's formatter/test/build/identity) — easy, clearly belongs in a sensor + profile. **Do this first** (Phase 3.0–3.2).
+2. *Workflow-shape* (no-review repos, trunk-based, stacked PRs, multiple CI lanes, monorepos) — the §11 lifecycle assumes one shape. **Decision:** parameterize the still-deterministic FSM with a `WorkflowProfile` (review-required? CI-required? merge strategy? branch model?) for as long as possible, and **resist making the spine itself agentic**. An agent that composes the workflow is a real future option, but it is where the trust properties start being traded away — push it out until command-level adaptation is proven insufficient.
+
+**Was v1 right?** Yes, for v1's goal (a buildable, trustable, debuggable single-repo MVP). The pure spine is the asset, not the liability — we leaned on it to fix dogfood #1. It is *incomplete* for the cross-repo / learning goal because it has no adaptation layer and assumes a fixed environment (hardcoded config, repo-blindness, ambient git identity). The right move is to add the agentic adaptation layer *feeding* the deterministic core — not to make the core agentic, and not to keep papering over repo variety with config. The commit-identity fix is the tiniest instance of the whole thesis: the harness should *sense and declare* its environment rather than inherit ambient defaults.
+
+**In the spec today:** §3 (architecture — the spine/senses split lands in `forge-design-1.7.md`), §7 (Mode / Role — sensors are new roles, see the role-trait refactor in roadmap §4.2), §8/§10 (gate seams the FailureClassifier hooks), §18 (config vs profile), §19 (`profile.snapshot` action). Continuous with [[A1]] (Mode is hard-coded, not a manager-LLM), [[A4]] (no manager LLM), and the roadmap's Phase-3 sub-slices.
+
 ---
 
 ## Source of truth & logging

@@ -6,7 +6,15 @@ that first; everything below is Claude-Code-specific.
 ## TL;DR
 
 - **Implementation contract:** [`docs/forge-design-1.6.md`](docs/forge-design-1.6.md). The 1.1, 1.2, 1.3, 1.4, and 1.5 revisions are kept in-tree only as superseded stubs that point here (full prior text in git history); §-numbers are preserved, so any "v1.4 §N" reference resolves to the same §N in 1.6.
+- **Docs index:** [`docs/README.md`](docs/README.md) — sorts the `docs/` tree
+  into live / reference / closed-historical. Start there if unsure what's current.
 - **Phase plan:** [`docs/roadmap.md`](docs/roadmap.md).
+- **Direction change (2026-06-02):** the roadmap is re-centered on **repo
+  adaptation** — a deterministic spine + agentic *senses* (RepoProfiler /
+  FailureClassifier / ConventionLearner) so Forge stops running blind on a repo.
+  Architecture write-up: [`docs/design-rationale.md`](docs/design-rationale.md)
+  **A5**; plan: [`docs/roadmap.md`](docs/roadmap.md) §4 (Phase 3 — Repo
+  Adaptation). The implementation contract opens next as `docs/forge-design-1.7.md`.
 - **Active implementation plan:** none — between slices. The most recent
   closed audit trail is [`docs/design-2.1-tui.md`](docs/design-2.1-tui.md)
   (Slice 2.1 — Phase-2 TUI, ✅ closed 2026-06-01): read-only `forge tui

@@ -6,7 +6,7 @@
 > §17 of the design); later phases capture direction and have not yet been
 > turned into specs.
 >
-> **Status:** draft v0.12 — 2026-06-01. **Phase 1 (MVP) ✅ COMPLETE — Slices 1.1, 1.2, 1.3, and 1.4 all closed.** Phase 2 (MLP) is open; **Slice 2.0 (run observability, §3.1) ✅ closed 2026-05-31** — all three tiers landed (`cost.update` + `session.complete` writers, `forge stats`, work-vs-wait markers, driver raw-dump, clean resume-from-NHI); the final implement-turn `forge stats` capture against real CLI output is a watch item (the writers + fold are unit-tested). **§3.5 driver-respawn-avoidance (the D3 large half) ✅ closed 2026-06-01** — a restart from a mid-exploration implement/fix-up crash now resumes the existing driver session instead of re-paying the full exploration (gap #10), gated by a worktree-safety classifier; `forge stats` folds the resumed turn as a measured saving. The live contract is now **[`forge-design-1.6.md`](forge-design-1.6.md)** (1.4 and 1.5 → redirect stubs), which reconciles the Slice-2.0 §19 additions, the §3.5 D3 deltas, and (new in 1.6) the §3.3 termflow `0.4.0` dependency + §3.3.1 Scala-3.7.1 floor against what Slice 2.1 shipped; §3.5's second bullet (§18 reviewer/driver tuning, S4-3/S4-5) stays open. Audit trails: [`design-2.0.md`](design-2.0.md), [`design-3.5.md`](design-3.5.md), [`design-2.1-tui.md`](design-2.1-tui.md). **Slice 2.1 (TUI, §3.2) ✅ closed 2026-06-01** — plan in [`design-2.1-tui.md`](design-2.1-tui.md); Tasks 2.1.1→2.1.4 plus 2.1.6→2.1.8 landed (read-only `forge tui <feature>`, polling snapshot builder, scrollable log pane, Q&A display, resize-aware themed view, key-help overlay, and the Task 2.1.8 close-out → v1.6). Task 2.1.5 live `AgentEvent` tap is carried forward unless real use needs token-level liveness; the termflow-`0.4.0`-to-Central watch item (rolled to §3.4) has since ✅ resolved upstream — `0.4.0` is on Maven Central as of 2026-04-30, so fresh clones resolve the build (the spec §3.3 note corrects in the next 1.7 revision).
+> **Status:** draft v0.13 — 2026-06-02. **DIRECTION CHANGE (2026-06-02):** the roadmap is re-centered on _repo adaptation_ — Forge grows agentic *senses* on its deterministic spine so it stops running blind on a repo (RepoProfiler, FailureClassifier, ConventionLearner; see §4 Phase 3 and design-rationale **A5**). The compact picture is in "## Status at a glance" below; this paragraph keeps the detailed history. **Phase 1 (MVP) ✅ COMPLETE — Slices 1.1, 1.2, 1.3, and 1.4 all closed.** Phase 2 (MLP) is open; **Slice 2.0 (run observability, §3.1) ✅ closed 2026-05-31** — all three tiers landed (`cost.update` + `session.complete` writers, `forge stats`, work-vs-wait markers, driver raw-dump, clean resume-from-NHI); the final implement-turn `forge stats` capture against real CLI output is a watch item (the writers + fold are unit-tested). **§3.5 driver-respawn-avoidance (the D3 large half) ✅ closed 2026-06-01** — a restart from a mid-exploration implement/fix-up crash now resumes the existing driver session instead of re-paying the full exploration (gap #10), gated by a worktree-safety classifier; `forge stats` folds the resumed turn as a measured saving. The live contract is now **[`forge-design-1.6.md`](forge-design-1.6.md)** (1.4 and 1.5 → redirect stubs), which reconciles the Slice-2.0 §19 additions, the §3.5 D3 deltas, and (new in 1.6) the §3.3 termflow `0.4.0` dependency + §3.3.1 Scala-3.7.1 floor against what Slice 2.1 shipped; §3.5's second bullet (§18 reviewer/driver tuning, S4-3/S4-5) stays open. Audit trails: [`design-2.0.md`](design-2.0.md), [`design-3.5.md`](design-3.5.md), [`design-2.1-tui.md`](design-2.1-tui.md). **Slice 2.1 (TUI, §3.2) ✅ closed 2026-06-01** — plan in [`design-2.1-tui.md`](design-2.1-tui.md); Tasks 2.1.1→2.1.4 plus 2.1.6→2.1.8 landed (read-only `forge tui <feature>`, polling snapshot builder, scrollable log pane, Q&A display, resize-aware themed view, key-help overlay, and the Task 2.1.8 close-out → v1.6). Task 2.1.5 live `AgentEvent` tap is carried forward unless real use needs token-level liveness; the termflow-`0.4.0`-to-Central watch item (rolled to §3.4) has since ✅ resolved upstream — `0.4.0` is on Maven Central as of 2026-04-30, so fresh clones resolve the build (the spec §3.3 note corrects in the next 1.7 revision).
 > Slice 1.1 (Task 1.1.1 → Task 1.1.5 in [`design-2.1.md`](design-2.1.md)) ships
 > both connectors against the v1.2 §7.1 streaming-spec trait with
 > real-CLI integration tests in `forge-it`. Slice 1.2 (Task 1.2.1 → Task 1.2.7 in
@@ -31,6 +31,21 @@
 > stays as v0.7: pick a contained, low-variance first feature, not
 > "Forge builds its own Slice 2.1 (TUI)".
 
+## Status at a glance
+
+| Phase | Theme | State |
+|---|---|---|
+| 0 — Slice 0 | CLI capabilities validated | ✅ closed |
+| 1 — MVP | Single-repo self-host end-to-end | ✅ closed |
+| 2 — MLP | Pleasant single-repo daily-driver | open — Slice 2.0 (observability) ✅, Slice 2.1 (TUI) ✅; §3.4 OSS / §3.5 tuning / a small dogfood-#2 resilience pass still open |
+| 3 — v1.0: **Repo Adaptation** ⭐ | Deterministic spine + agentic senses; works on any repo via its CLAUDE.md + a derived, hashed `RepoProfile` | **next** — implementation contract to open as `forge-design-1.7.md` |
+| 4 — v2.0 | Workspace (multi-repo) + workstreams + daemon + multi-workstream cockpit TUI | needs `forge-design-2.0.md` first |
+| 5 — v3.0+ | Agentic-dev cockpit (knowledge base, reactive review, custom triggers) | concept |
+
+**Live docs:** this roadmap · spec [`forge-design-1.6.md`](forge-design-1.6.md) · [`design-rationale.md`](design-rationale.md) · index [`README.md`](README.md). The per-slice `design-*.md` files (`design-1.4.md` … `design-3.5.md`) are *closed* audit trails kept for historical reference — the index sorts live-vs-historical.
+
+---
+
 ## 0. How to read this
 
 | Phase | Outcome | Source of detail |
@@ -38,7 +53,7 @@
 | 0 — Slice 0 | CLI capabilities validated | [`slice-0/slice-0-report.md`](slice-0/slice-0-report.md) |
 | 1 — Testability MVP | Forge ships its own next slice | `forge-design-1.4.md` §17 slices 1–4 |
 | 2 — MLP | Pleasant single-repo daily-driver | §17 slice 5 + polish |
-| 3 — v1.0 | Single-repo, OSS-ready, role-pluggable | §20 v2 candidates + role-trait refactor |
+| 3 — v1.0: Repo Adaptation | Works on a stranger's repo / any stack via its CLAUDE.md + derived profile; deterministic spine + agentic senses | §4 + `forge-design-1.7.md` (to open) + role-trait refactor |
 | 4 — v2.0 | Forge-instance pivot (multi-repo, daemon, parallel, containerised) | Needs its own design doc (`forge-design-2.0.md`) before work starts |
 | 5 — v3.0+ | Agentic-dev cockpit (knowledge base, reactive review, triggers) | Concept notes only |
 
@@ -494,6 +509,12 @@ prompt diffs in git; they're load-bearing for behaviour.
 > (2026-06-02) — surfaced the implement-driver-doesn't-format and
 > fix-up-hand-formats prompt items (#3/#4 there), plus a fixed `spec→run`
 > restart-recovery regression and small resilience gaps.
+>
+> **Re-scope (2026-06-02):** the formatter findings (#3 implement-driver-doesn't-
+> format, #4 fix-up-hand-formats / never sees the failing log) are **no longer
+> prompt tweaks** — they become **FailureClassifier deterministic-fix routing**
+> in Phase 3 (§4). The prompt log stays the source of truth for genuine *code*
+> failure modes; repo-blindness moves to the adaptation layer.
 
 ### 3.4 OSS-readiness scaffolding
 
@@ -709,10 +730,77 @@ out-scoped the observability slice (full dispositions in
 
 ---
 
-## 4. Phase 3 — v1.0
+## 4. Phase 3 — v1.0: Repo Adaptation ⭐
 
-**Exit criterion:** you'd recommend it to a friend with a Claude/Codex
-license, on their single repo, with a straight face.
+**The pivot.** Phase 3's original exit criterion — "you'd recommend it to a
+friend, on *their* single repo, with a straight face" — is exactly what _repo
+adaptation_ delivers. A friend's repo is not Scala/sbt, and Forge today runs
+blind to it: hardcoded reviewer models, ambient git identity, and no knowledge
+of the repo's format/lint/build/test commands. Both dogfood runs proved the
+cost; dogfood #2 spent **$0.73 on real implement work, then $1.78 / 12 min /
+2 fix-up rounds** fixing a formatting issue the driver could have avoided by
+running `sbt scalafmtAll` — pure repo-blindness waste. Architecture write-up:
+design-rationale **A5**.
+
+**Deterministic spine + agentic senses.** Keep the spine (`Fsm.transition`,
+action log, replay, restart recovery, budget caps, push/PR/merge) deterministic
+— that determinism is *why* the dogfood-#1 projection bug was fixable in one
+session. Add agentic **sensors** at well-defined seams that *perceive and
+propose*; only the core *decides, records, and touches irreversible things*:
+
+- **RepoProfiler** (first encounter / on CLAUDE.md or CI change) — reads
+  CLAUDE.md + AGENTS.md + `.github/workflows` + build files + README → a
+  structured **`RepoProfile`**: build tool; format/lint/build/test/typecheck
+  commands *tiered by determinism* and tagged required/optional; commit
+  identity; merge strategy; workflow shape. Committed at `.forge/profile.json`
+  (reviewable in PRs, shared across machines/workstreams) and **hashed into the
+  action log per run** so a replay uses the profile-as-of-that-run —
+  `Fsm.transition` stays pure-given-inputs. Learning mutates the profile only
+  *between* runs, never inside a transition; that is what preserves replay,
+  audit, and reconstructable cost.
+- **FailureClassifier** (on any CI/build/format gate failure) — failure log →
+  `{kind, confidence, suggestedAction}`; the core routes deterministically:
+  `deterministic-fix` → Forge runs the repo's own tool (no driver turn — the
+  formatter case becomes a ~2s local step, not a paid fix-up round); `code-fix`
+  → driver fix-up **with the real failing log piped in** (dogfood #4 carried
+  only the `gh pr checks` summary, never the `scalafmt: 1 file must be
+  formatted` log); `flaky` → retry; `env`/`rate-limit` → back off and keep
+  polling (dogfood #5's false-NHI).
+- **ConventionLearner** (post-run / periodic) — mines failure→remedy patterns +
+  recurring reviewer comments → profile deltas **and a proposed PR to the repo's
+  own CLAUDE.md** ("implement driver must run `sbt scalafmtAll` before
+  settling"). Human-approved; no autonomous doc mutation.
+
+**Workflow-shape adaptation stays deterministic.** Repo variety
+(review-required? CI required? merge strategy? trunk vs PR?) is handled by a
+**`WorkflowProfile`** that *parameterizes* the still-deterministic §11 FSM — not
+by an LLM composing the workflow shape. Resist making the spine itself agentic
+until command-level adaptation is proven insufficient (design-rationale A5, "the
+honest hard edge").
+
+**Sub-slices (runnable-first, per the AGENTS.md "thin runnable slice" rule):**
+
+- **3.0 — `RepoProfile` model + `ProfileStore` + hash-into-log.** New
+  `profile.snapshot` action (§19). Spike: profile szork *and* forge itself,
+  commit the captured profiles as fixtures. Proves the determinism story before
+  any LLM is in the loop.
+- **3.1 — `FailureClassifier` + deterministic-fix routing.** Highest-ROI first
+  runnable: re-run the dogfood-#2 formatter case and watch the $1.78 / 12-min
+  fix-up collapse to a local `scalafmtAll`. Pipe `gh run view --log-failed` into
+  the fix-up context.
+- **3.2 — `RepoProfiler` LLM sensor** replacing hardcoded reviewer config +
+  commit-identity sourced from the profile (sense the environment, don't inherit
+  ambient defaults — the tiniest instance of the whole thesis).
+- **3.3 — `WorkflowProfile` FSM parameterization** (review / CI / merge-strategy
+  / branch model).
+- **3.4 — `ConventionLearner`** → proposed CLAUDE.md PRs (human-approved).
+- **3.5 — Role-trait refactor** (§4.2 below) — the sensors are the first
+  concrete third+ roles, so the refactor lands *inside* the phase that needs it.
+
+**Exit criterion:** Forge drives a feature end-to-end on a **new, unseen repo
+with a different stack** (e.g. a Node or Python repo), having auto-profiled it,
+with **zero hardcoded-config edits**, and the formatter handled as a local
+deterministic step rather than a paid fix-up round.
 
 ### 4.1 v2 candidates from design §20, picked by lived experience
 
@@ -737,7 +825,11 @@ Probably skip in Phase 3 (re-evaluate in Phase 4):
 ### 4.2 Role-trait refactor (architectural seam for Phase 4–5)
 
 This is the one architectural change Phase 3 should fund even if no
-feature visibly requires it. Phase 1's role-trait *stub* (§2.6) means
+feature visibly requires it — and the adaptation sensors above
+(RepoProfiler / FailureClassifier / ConventionLearner) now make it
+*demand-driven* rather than speculative: they are the first concrete
+third+ roles, so the refactor lands as sub-slice 3.5. Phase 1's
+role-trait *stub* (§2.6) means
 this is a refactor of `Mode`'s implementation and the connector
 factories, not a sweep through every caller — call sites already speak
 to `Role`, not `Mode`.
@@ -760,7 +852,17 @@ to `Role`, not `Mode`.
 
 ---
 
-## 5. Phase 4 — v2.0: Forge-instance pivot
+## 5. Phase 4 — v2.0: Workspace & Workstream platform
+
+> **Terminology (2026-06-02):** what earlier drafts call a Forge *instance*
+> is the **workspace** — one project that may span multiple repos. The
+> destination this phase builds toward is the one stated up front: **one
+> workspace per project, N concurrent workstreams, a multi-workstream cockpit
+> TUI that flags and accepts human input at the right stage of each stream**
+> (NHI, a driver question, a merge gate, a profile-change or convention-PR
+> approval). Phase 3's adaptation layer is the prerequisite — a cockpit driving
+> several repos at once is only safe once each repo is profiled rather than run
+> blind.
 
 **This is the big architectural change**, and it should land as a single
 phase because the four sub-pieces unlock each other:
