@@ -156,8 +156,12 @@ class OrchestratorReviewGateSuite extends munit.FunSuite:
         ),
         s"merge must follow review: $states"
       )
+      // design-3.3 W1: the skip still leaves an honest audit row — an `fsm.transition` into the merge gate. Note the
+      // `fsm.transition` action serializes only from/to *states* (never the event name), and this `PieceAwaitingReview
+      // → PieceAwaitingMerge` edge is identical to a reviewer Approve, so the log cannot distinguish skip from review —
+      // `prCalls == 0` above is the discriminator. Here we just confirm the audit row was recorded.
       val log = os.read(paths(root).featureLog(featureId))
-      assert(log.contains("ReviewSkipped") || log.contains("PieceAwaitingMerge"), log)
+      assert(log.contains("PieceAwaitingMerge"), log)
       assert(out.manifest.pieces.forall(_.status == PieceStatus.Merged), out.manifest.pieces.toString)
 
   tempFixture.test("reviewRequired=true → reviewer consulted (1.6/1.8 path), no skip"): root =>
