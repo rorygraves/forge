@@ -103,13 +103,20 @@ final case class SettleConfig(
   * Phase-3 seam (pure 1.6 behaviour). The `RepoProfile` itself is **not** here — it lives in its own committed
   * `.forge/profile.json` (§6.5) because it is sensor-produced, versioned, and hashed per run, unlike the hand-edited
   * config.
+  *
+  * `workflowGate` (design-3.3) lets the profile's `WorkflowProfile` parameterize the §11 FSM: with it on, a profile
+  * declaring `workflow.reviewRequired = false` makes Forge skip the PR code-review step (the orchestrator emits
+  * `ReviewSkipped` instead of spawning a reviewer). It is `true` by default but inert for an unprofiled / `enabled =
+  * false` run (no profile ⇒ review required ⇒ 1.6/1.8 behaviour); set `false` to keep the fixed 1.6 workflow even for a
+  * profiled repo.
   */
 final case class AdaptConfig(
     enabled: Boolean = true,
     localGate: Boolean = true,
     autofix: Boolean = true,
     llmClassifierOnUnknown: Boolean = true,
-    conventionLearner: Boolean = true
+    conventionLearner: Boolean = true,
+    workflowGate: Boolean = true
 ) derives ReadWriter
 
 /** §18 `github` block. */

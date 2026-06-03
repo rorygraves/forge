@@ -546,6 +546,15 @@ object Fsm:
         val updated = feature.copy(state = to)
         (updated, Vector(fsmTransitionDraft(feature, state, to, piece = Some(state.p))))
 
+      // §11.5 (1.9 / design-3.3) PieceAwaitingReview: the repo's WorkflowProfile.reviewRequired is false → the
+      // orchestrator's entry hook skips the reviewer one-shot and emits ReviewSkipped, advancing straight to the merge
+      // gate (same target as an Approve). The decision is the orchestrator's (it holds the resolved workflow profile);
+      // the FSM stays profile-agnostic (the §6.1 replayability invariant). PR-number guard mirrors the snapshot arms.
+      case FsmEvent.ReviewSkipped(piece, prNumber) if piece == state.p && prNumber == state.prNumber =>
+        val to = FsmState.PieceAwaitingMerge(state.p, state.prNumber)
+        val updated = feature.copy(state = to)
+        (updated, Vector(fsmTransitionDraft(feature, state, to, piece = Some(state.p))))
+
       // §11.5 PieceAwaitingReview: reviewer request_changes → attempts+=1, PieceReviewFailed (gated by maxFixupRounds).
       case FsmEvent.CodeReviewVerdict(piece, PrReviewVerdict.RequestChanges(_)) if piece == state.p =>
         bumpAttemptsAndGate(

@@ -15,11 +15,12 @@ deleted; git holds the full lineage either way.)
 | Doc | What it is |
 |---|---|
 | [`roadmap.md`](roadmap.md) | Multi-horizon product plan. Phase 3 = Repo Adaptation (the current pivot); Phase 4 = workspace/workstream platform; Phase 5 = cockpit. |
-| [`forge-design-1.8.md`](forge-design-1.8.md) | **Live implementation contract** (the spec) — latest revision. Standalone-by-freeze over 1.7: restates only §6/§8.3/§11.4/§11.5/§19 (the pre-PR Build gate, design-3.0 D2), freezing the rest at 1.7. §-numbers preserved, so a "v1.2 §N" reference resolves to the same §N. |
-| [`forge-design-1.7.md`](forge-design-1.7.md) | Phase-3 architectural revision (Repo Adaptation): `RepoProfile` / `WorkflowProfile`, sensor surface (§3/§6/§7/§8/§11/§18/§19). 1.8 freezes its unchanged sections; read both together. |
-| [`forge-design-1.6.md`](forge-design-1.6.md) | The pre-Phase-3 base (Phases 1–2). 1.7/1.8 freeze its unchanged sections. |
+| [`forge-design-1.9.md`](forge-design-1.9.md) | **Live implementation contract** (the spec) — latest revision. Standalone-by-freeze over 1.8: restates only §6/§11.5/§18 (the `WorkflowProfile` begins parameterizing the §11 FSM — review-required, design-3.3), freezing the rest at 1.8. §-numbers preserved, so a "v1.2 §N" reference resolves to the same §N. |
+| [`forge-design-1.8.md`](forge-design-1.8.md) | Phase-3 revision: the pre-PR Build gate (§6/§8.3/§11.4/§11.5/§19, design-3.0 D2). 1.9 freezes its unchanged sections; read together. |
+| [`forge-design-1.7.md`](forge-design-1.7.md) | Phase-3 architectural revision (Repo Adaptation): `RepoProfile` / `WorkflowProfile`, sensor surface (§3/§6/§7/§8/§11/§18/§19). 1.8/1.9 freeze its unchanged sections. |
+| [`forge-design-1.6.md`](forge-design-1.6.md) | The pre-Phase-3 base (Phases 1–2). 1.7/1.8/1.9 freeze its unchanged sections. |
 | [`design-rationale.md`](design-rationale.md) | Why the spec looks the way it does. Decision/rejected/where-to-read per item. **A5** is the Phase-3 architecture direction. |
-| [`design-3.0.md`](design-3.0.md) / [`design-3.1-build-gate.md`](design-3.1-build-gate.md) | Phase-3 implementation plans — Slice 3.0/3.1 (RepoProfile + senses) and the 3.1-D2 pre-PR Build gate. Task breakdowns, status logs, carry-forwards. |
+| [`design-3.0.md`](design-3.0.md) / [`design-3.1-build-gate.md`](design-3.1-build-gate.md) / [`design-3.3.md`](design-3.3.md) | Phase-3 implementation plans — Slice 3.0/3.1 (RepoProfile + senses), the 3.1-D2 pre-PR Build gate, and 3.3 (WorkflowProfile FSM parameterization). Task breakdowns, status logs, carry-forwards. |
 
 ## Reference / support
 

@@ -407,7 +407,7 @@ final class Orchestrator(
     if isLoopTerminal(feature.state) then IO.pure(feature)
     else
       val entry =
-        if justEntered then runEntryHook(feature, driverRef, totalsRef) else IO.pure(Option.empty[FsmEvent])
+        if justEntered then runEntryHook(feature, driverRef, totalsRef, profile) else IO.pure(Option.empty[FsmEvent])
       entry.flatMap {
         // An entry-hook-synthesized event: apply, persist, then re-run the entry hook (steps chain).
         case Some(event) =>
@@ -456,7 +456,8 @@ final class Orchestrator(
   private def runEntryHook(
       feature: Feature,
       driverRef: Ref[IO, Option[ActiveSession]],
-      totalsRef: Ref[IO, CostTotals]
+      totalsRef: Ref[IO, CostTotals],
+      profile: Option[RepoProfile]
   ): IO[Option[FsmEvent]] =
     feature.state match
       case FsmState.Drafting =>
@@ -559,6 +560,14 @@ final class Orchestrator(
                   .launchBuildFixup(feature, s.p, s.attempt)
                   .flatMap(as => store(driverRef, totalsRef, as).as(Some(spawned(as, Some(s.p)))))
         }
+
+      // §11.5 (1.9 / design-3.3) — workflow parameterization: when the resolved profile declares
+      // `workflow.reviewRequired = false` (and `adapt.workflowGate`), skip the PR code-review step entirely by emitting
+      // `ReviewSkipped` instead of letting the reviewer/watcher race run. The decision lives here (the orchestrator
+      // holds the resolved RepoProfile); the FSM stays profile-agnostic. An unprofiled / disabled / `reviewRequired =
+      // true` run returns None below and falls through to the normal reviewer race (1.6/1.8 behaviour).
+      case s: FsmState.PieceAwaitingReview if skipReview(profile) =>
+        IO.pure(Some(FsmEvent.ReviewSkipped(s.p, s.prNumber)))
 
       // Watcher / reviewer / user-Q&A states have no entry side effect: fall through to the race.
       case _ => IO.pure(None)
@@ -900,6 +909,14 @@ final class Orchestrator(
         .filter(c =>
           c.kind == CommandKind.Format && c.required && c.autofix && c.determinism == Determinism.Deterministic
         )
+
+  /** §11.5 (1.9 / design-3.3) — pure decision: should the PR code-review step be skipped for this run? True only when
+    * `adapt.workflowGate` is on AND the resolved profile declares `workflow.reviewRequired = false`. An unprofiled run
+    * (incl. `adapt.enabled = false`, already folded into a `None` profile by [[resolveProfile]]) keeps review required
+    * — the 1.6/1.8 behaviour. Consumed by the `PieceAwaitingReview` entry hook, which emits `ReviewSkipped` when true.
+    */
+  private def skipReview(profile: Option[RepoProfile]): Boolean =
+    config.adapt.workflowGate && profile.exists(!_.workflow.reviewRequired)
 
   /** §8.3 / §19 — the local format gate's audit record: which deterministic autofix commands ran pre-PR. A new
     * `profile.*` kind (the 1.7 §19 table enumerates only `profile.snapshot` / `profile.failure_classified`; this gap is

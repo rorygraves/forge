@@ -103,6 +103,16 @@ enum FsmEvent derives ReadWriter:
     */
   case CodeReviewVerdict(piece: PieceId, verdict: PrReviewVerdict)
 
+  /** §11.5 (1.9 / design-3.3) — the repo's `WorkflowProfile.reviewRequired` is `false`, so Forge skips the PR
+    * code-review step entirely. The orchestrator emits this from the `PieceAwaitingReview` entry hook **instead of**
+    * spawning a reviewer one-shot, advancing `PieceAwaitingReview → PieceAwaitingMerge` with no reviewer call spent.
+    * The decision lives in the orchestrator (which holds the resolved `WorkflowProfile`); the FSM routes purely on the
+    * piece + `prNumber`, staying profile-agnostic — the §6.1 replayability invariant (the FSM never reads the profile).
+    * An unprofiled run, `adapt.workflowGate = false`, or `reviewRequired = true` never emits this, so the 1.6/1.8
+    * review step is byte-identical.
+    */
+  case ReviewSkipped(piece: PieceId, prNumber: PrNumber)
+
   /** §8 — CI discovery finished (either branch-protection required set surfaced, or `checkDiscoveryTimeoutSec`
     * expired). Unblocks the §11.5 `PieceAwaitingCi → PieceAwaitingReview` transition under
     * `CiPolicy.BranchProtectionThenObserved`.
