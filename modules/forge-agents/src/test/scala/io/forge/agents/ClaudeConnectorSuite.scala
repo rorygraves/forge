@@ -492,7 +492,8 @@ class ClaudeConnectorSuite extends munit.FunSuite:
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       refine = ReviewerAssets.PerMethod(schema, systemPrompt),
       profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt),
-      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt)
+      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt),
+      learnConventions = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = ClaudeConnector(binary = fakeClaude.toString, reviewerAssets = Some(assets))
     val review = connector
@@ -530,7 +531,8 @@ class ClaudeConnectorSuite extends munit.FunSuite:
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       refine = ReviewerAssets.PerMethod(schema, systemPrompt),
       profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt),
-      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt)
+      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt),
+      learnConventions = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = ClaudeConnector(binary = fakeClaude.toString, reviewerAssets = Some(assets))
     val profile = connector
@@ -567,7 +569,8 @@ class ClaudeConnectorSuite extends munit.FunSuite:
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       refine = ReviewerAssets.PerMethod(schema, systemPrompt),
       profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt),
-      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt)
+      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt),
+      learnConventions = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = ClaudeConnector(binary = fakeClaude.toString, reviewerAssets = Some(assets))
     val profile = io.forge.core.profile.RepoProfile.fromJson(
@@ -582,6 +585,49 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     assertEquals(c.kind, io.forge.core.profile.FailureKind.DeterministicFix)
     assertEquals(c.suggested, Some(io.forge.core.profile.CommandKind.Format))
     assertEquals(c.confidence, 0.97)
+
+  test("learnConventions end-to-end against a fake CLI: schema-conformant envelope decoded to ConventionDeltas"):
+    // The §7.11 ConventionLearner sensor rides the same reviewer one-shot path; verify it end-to-end with a fake CLI
+    // emitting a convention-deltas-shaped structured_output (Task 3.2).
+    val envelope =
+      """{"type":"result","subtype":"success","is_error":false,"structured_output":
+        |{"addCommands":[{"kind":"format","argv":["sbt","scalafmtAll"],"determinism":"deterministic","required":true,"autofix":true}],
+        |"claudeMdProposal":{"rationale":"two fix-up rounds were spent on formatting","suggestedAddition":"Run `sbt scalafmtAll` before settling."},
+        |"summary":"add the format autofix gate"}}""".stripMargin
+        .replace("\n", " ")
+    val fakeClaude = os.temp(
+      contents = s"""#!/bin/sh
+                    |cat <<'JSON'
+                    |$envelope
+                    |JSON
+                    |""".stripMargin,
+      prefix = "fake-claude-learn-",
+      suffix = ".sh",
+      deleteOnExit = true
+    )
+    os.perms.set(fakeClaude, "rwx------")
+    val schema = os.temp(contents = """{"type":"object"}""", prefix = "schema-", suffix = ".json", deleteOnExit = true)
+    val systemPrompt = os.temp(contents = "Learn conventions", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val assets = ReviewerAssets(
+      designReview = ReviewerAssets.PerMethod(schema, systemPrompt),
+      prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
+      refine = ReviewerAssets.PerMethod(schema, systemPrompt),
+      profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt),
+      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt),
+      learnConventions = ReviewerAssets.PerMethod(schema, systemPrompt)
+    )
+    val connector = ClaudeConnector(binary = fakeClaude.toString, reviewerAssets = Some(assets))
+    val profile = io.forge.core.profile.RepoProfile.fromJson(
+      """{"schemaVersion":1,"buildTool":"sbt","commands":[],"commitIdentity":{"name":"x","email":"y"},
+        |"workflow":{"reviewRequired":true,"ciRequiredChecks":[],"branchModel":"trunk_based","mergeStrategy":"squash"}}""".stripMargin
+    )
+    val d = connector
+      .learnConventions(ConventionLearnerInput(FeatureId("feat-1"), profile, None, Vector.empty))
+      .unsafeRunSync()
+    assertEquals(d.addCommands.map(_.kind.asString), Vector("format"))
+    assert(d.addCommands.head.autofix)
+    assertEquals(d.claudeMdProposal.map(_.suggestedAddition), Some("Run `sbt scalafmtAll` before settling."))
+    assertEquals(d.summary, "add the format autofix gate")
 
   test("reviewer end-to-end against a fake CLI: Claude 2.1.153 `result`-string envelope decoded to DesignReview"):
     // Fake `claude` echoing the *current* (2.1.153) envelope shape: no structured_output field; the schema-conformant
@@ -609,7 +655,8 @@ class ClaudeConnectorSuite extends munit.FunSuite:
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       refine = ReviewerAssets.PerMethod(schema, systemPrompt),
       profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt),
-      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt)
+      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt),
+      learnConventions = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = ClaudeConnector(binary = fakeClaude.toString, reviewerAssets = Some(assets))
     val review = connector
@@ -645,7 +692,8 @@ class ClaudeConnectorSuite extends munit.FunSuite:
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       refine = ReviewerAssets.PerMethod(schema, systemPrompt),
       profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt),
-      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt)
+      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt),
+      learnConventions = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = ClaudeConnector(binary = fakeClaude.toString, reviewerAssets = Some(assets))
     val review = connector
@@ -673,7 +721,8 @@ class ClaudeConnectorSuite extends munit.FunSuite:
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       refine = ReviewerAssets.PerMethod(schema, systemPrompt),
       profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt),
-      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt)
+      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt),
+      learnConventions = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = ClaudeConnector(binary = fakeClaude.toString, reviewerAssets = Some(assets))
     val r = connector.reviewDesign(DesignReviewInput(FeatureId("feat-1"), 1, "x")).attempt.unsafeRunSync()

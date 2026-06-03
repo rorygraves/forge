@@ -8,11 +8,10 @@ import io.forge.core.FeatureId
 import io.forge.core.paths.ForgePaths
 import io.forge.core.profile.{
   BranchModel,
-  Classification,
   CommandKind,
   CommitIdentity,
+  ConventionDeltas,
   Determinism,
-  FailureKind,
   MergeStrategy,
   RepoCommand,
   RepoProfile,
@@ -21,21 +20,20 @@ import io.forge.core.profile.{
 
 import scala.concurrent.duration.*
 
-/** Task 3.1.4 — live wiring smoke for the §7.11 `FailureClassifier` sensor (`Connector.classifyFailure`). Runs the
-  * **real** Claude / Codex CLI against the shipped `failure-classifier.json` schema + `failure-classifier.<cli>.md`
-  * prompt, feeding the real dogfood-#2 scalafmt failure plus a profile that exposes `sbt scalafmtAll`, and asserts the
-  * structured output decodes cleanly into a [[Classification]] and that the model perceives it as a `DeterministicFix`
-  * (the high-value collapse case). This is the "capture a real Claude/Codex structured-output sample before pinning the
-  * schema" discipline as an executable check — the deterministic decode is proven in
-  * `FailureClassificationDecoderSuite`; this proves the live CLI honours the schema and the prompt steers the
-  * perception correctly.
+/** Task 3.2 — live wiring smoke for the §7.11 `ConventionLearner` sensor (`Connector.learnConventions`). Runs the
+  * **real** Claude / Codex CLI against the shipped `convention-deltas.json` schema + `learn-conventions.<cli>.md`
+  * prompt, feeding the canonical dogfood signal — a `DeterministicFix` that was paid as a `DriverFixup` because the
+  * profile (deliberately) declares no `format` autofix — and asserts the structured output decodes cleanly into a
+  * [[ConventionDeltas]]. The deterministic decode is proven in `ConventionDeltasDecoderSuite`; this proves the live CLI
+  * honours the schema and the prompt steers the perception (the model should propose the missing `format` command
+  * and/or a CLAUDE.md note rather than nothing).
   *
   * **Opt-in by default.** Real CLI spend; even with the binary on PATH this skips unless
-  * `FORGE_IT_RUN_CLASSIFIER_SMOKE=1`. Per-connector escape hatches `FORGE_IT_SKIP_CLAUDE=1` / `FORGE_IT_SKIP_CODEX=1`
-  * (matching [[RepoProfilerSmokeSuite]]); Claude model pinnable via `FORGE_IT_CLAUDE_MODEL` (default = CLI default),
-  * Codex via `FORGE_IT_CODEX_MODEL` (default `gpt-5.3-codex`).
+  * `FORGE_IT_RUN_LEARNER_SMOKE=1`. Per-connector escape hatches `FORGE_IT_SKIP_CLAUDE=1` / `FORGE_IT_SKIP_CODEX=1`
+  * (matching [[FailureClassifierSmokeSuite]]); Claude model pinnable via `FORGE_IT_CLAUDE_MODEL` (default = CLI
+  * default), Codex via `FORGE_IT_CODEX_MODEL` (default `gpt-5.3-codex`).
   */
-class FailureClassifierSmokeSuite extends munit.FunSuite:
+class ConventionLearnerSmokeSuite extends munit.FunSuite:
 
   override def munitTimeout: Duration = 600.seconds
 
@@ -44,7 +42,7 @@ class FailureClassifierSmokeSuite extends munit.FunSuite:
       case p if os.exists(p / bin) => p / bin
     }
 
-  private val optIn: Boolean = sys.env.get("FORGE_IT_RUN_CLASSIFIER_SMOKE").contains("1")
+  private val optIn: Boolean = sys.env.get("FORGE_IT_RUN_LEARNER_SMOKE").contains("1")
   private val claudeOnPath: Option[os.Path] = onPath("claude")
   private val codexOnPath: Option[os.Path] = onPath("codex")
   private val claudeCanRun: Boolean =
@@ -56,7 +54,7 @@ class FailureClassifierSmokeSuite extends munit.FunSuite:
   private val limits: ReviewerLimits = ReviewerLimits(wallClockTimeout = 5.minutes)
 
   private lazy val installedPaths: ForgePaths =
-    val home = os.temp.dir(prefix = "forge-it-classifier-home-", deleteOnExit = true)
+    val home = os.temp.dir(prefix = "forge-it-learner-home-", deleteOnExit = true)
     val paths = ForgePaths(repoRoot = os.pwd, home = home)
     AssetInstaller.installIfMissing(paths).unsafeRunSync() match
       case Right(_) => paths
@@ -83,58 +81,67 @@ class FailureClassifierSmokeSuite extends munit.FunSuite:
       upickle.default.read[PriceTable](scala.io.Source.fromInputStream(stream)(using scala.io.Codec("UTF-8")).mkString)
     finally stream.close()
 
-  /** A profile that exposes `sbt scalafmtAll` as the deterministic, in-place format autofix — so the model can name a
-    * `suggested` kind that actually maps to a routable command.
-    */
-  private val scalafmtProfile: RepoProfile = RepoProfile(
+  /** A profile that deliberately omits a `format` autofix — so the learner has a genuine gap to propose filling. */
+  private val profileMissingFormat: RepoProfile = RepoProfile(
     schemaVersion = RepoProfile.CurrentSchemaVersion,
     buildTool = "sbt",
     commands = Vector(
       RepoCommand(
-        CommandKind.Format,
-        Vector("sbt", "scalafmtAll"),
+        CommandKind.Build,
+        Vector("sbt", "compile"),
         Determinism.Deterministic,
         required = true,
-        autofix = true
+        autofix = false
       )
     ),
     commitIdentity = CommitIdentity("forge[bot]", "forge@users.noreply.github.com"),
     workflow = WorkflowProfile(true, Vector("backend"), BranchModel.TrunkBased, MergeStrategy.Squash)
   )
 
-  /** The real dogfood-#2 failing log (the case the §8 collapse was designed around). */
-  private val scalafmtFailureLog: String =
-    """[warn] scalafmt: src/main/scala/szork/MediaNetworkConfig.scala isn't formatted properly!
-      |[error] scalafmt: 1 files must be formatted (/home/runner/work/szork/szork)""".stripMargin
-
-  private def classifierInput: FailureClassifierInput =
-    FailureClassifierInput(
+  /** The canonical dogfood signal: a scalafmt `DeterministicFix` the run paid as a `DriverFixup` (because the profile
+    * had no autofix) — exactly the pattern a learned convention should prevent next time.
+    */
+  private def learnerInput: ConventionLearnerInput =
+    ConventionLearnerInput(
       FeatureId("smoke-feat"),
-      gate = "ci",
-      failureLog = scalafmtFailureLog,
-      profile = scalafmtProfile
+      profile = profileMissingFormat,
+      claudeDoc = Some("# CLAUDE.md\n\nForge drives this repo."),
+      failures = Vector(
+        ObservedFailure(
+          gate = "ci",
+          kind = "deterministic_fix",
+          suggested = Some("format"),
+          route = "DriverFixup",
+          evidence = "scalafmt: 1 files must be formatted"
+        )
+      )
     )
 
-  private def assertPlausible(c: Classification): Unit =
-    assert(c.confidence >= 0.0 && c.confidence <= 1.0, s"confidence out of range: $c")
-    assert(c.evidence.nonEmpty, s"evidence should be non-empty: $c")
-    assertEquals(c.kind, FailureKind.DeterministicFix, s"a scalafmt failure should be a deterministic fix: $c")
-    assertEquals(c.suggested, Some(CommandKind.Format), s"should suggest the format command: $c")
+  /** The live output is judged for *plausibility*, not byte-equality (the model's perception of the run is its own): a
+    * non-empty summary, and either a proposed `format` command or a CLAUDE.md note — i.e. it learned *something*.
+    */
+  private def assertPlausible(d: ConventionDeltas): Unit =
+    assert(d.summary.nonEmpty, s"summary should be non-empty: $d")
+    assert(
+      d.addCommands.nonEmpty || d.claudeMdProposal.isDefined,
+      s"a paid format fix-up should yield at least one proposal: $d"
+    )
+    d.addCommands.foreach(c => assert(c.argv.nonEmpty, s"a proposed command needs argv: $c"))
 
-  test("classifyFailure (claude) on a real scalafmt failure → DeterministicFix(Format)".flaky):
-    assume(claudeCanRun, "set FORGE_IT_RUN_CLASSIFIER_SMOKE=1 with `claude` on PATH")
+  test("learnConventions (claude) on a paid format fix-up → a plausible proposal".flaky):
+    assume(claudeCanRun, "set FORGE_IT_RUN_LEARNER_SMOKE=1 with `claude` on PATH")
     val connector =
       ClaudeConnector(
         binary = claudeOnPath.get.toString,
         reviewerAssets = Some(assetsFor("claude")),
         reviewerModel = claudeModel
       )
-    new RealReviewerCall(connector).classifyFailure(classifierInput, limits).unsafeRunSync() match
-      case ReviewerOutcome.Settled(c) => assertPlausible(c)
-      case other => fail(s"expected a settled Classification, got $other")
+    new RealReviewerCall(connector).learnConventions(learnerInput, limits).unsafeRunSync() match
+      case ReviewerOutcome.Settled(d) => assertPlausible(d)
+      case other => fail(s"expected a settled ConventionDeltas, got $other")
 
-  test("classifyFailure (codex) on a real scalafmt failure → DeterministicFix(Format)".flaky):
-    assume(codexCanRun, "set FORGE_IT_RUN_CLASSIFIER_SMOKE=1 with `codex` on PATH")
+  test("learnConventions (codex) on a paid format fix-up → a plausible proposal".flaky):
+    assume(codexCanRun, "set FORGE_IT_RUN_LEARNER_SMOKE=1 with `codex` on PATH")
     val connector = CodexConnector(
       binary = codexOnPath.get.toString,
       model = codexModel,
@@ -142,6 +149,6 @@ class FailureClassifierSmokeSuite extends munit.FunSuite:
       sessionSettings = CodexSessionSettings.driver(sandbox = "read-only", approvalMode = "never"),
       reviewerAssets = Some(assetsFor("codex"))
     )
-    new RealReviewerCall(connector).classifyFailure(classifierInput, limits).unsafeRunSync() match
-      case ReviewerOutcome.Settled(c) => assertPlausible(c)
-      case other => fail(s"expected a settled Classification, got $other")
+    new RealReviewerCall(connector).learnConventions(learnerInput, limits).unsafeRunSync() match
+      case ReviewerOutcome.Settled(d) => assertPlausible(d)
+      case other => fail(s"expected a settled ConventionDeltas, got $other")

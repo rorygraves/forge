@@ -2,6 +2,7 @@ package io.forge.app.reviewer
 
 import cats.effect.IO
 import io.forge.agents.{
+  ConventionLearnerInput,
   DesignReview,
   DesignReviewInput,
   FailureClassifierInput,
@@ -11,7 +12,7 @@ import io.forge.agents.{
   RefineResult,
   RepoProfilerInput
 }
-import io.forge.core.profile.{Classification, RepoProfile}
+import io.forge.core.profile.{Classification, ConventionDeltas, RepoProfile}
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -53,6 +54,13 @@ trait ReviewerCall:
     * the orchestrator keep the rules `Escalate` rather than block on a stalled sensor.
     */
   def classifyFailure(input: FailureClassifierInput, limits: ReviewerLimits): IO[ReviewerOutcome[Classification]]
+
+  /** §7.11 `ConventionLearner` sensor under the same wall-clock cap (Task 3.2). Run out-of-band on the transition to
+    * `FeatureDone` (§11.7), so — like [[profileRepo]] — it is not on the feature loop; it shares the boundary so the
+    * "kill on stall" backstop and [[ReviewerOutcome]] surface apply. Advisory: the orchestrator drops a
+    * [[ReviewerOutcome.Timeout]] / failure rather than blocking the (already-reached) `FeatureDone` (§14.2 posture).
+    */
+  def learnConventions(input: ConventionLearnerInput, limits: ReviewerLimits): IO[ReviewerOutcome[ConventionDeltas]]
 
 /** §7.9 reviewer / refine wall-clock cap. Per-call only; no per-call cost cap (see [[ReviewerCall]] docstring and
   * carry-forward S4-3). The orchestrator (Task 1.4.10) populates this from `.forge/config.json` §18 reviewer settle

@@ -113,3 +113,46 @@ object ReviewerPrompts:
        |${input.failureLog.stripLineEnd}
        |```
        |""".stripMargin
+
+  /** §7.11 `ConventionLearner` body (Task 3.2) — packages the run's observed failures, the profile's known commands,
+    * and the current CLAUDE.md under stable headers the `learn-conventions.<cli>.md` system prompt refers to. The known
+    * commands are rendered so the model proposes an `addCommands` entry the repo doesn't already have (rather than
+    * duplicating one); the observed failures carry the route the spine chose so the model can tell which failures a new
+    * convention would have avoided; the CLAUDE.md is included so a `claudeMdProposal` is phrased relative to what the
+    * doc already says. A missing CLAUDE.md / empty failure list is rendered as an explicit "(none)".
+    */
+  def learnConventionsBody(input: ConventionLearnerInput): String =
+    val commands =
+      if input.profile.commands.isEmpty then "(none)"
+      else
+        input.profile.commands
+          .map { c =>
+            val argv = c.argv.mkString(" ")
+            s"- ${c.kind.asString}: `$argv` (${c.determinism.asString}, autofix=${c.autofix}, required=${c.required})"
+          }
+          .mkString("\n")
+    val failures =
+      if input.failures.isEmpty then "(none)"
+      else
+        input.failures
+          .map { f =>
+            val sug = f.suggested.map(s => s", suggested=$s").getOrElse("")
+            s"- ${f.gate}/${f.kind} → ${f.route}$sug: ${f.evidence}"
+          }
+          .mkString("\n")
+    val claude = input.claudeDoc.map(_.stripLineEnd).filter(_.nonEmpty).getOrElse("(none)")
+    s"""## Feature
+       |${input.featureId.value}
+       |
+       |## Build tool
+       |${input.profile.buildTool}
+       |
+       |## Known commands
+       |$commands
+       |
+       |## Observed failures (this feature's run)
+       |$failures
+       |
+       |## Current CLAUDE.md
+       |$claude
+       |""".stripMargin

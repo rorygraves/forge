@@ -74,7 +74,8 @@ object ConnectorFactory:
       prReview = per("code-review.json", "code-review"),
       refine = per("refine.json", "refine"),
       profileRepo = per("repo-profile.json", "repo-profile"),
-      classifyFailure = per("failure-classifier.json", "failure-classifier")
+      classifyFailure = per("failure-classifier.json", "failure-classifier"),
+      learnConventions = per("convention-deltas.json", "learn-conventions")
     )
 
   /** §7.10(b) — Codex cost telemetry needs the price table. A missing or malformed table degrades to

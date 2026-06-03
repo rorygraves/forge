@@ -302,6 +302,10 @@ class RealSideEffectsSuite extends munit.FunSuite:
         input: io.forge.agents.FailureClassifierInput
     ): IO[io.forge.core.profile.Classification] =
       IO.raiseError(new NotImplementedError)
+    def learnConventions(
+        input: io.forge.agents.ConventionLearnerInput
+    ): IO[io.forge.core.profile.ConventionDeltas] =
+      IO.raiseError(new NotImplementedError)
     def schemaMechanism: SchemaMechanism = SchemaMechanism.Native
     def costFrom(event: AgentEvent): Option[Cost] = None
 

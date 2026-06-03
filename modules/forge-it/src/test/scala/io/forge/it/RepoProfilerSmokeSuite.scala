@@ -57,7 +57,9 @@ class RepoProfilerSmokeSuite extends munit.FunSuite:
       refine = ReviewerAssets.PerMethod(schemas / "refine.json", prompts / s"refine.$cli.md"),
       profileRepo = ReviewerAssets.PerMethod(schemas / "repo-profile.json", prompts / s"repo-profile.$cli.md"),
       classifyFailure =
-        ReviewerAssets.PerMethod(schemas / "failure-classifier.json", prompts / s"failure-classifier.$cli.md")
+        ReviewerAssets.PerMethod(schemas / "failure-classifier.json", prompts / s"failure-classifier.$cli.md"),
+      learnConventions =
+        ReviewerAssets.PerMethod(schemas / "convention-deltas.json", prompts / s"learn-conventions.$cli.md")
     )
 
   private def loadPriceTable: PriceTable =

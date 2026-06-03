@@ -4,8 +4,10 @@ import io.forge.core.{Question, QuestionSeverity}
 import io.forge.core.profile.{
   BranchModel,
   Classification,
+  ClaudeMdProposal,
   CommandKind,
   CommitIdentity,
+  ConventionDeltas,
   Determinism,
   FailureKind,
   MergeStrategy,
@@ -139,6 +141,39 @@ object ReviewDecoders:
       suggested <- suggestedCommandKind(obj.get("suggested"))
       evidence <- stringOrLeft(obj.get("evidence"), "evidence")
     yield Classification(kind, confidence, suggested, evidence)
+
+  /** `convention-deltas.json` (§7.11 `ConventionLearner`, Task 3.2):
+    * {{{
+    *   {
+    *     "addCommands": [{ "kind", "argv": [string], "determinism", "required": bool, "autofix": bool }],
+    *     "claudeMdProposal": { "rationale": string, "suggestedAddition": string } | null,
+    *     "summary": string
+    *   }
+    * }}}
+    *
+    * `addCommands` reuses the same per-command decode as `repo-profile.json` (so the accepted enum wire strings can't
+    * drift); a missing/empty array ⇒ no command deltas. `claudeMdProposal` is optional (absent or `null` ⇒ `None`) —
+    * the learner proposes a doc edit only when it has one. The orchestrator dedups `addCommands` against the live
+    * profile before saving ([[ConventionDeltas.freshCommands]]).
+    */
+  def conventionDeltas(v: Value): Either[String, ConventionDeltas] =
+    for
+      obj <- objectOrLeft(v, "convention-deltas root")
+      addCommands <- repoCommands(obj.get("addCommands"))
+      proposal <- claudeMdProposal(obj.get("claudeMdProposal"))
+      summary <- stringOrLeft(obj.get("summary"), "summary")
+    yield ConventionDeltas(addCommands, proposal, summary)
+
+  private def claudeMdProposal(v: Option[Value]): Either[String, Option[ClaudeMdProposal]] =
+    v match
+      case None | Some(ujson.Null) => Right(None)
+      case Some(value) =>
+        objectOrLeft(value, "claudeMdProposal").flatMap { obj =>
+          for
+            rationale <- stringOrLeft(obj.get("rationale"), "claudeMdProposal.rationale")
+            addition <- stringOrLeft(obj.get("suggestedAddition"), "claudeMdProposal.suggestedAddition")
+          yield Some(ClaudeMdProposal(rationale, addition))
+        }
 
   private def suggestedCommandKind(v: Option[Value]): Either[String, Option[CommandKind]] =
     v match

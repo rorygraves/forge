@@ -5,7 +5,7 @@ import fs2.Stream
 import io.forge.agents.*
 import io.forge.core.{QuestionMechanism, SchemaMechanism}
 import io.forge.core.cost.Cost
-import io.forge.core.profile.{Classification, RepoProfile}
+import io.forge.core.profile.{Classification, ConventionDeltas, RepoProfile}
 
 /** Minimal [[Connector]] for [[ReviewerCall]] unit tests. Each of the three reviewer methods is backed by a
   * programmable `IO` so individual cases can install `IO.never` (timeout), `IO.pure(x)` (clean settle), or
@@ -22,6 +22,7 @@ final class FakeReviewerConnector(
     refineIO: IO[RefineResult],
     profileRepoIO: IO[RepoProfile],
     classifyFailureIO: IO[Classification],
+    learnConventionsIO: IO[ConventionDeltas],
     val cancelled: Ref[IO, Boolean]
 ) extends Connector:
 
@@ -60,6 +61,8 @@ final class FakeReviewerConnector(
     profileRepoIO.onCancel(cancelled.set(true))
   override def classifyFailure(input: FailureClassifierInput): IO[Classification] =
     classifyFailureIO.onCancel(cancelled.set(true))
+  override def learnConventions(input: ConventionLearnerInput): IO[ConventionDeltas] =
+    learnConventionsIO.onCancel(cancelled.set(true))
 
   override def costFrom(event: AgentEvent): Option[Cost] = None
 
@@ -70,8 +73,18 @@ object FakeReviewerConnector:
       refineIO: IO[RefineResult] = IO.raiseError(new IllegalStateException("refineIO not programmed")),
       profileRepoIO: IO[RepoProfile] = IO.raiseError(new IllegalStateException("profileRepoIO not programmed")),
       classifyFailureIO: IO[Classification] =
-        IO.raiseError(new IllegalStateException("classifyFailureIO not programmed"))
+        IO.raiseError(new IllegalStateException("classifyFailureIO not programmed")),
+      learnConventionsIO: IO[ConventionDeltas] =
+        IO.raiseError(new IllegalStateException("learnConventionsIO not programmed"))
   ): IO[FakeReviewerConnector] =
     Ref.of[IO, Boolean](false).map { cancelled =>
-      new FakeReviewerConnector(designReviewIO, prReviewIO, refineIO, profileRepoIO, classifyFailureIO, cancelled)
+      new FakeReviewerConnector(
+        designReviewIO,
+        prReviewIO,
+        refineIO,
+        profileRepoIO,
+        classifyFailureIO,
+        learnConventionsIO,
+        cancelled
+      )
     }

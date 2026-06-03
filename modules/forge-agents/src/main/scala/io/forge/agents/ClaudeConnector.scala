@@ -173,6 +173,13 @@ final class ClaudeConnector(
       ReviewDecoders.failureClassification
     )
 
+  def learnConventions(input: ConventionLearnerInput): IO[io.forge.core.profile.ConventionDeltas] =
+    runReviewer(
+      assets => assets.learnConventions,
+      ReviewerPrompts.learnConventionsBody(input),
+      ReviewDecoders.conventionDeltas
+    )
+
   // --- telemetry ----
 
   def costFrom(event: AgentEvent): Option[Cost] = event match

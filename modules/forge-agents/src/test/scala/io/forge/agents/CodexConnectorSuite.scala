@@ -663,7 +663,8 @@ class CodexConnectorSuite extends munit.FunSuite:
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       refine = ReviewerAssets.PerMethod(schema, systemPrompt),
       profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt),
-      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt)
+      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt),
+      learnConventions = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = CodexConnector(
       binary = fakeCodex.toString,
@@ -703,7 +704,8 @@ class CodexConnectorSuite extends munit.FunSuite:
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       refine = ReviewerAssets.PerMethod(schema, systemPrompt),
       profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt),
-      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt)
+      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt),
+      learnConventions = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = CodexConnector(
       binary = fakeCodex.toString,
@@ -741,7 +743,8 @@ class CodexConnectorSuite extends munit.FunSuite:
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       refine = ReviewerAssets.PerMethod(schema, systemPrompt),
       profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt),
-      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt)
+      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt),
+      learnConventions = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = CodexConnector(
       binary = fakeCodex.toString,
@@ -762,6 +765,50 @@ class CodexConnectorSuite extends munit.FunSuite:
     assertEquals(c.kind, io.forge.core.profile.FailureKind.DeterministicFix)
     assertEquals(c.suggested, Some(io.forge.core.profile.CommandKind.Format))
 
+  test("learnConventions end-to-end against a fake CLI: schema-conformant payload decoded to ConventionDeltas"):
+    // The §7.11 ConventionLearner sensor rides the Codex reviewer one-shot path; verify it end-to-end (Task 3.2).
+    val deltaJson =
+      """{\"addCommands\":[{\"kind\":\"format\",\"argv\":[\"sbt\",\"scalafmtAll\"],\"determinism\":\"deterministic\",""" +
+        """\"required\":true,\"autofix\":true}],""" +
+        """\"claudeMdProposal\":{\"rationale\":\"two fix-up rounds on formatting\",\"suggestedAddition\":\"Run scalafmtAll before settling.\"},""" +
+        """\"summary\":\"add the format autofix gate\"}"""
+    val lines = Seq(
+      """{"type":"thread.started","thread_id":"019e5e65-1caf-7210-a79b-239db0bafb43"}""",
+      """{"type":"turn.started"}""",
+      s"""{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"$deltaJson"}}""",
+      """{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":5}}"""
+    )
+    val script = "#!/bin/sh\n" + lines.map(l => s"printf '%s\\n' '${l.replace("'", "'\\''")}'").mkString("\n") + "\n"
+    val fakeCodex = os.temp(contents = script, prefix = "fake-codex-learn-", suffix = ".sh", deleteOnExit = true)
+    os.perms.set(fakeCodex, "rwx------")
+    val schema = os.temp(contents = """{"type":"object"}""", prefix = "schema-", suffix = ".json", deleteOnExit = true)
+    val systemPrompt = os.temp(contents = "Learn conventions", prefix = "sys-", suffix = ".md", deleteOnExit = true)
+    val assets = ReviewerAssets(
+      designReview = ReviewerAssets.PerMethod(schema, systemPrompt),
+      prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
+      refine = ReviewerAssets.PerMethod(schema, systemPrompt),
+      profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt),
+      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt),
+      learnConventions = ReviewerAssets.PerMethod(schema, systemPrompt)
+    )
+    val connector = CodexConnector(
+      binary = fakeCodex.toString,
+      model = model,
+      priceTable = emptyPrices,
+      sessionSettings = defaultSettings,
+      reviewerAssets = Some(assets)
+    )
+    val profile = io.forge.core.profile.RepoProfile.fromJson(
+      """{"schemaVersion":1,"buildTool":"sbt","commands":[],"commitIdentity":{"name":"x","email":"y"},
+        |"workflow":{"reviewRequired":true,"ciRequiredChecks":[],"branchModel":"trunk_based","mergeStrategy":"squash"}}""".stripMargin
+    )
+    val d = connector
+      .learnConventions(ConventionLearnerInput(FeatureId("feat-1"), profile, None, Vector.empty))
+      .unsafeRunSync()
+    assertEquals(d.addCommands.map(_.kind.asString), Vector("format"))
+    assert(d.addCommands.head.autofix)
+    assertEquals(d.summary, "add the format autofix gate")
+
   test("reviewer end-to-end against a fake CLI: non-zero exit surfaces as ReviewerProcessFailure"):
     val fakeCodex = os.temp(
       contents = """#!/bin/sh
@@ -781,7 +828,8 @@ class CodexConnectorSuite extends munit.FunSuite:
       prReview = ReviewerAssets.PerMethod(schema, systemPrompt),
       refine = ReviewerAssets.PerMethod(schema, systemPrompt),
       profileRepo = ReviewerAssets.PerMethod(schema, systemPrompt),
-      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt)
+      classifyFailure = ReviewerAssets.PerMethod(schema, systemPrompt),
+      learnConventions = ReviewerAssets.PerMethod(schema, systemPrompt)
     )
     val connector = CodexConnector(
       binary = fakeCodex.toString,
@@ -806,7 +854,8 @@ class CodexConnectorSuite extends munit.FunSuite:
       prReview = ReviewerAssets.PerMethod(schemaPr, systemPrompt),
       refine = ReviewerAssets.PerMethod(schemaRf, systemPrompt),
       profileRepo = ReviewerAssets.PerMethod(schemaRf, systemPrompt),
-      classifyFailure = ReviewerAssets.PerMethod(schemaRf, systemPrompt)
+      classifyFailure = ReviewerAssets.PerMethod(schemaRf, systemPrompt),
+      learnConventions = ReviewerAssets.PerMethod(schemaRf, systemPrompt)
     )
     // Each method's argv carries its own --output-schema path. Exercise the wiring via execArgv directly using the
     // settings the connector would build per-call.

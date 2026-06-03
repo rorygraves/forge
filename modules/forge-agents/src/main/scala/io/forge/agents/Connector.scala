@@ -109,6 +109,16 @@ trait Connector:
     */
   def classifyFailure(input: FailureClassifierInput): IO[io.forge.core.profile.Classification]
 
+  /** `ConventionLearner` sensor (§7.11, Task 3.2): perceive a finished feature's failure→remedy patterns (`failures` +
+    * the current `profile` + `claudeDoc`) into proposed [[io.forge.core.profile.ConventionDeltas]]. A reviewer-side
+    * one-shot exactly like [[profileRepo]] — Native schema (`~/.forge/schemas/convention-deltas.json`) +
+    * `learn-conventions.<cli>.md` system prompt + a [[ReviewDecoders.conventionDeltas]] decode. Run **out of band** on
+    * the transition to `FeatureDone` (§11.7), never gating it; its proposals are applied advisory-only (profile deltas
+    * via `ProfileStore.save`, the CLAUDE.md edit persisted for human review). Wall-clock-capped orchestrator-side via
+    * the `ReviewerCall` boundary; a stall/failure is dropped (the §14.2 refinery posture).
+    */
+  def learnConventions(input: ConventionLearnerInput): IO[io.forge.core.profile.ConventionDeltas]
+
   /** Schema enforcement (§7.4/§7.5). */
   def schemaMechanism: SchemaMechanism
 

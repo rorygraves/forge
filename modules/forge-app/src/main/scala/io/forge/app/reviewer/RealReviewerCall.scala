@@ -3,6 +3,7 @@ package io.forge.app.reviewer
 import cats.effect.IO
 import io.forge.agents.{
   Connector,
+  ConventionLearnerInput,
   DesignReview,
   DesignReviewInput,
   FailureClassifierInput,
@@ -13,7 +14,7 @@ import io.forge.agents.{
   RepoProfilerInput,
   ReviewerError
 }
-import io.forge.core.profile.{Classification, RepoProfile}
+import io.forge.core.profile.{Classification, ConventionDeltas, RepoProfile}
 
 /** §7.9 wall-clock cap implementation. Each of the three methods runs the underlying `connector.review*` IO under
   * `.attempt` so [[ReviewerError]] subclasses become [[ReviewerOutcome.AdapterFailure]] (preserving sub-variant
@@ -60,6 +61,12 @@ final class RealReviewerCall(connector: Connector) extends ReviewerCall:
       limits: ReviewerLimits
   ): IO[ReviewerOutcome[Classification]] =
     runWithCap(limits, connector.classifyFailure(input))
+
+  override def learnConventions(
+      input: ConventionLearnerInput,
+      limits: ReviewerLimits
+  ): IO[ReviewerOutcome[ConventionDeltas]] =
+    runWithCap(limits, connector.learnConventions(input))
 
   private def runWithCap[A](
       limits: ReviewerLimits,

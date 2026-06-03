@@ -116,3 +116,28 @@ final case class FailureClassifierInput(
     failureLog: String,
     profile: io.forge.core.profile.RepoProfile
 )
+
+// --- ConventionLearner (§7.11 sensor, Task 3.2) ----
+
+/** One classified gate failure the feature hit during its run, distilled from a §19 `profile.failure_classified` action
+  * — the failure→remedy signal the `ConventionLearner` mines. `route` is the [[io.forge.core.profile.FixupRoute]] label
+  * the spine chose (a `DriverFixup` is a round the repo paid for; a `RunLocalCommand` shows the profile already had the
+  * remedy), so the learner can tell which failures a new convention would have *avoided*.
+  */
+final case class ObservedFailure(gate: String, kind: String, suggested: Option[String], route: String, evidence: String)
+
+/** §7.11 `ConventionLearner` input — what the post-run sensor reads to propose
+  * [[io.forge.core.profile.ConventionDeltas]] after a feature reaches `FeatureDone` (§11.7). It mines `failures` (the
+  * run's classified gate failures) against the current `profile` and `claudeDoc` to propose (a) gate commands the
+  * profile was missing and (b) a CLAUDE.md addition, **proposing only** — never mutating either autonomously. The
+  * orchestrator gathers `failures` from the feature's action log and only consults the sensor when `failures` is
+  * non-empty (the §7.11 cost lever — no failure signal, no sensor call). The connector renders these into a stable
+  * prompt body ([[ReviewerPrompts.learnConventionsBody]]) and decodes the structured reply via
+  * [[ReviewDecoders.conventionDeltas]].
+  */
+final case class ConventionLearnerInput(
+    featureId: FeatureId,
+    profile: io.forge.core.profile.RepoProfile,
+    claudeDoc: Option[String],
+    failures: Vector[ObservedFailure]
+)

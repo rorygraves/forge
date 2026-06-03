@@ -2,6 +2,7 @@ package io.forge.app.reviewer
 
 import cats.effect.IO
 import io.forge.agents.{
+  ConventionLearnerInput,
   DesignReview,
   DesignReviewInput,
   FailureClassifierInput,
@@ -12,7 +13,7 @@ import io.forge.agents.{
   RepoProfilerInput,
   ReviewerProcessFailure
 }
-import io.forge.core.profile.{Classification, RepoProfile}
+import io.forge.core.profile.{Classification, ConventionDeltas, RepoProfile}
 
 /** §7.6 / §11.2 step 9 — the **process-failure retry** layer over a [[ReviewerCall]] (carry-forward **S4-5**).
   *
@@ -63,6 +64,13 @@ final class RetryingReviewerCall(
       limits: ReviewerLimits
   ): IO[ReviewerOutcome[Classification]] =
     retrying(reviewRetries)(delegate.classifyFailure(input, limits))
+
+  /** The §7.11 `ConventionLearner` shares the `reviewRetries` process-failure budget (a reviewer-side one-shot). */
+  override def learnConventions(
+      input: ConventionLearnerInput,
+      limits: ReviewerLimits
+  ): IO[ReviewerOutcome[ConventionDeltas]] =
+    retrying(reviewRetries)(delegate.learnConventions(input, limits))
 
   /** Re-issue `call` while it returns a retryable [[ReviewerProcessFailure]] and `remaining > 0`. `remaining` counts
     * *retries*, so the call is issued at most `remaining + 1` times.

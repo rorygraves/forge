@@ -2,8 +2,10 @@ package io.forge.app.orchestrator
 
 import cats.effect.{IO, Ref}
 import io.forge.agents.{
+  ConventionLearnerInput,
   DesignReview,
   FailureClassifierInput,
+  ObservedFailure,
   PrReview,
   RefineOutcome as AgentRefineOutcome,
   RefineResult,
@@ -30,6 +32,8 @@ import io.forge.core.manifest.{ManifestPatch, ManifestStore}
 import io.forge.core.pr.{PrState, ReviewDecision}
 import io.forge.core.profile.{
   CommandKind,
+  ConventionDeltas,
+  ConventionsLearnedAction,
   Determinism,
   FailureClassifiedAction,
   FailureKind,
@@ -274,7 +278,108 @@ final class Orchestrator(
         driverRef <- Ref.of[IO, Option[ActiveSession]](None)
         totalsRef <- Ref.of[IO, CostTotals](CostTotals.zero)
         out <- loop(feature, profile, driverRef, totalsRef, justEntered = true)
+        // §11.7: on the transition to FeatureDone, consult the ConventionLearner out of band. Runs *after* the loop
+        // reached its terminal, never gating it; `maybeLearnConventions` no-ops unless `out` is FeatureDone.
+        _ <- maybeLearnConventions(out, profile)
       yield out
+
+  // ---------------------------------------------------------------------------
+  // §11.7 ConventionLearner (out of band, advisory)
+  // ---------------------------------------------------------------------------
+
+  /** §11.7 — out-of-band `ConventionLearner` on the transition to `FeatureDone` (Task 3.2). Advisory and
+    * **never-blocking** (the §14.2 refinery posture): the feature has already reached `FeatureDone` deterministically;
+    * this runs after the loop and any failure is logged-and-dropped (`handleErrorWith`) — it never turns a done feature
+    * into a crash, and `Fsm.transition` never observes it (the profile delta reaches a later run only as a committed
+    * `.forge/profile.json` input, preserving replayability).
+    *
+    * Gated on `adapt.enabled` + `adapt.conventionLearner` + a resolved profile (an unprofiled / disabled run has no
+    * profile to delta against, and emits no `profile.failure_classified` signal anyway). The §7.11 **cost lever**: the
+    * sensor is consulted **only** when the feature actually hit a classified gate failure
+    * ([[Orchestrator.observedFailures]] over the log) — a clean run learns nothing and spends no reviewer call. On a
+    * settled proposal: fresh command deltas merge into the committed profile via `ProfileStore.save` (a
+    * human-reviewable diff), the proposed CLAUDE.md edit is persisted to the feature's audit dir for human review (**no
+    * autonomous doc mutation / no PR** — the auto-PR-open is a deferred follow-up, design-3.0 §4), and a
+    * `profile.conventions_learned` audit action records what was proposed.
+    */
+  private def maybeLearnConventions(feature: Feature, profile: Option[RepoProfile]): IO[Unit] =
+    val body = (feature.state, profile) match
+      case (FsmState.FeatureDone, Some(p)) if config.adapt.enabled && config.adapt.conventionLearner =>
+        log.replay(feature.id).map(Orchestrator.observedFailures).flatMap { failures =>
+          if failures.isEmpty then IO.unit
+          else
+            readClaudeDoc.flatMap { claudeDoc =>
+              val input = ConventionLearnerInput(feature.id, p, claudeDoc, failures)
+              reviewer.learnConventions(input, ReviewerLimits(reviewerWallClock)).flatMap {
+                case ReviewerOutcome.Settled(deltas) => applyConventionDeltas(feature.id, p, deltas)
+                case _ => IO.unit // Timeout / AdapterFailure — advisory, dropped (§14.2)
+              }
+            }
+        }
+      case _ => IO.unit
+    body.handleErrorWith(_ => IO.unit)
+
+  /** Apply a settled [[ConventionDeltas]] proposal: merge fresh command deltas into the committed profile (skipping the
+    * `save` when nothing is fresh — see [[ConventionDeltas.freshCommands]]), persist any proposed CLAUDE.md edit for
+    * human review, and record the `profile.conventions_learned` audit action regardless (so the run shows the learner
+    * was consulted, even when it proposed nothing actionable).
+    */
+  private def applyConventionDeltas(
+      featureId: io.forge.core.FeatureId,
+      profile: RepoProfile,
+      deltas: ConventionDeltas
+  ): IO[Unit] =
+    val fresh = deltas.freshCommands(profile)
+    val saveProfile = if fresh.isEmpty then IO.unit else profileStore.save(deltas.applyTo(profile))
+    val writeProposal = deltas.claudeMdProposal match
+      case Some(proposal) => writeConventionProposal(featureId, proposal, deltas.summary)
+      case None => IO.unit
+    saveProfile >>
+      writeProposal >>
+      log
+        .append(
+          featureId,
+          ConventionsLearnedAction.draft(featureId, fresh, deltas.claudeMdProposal.isDefined, deltas.summary)
+        )
+        .void
+
+  /** Persist the proposed CLAUDE.md addition to the feature's committed audit dir (`.forge/specs/<feature>/audit/`) for
+    * human review. **Never** edits CLAUDE.md or opens a PR (§11.7 "no autonomous doc mutation"; the auto-PR-open is a
+    * deferred follow-up, design-3.0 §4).
+    */
+  private def writeConventionProposal(
+      featureId: io.forge.core.FeatureId,
+      proposal: io.forge.core.profile.ClaudeMdProposal,
+      summary: String
+  ): IO[Unit] =
+    IO.blocking {
+      val target = paths.audit(featureId, "learned-conventions.md")
+      os.makeDir.all(target / os.up)
+      val md =
+        s"""# Proposed CLAUDE.md convention (forge ConventionLearner)
+           |
+           |_Proposed for **${featureId.value}** — review and merge into CLAUDE.md by hand; Forge does not open this PR itself (§11.7)._
+           |
+           |## Summary
+           |$summary
+           |
+           |## Rationale
+           |${proposal.rationale}
+           |
+           |## Suggested addition
+           |${proposal.suggestedAddition}
+           |""".stripMargin
+      os.write.over(target, md)
+    }
+
+  /** The repo's current CLAUDE.md, threaded to the learner so a proposed addition is phrased relative to what the doc
+    * already says. `None` when the repo has no CLAUDE.md.
+    */
+  private def readClaudeDoc: IO[Option[String]] =
+    IO.blocking {
+      val f = paths.repoRoot / "CLAUDE.md"
+      if os.exists(f) && os.isFile(f) then Some(os.read(f)) else None
+    }
 
   // ---------------------------------------------------------------------------
   // The loop
@@ -1162,6 +1267,29 @@ object Orchestrator:
     case _: ResumeHint.ResolveLocalImplementationChanges => true
     case _: ResumeHint.ApplyPlanningUpdate => true
     case _ => false
+
+  /** §11.7 — distil the §19 `profile.failure_classified` actions from a feature's log into the §7.11
+    * `ConventionLearner`'s failure→remedy signal (the `gate`/`kind`/`route`/`evidence` the spine recorded). Pure +
+    * total; a malformed payload is skipped rather than raised, since the learner is advisory. An empty result is the
+    * §7.11 cost lever: no classified failure ⇒ the orchestrator never spends a learner reviewer-call.
+    */
+  private[orchestrator] def observedFailures(actions: Vector[io.forge.core.log.Action]): Vector[ObservedFailure] =
+    actions.filter(_.kind == FailureClassifiedAction.Kind).flatMap { a =>
+      a.payload.objOpt.flatMap { o =>
+        for
+          gate <- o.get("gate").flatMap(_.strOpt)
+          kind <- o.get("kind").flatMap(_.strOpt)
+          route <- o.get("route").flatMap(_.strOpt)
+          evidence <- o.get("evidence").flatMap(_.strOpt)
+        yield ObservedFailure(
+          gate = gate,
+          kind = kind,
+          suggested = o.get("suggested").flatMap(_.strOpt),
+          route = route,
+          evidence = evidence
+        )
+      }
+    }
 
   /** Slice 2.0 Task 2.0.2: the `success` field of a `session.complete` audit record. Only a clean settle counts as a
     * successful session; a non-zero adapter result, a settle-timeout, or a budget breach is `false`.

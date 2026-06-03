@@ -6,6 +6,7 @@ import fs2.Stream
 import io.forge.agents.{
   AgentEvent,
   AgentSession,
+  ConventionLearnerInput,
   DesignReview,
   DesignReviewInput,
   FailureClassifierInput,
@@ -22,7 +23,7 @@ import io.forge.app.monitor.{MonitorOutcome, MonitorReport, SessionMonitor}
 import io.forge.app.reviewer.{ReviewerCall, ReviewerLimits, ReviewerOutcome}
 import io.forge.core.*
 import io.forge.core.cost.CostTotals
-import io.forge.core.profile.{Classification, RepoProfile}
+import io.forge.core.profile.{Classification, ConventionDeltas, RepoProfile}
 import io.forge.core.fsm.{Feature, FsmEvent, FsmState, SessionPhase, SettleOutcome}
 import io.forge.core.log.{Action, ActionDraft, ActionLog}
 import io.forge.core.manifest.{Manifest, ManifestStore, Piece, PieceStatus}
@@ -179,6 +180,9 @@ object OrchestratorTestKit:
       refineOutcome: ReviewerOutcome[RefineResult],
       classifyOutcome: IO[ReviewerOutcome[Classification]] = IO.raiseError(
         new IllegalStateException("FakeReviewerCall: classifyFailure not configured (set classifyOutcome)")
+      ),
+      learnOutcome: IO[ReviewerOutcome[ConventionDeltas]] = IO.raiseError(
+        new IllegalStateException("FakeReviewerCall: learnConventions not configured (set learnOutcome)")
       )
   ) extends ReviewerCall:
     override def designReview(input: DesignReviewInput, limits: ReviewerLimits): IO[ReviewerOutcome[DesignReview]] =
@@ -196,6 +200,11 @@ object OrchestratorTestKit:
         limits: ReviewerLimits
     ): IO[ReviewerOutcome[Classification]] =
       classifyOutcome
+    override def learnConventions(
+        input: ConventionLearnerInput,
+        limits: ReviewerLimits
+    ): IO[ReviewerOutcome[ConventionDeltas]] =
+      learnOutcome
 
   object FakeReviewerCall:
     val approveDesign: ReviewerOutcome[DesignReview] =

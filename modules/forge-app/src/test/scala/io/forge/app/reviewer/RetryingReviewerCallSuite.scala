@@ -3,7 +3,7 @@ package io.forge.app.reviewer
 import cats.effect.{IO, Ref}
 import io.forge.agents.*
 import io.forge.core.{FeatureId, PieceId, PrNumber}
-import io.forge.core.profile.{Classification, FailureKind, RepoProfile}
+import io.forge.core.profile.{Classification, ConventionDeltas, FailureKind, RepoProfile}
 import munit.CatsEffectSuite
 
 import scala.concurrent.duration.DurationInt
@@ -32,6 +32,7 @@ class RetryingReviewerCallSuite extends CatsEffectSuite:
       prScript: Ref[IO, List[ReviewerOutcome[PrReview]]],
       refineScript: Ref[IO, List[ReviewerOutcome[RefineResult]]],
       classifyScript: Ref[IO, List[ReviewerOutcome[Classification]]],
+      learnScript: Ref[IO, List[ReviewerOutcome[ConventionDeltas]]],
       val calls: Ref[IO, Int]
   ) extends ReviewerCall:
     private def pop[A](script: Ref[IO, List[ReviewerOutcome[A]]]): IO[ReviewerOutcome[A]] =
@@ -49,20 +50,26 @@ class RetryingReviewerCallSuite extends CatsEffectSuite:
         input: FailureClassifierInput,
         l: ReviewerLimits
     ): IO[ReviewerOutcome[Classification]] = pop(classifyScript)
+    override def learnConventions(
+        input: ConventionLearnerInput,
+        l: ReviewerLimits
+    ): IO[ReviewerOutcome[ConventionDeltas]] = pop(learnScript)
 
   private def scripted(
       design: List[ReviewerOutcome[DesignReview]] = Nil,
       pr: List[ReviewerOutcome[PrReview]] = Nil,
       refine: List[ReviewerOutcome[RefineResult]] = Nil,
-      classify: List[ReviewerOutcome[Classification]] = Nil
+      classify: List[ReviewerOutcome[Classification]] = Nil,
+      learn: List[ReviewerOutcome[ConventionDeltas]] = Nil
   ): IO[ScriptedReviewerCall] =
     for
       d <- Ref.of[IO, List[ReviewerOutcome[DesignReview]]](design)
       p <- Ref.of[IO, List[ReviewerOutcome[PrReview]]](pr)
       r <- Ref.of[IO, List[ReviewerOutcome[RefineResult]]](refine)
       cl <- Ref.of[IO, List[ReviewerOutcome[Classification]]](classify)
+      ln <- Ref.of[IO, List[ReviewerOutcome[ConventionDeltas]]](learn)
       c <- Ref.of[IO, Int](0)
-    yield new ScriptedReviewerCall(d, p, r, cl, c)
+    yield new ScriptedReviewerCall(d, p, r, cl, ln, c)
 
   private def procFail[A]: ReviewerOutcome[A] = ReviewerOutcome.AdapterFailure(ReviewerProcessFailure("boom"))
 
@@ -142,6 +149,19 @@ class RetryingReviewerCallSuite extends CatsEffectSuite:
       n <- fake.calls.get
     yield
       assertEquals(out, ReviewerOutcome.Settled(classification): ReviewerOutcome[Classification])
+      assertEquals(n, 3) // initial + 2 review retries; refineRetries=0 must not apply here
+
+  test("learnConventions draws on reviewRetries (shares the reviewer one-shot budget)"):
+    val deltas = ConventionDeltas(Vector.empty, None, "nothing to add")
+    val learnInput =
+      ConventionLearnerInput(FeatureId("feat-1"), profile = null, claudeDoc = None, failures = Vector.empty)
+    for
+      fake <- scripted(learn = List(procFail, procFail, ReviewerOutcome.Settled(deltas)))
+      decorated = new RetryingReviewerCall(fake, reviewRetries = 2, refineRetries = 0)
+      out <- decorated.learnConventions(learnInput, limits)
+      n <- fake.calls.get
+    yield
+      assertEquals(out, ReviewerOutcome.Settled(deltas): ReviewerOutcome[ConventionDeltas])
       assertEquals(n, 3) // initial + 2 review retries; refineRetries=0 must not apply here
 
   test("retry count of 0 is a transparent pass-through (one call, failure surfaced)"):

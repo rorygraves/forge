@@ -20,7 +20,8 @@ final case class ReviewerAssets(
     prReview: ReviewerAssets.PerMethod,
     refine: ReviewerAssets.PerMethod,
     profileRepo: ReviewerAssets.PerMethod,
-    classifyFailure: ReviewerAssets.PerMethod
+    classifyFailure: ReviewerAssets.PerMethod,
+    learnConventions: ReviewerAssets.PerMethod
 )
 
 object ReviewerAssets:

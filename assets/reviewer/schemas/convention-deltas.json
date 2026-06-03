@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://forge.io/schemas/convention-deltas.json",
+  "title": "ConventionDeltas",
+  "description": "Schema for forge ConventionLearner outputs (§7.11/§11.7, Task 3.2). Mirrors ConventionDeltas in forge-agents/Reviews.scala. `claudeMdProposal` is always present and nullable (an object when the learner proposes a CLAUDE.md edit, null otherwise) — expressed as anyOf{object|null} because Codex's --output-schema (OpenAI strict mode) forbids oneOf and requires every property in `required` (design-rationale C17).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["addCommands", "claudeMdProposal", "summary"],
+  "properties": {
+    "addCommands": {
+      "type": "array",
+      "description": "Gate commands the repo profile was MISSING that would have avoided an observed failure (e.g. a format autofix the run kept paying fix-up rounds for). Additive only — never propose removing or rewriting an existing command. Empty array if the profile already declares every command the failures needed.",
+      "items": { "$ref": "#/$defs/command" }
+    },
+    "claudeMdProposal": {
+      "description": "A proposed addition to the repo's own CLAUDE.md (a convention the run taught), or null if you have nothing worth proposing. NOT applied by Forge — persisted for a human to review and merge.",
+      "anyOf": [
+        { "$ref": "#/$defs/claudeMdProposal" },
+        { "type": "null" }
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "description": "One or two sentences: what the run's failures revealed and what you propose. Shown in the audit log."
+    }
+  },
+  "$defs": {
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "argv", "determinism", "required", "autofix"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["format", "lint", "build", "test", "typecheck"]
+        },
+        "argv": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "The command split into argv tokens, e.g. ['sbt', 'scalafmtAll']."
+        },
+        "determinism": {
+          "type": "string",
+          "enum": ["deterministic", "heuristic"],
+          "description": "'deterministic' = re-running is a pure function of the working tree (a formatter, codegen); 'heuristic' = interpreting the outcome needs judgment (a test could be a bug, a flake, or an env issue)."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether this gate must pass before a change can merge."
+        },
+        "autofix": {
+          "type": "boolean",
+          "description": "True when running the command mutates the working tree to remediate the failure (a formatter rewrites files). Only deterministic + autofix commands are safe for Forge to run itself without a driver turn."
+        }
+      }
+    },
+    "claudeMdProposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rationale", "suggestedAddition"],
+      "properties": {
+        "rationale": {
+          "type": "string",
+          "description": "Why this convention is worth adding — the failure→remedy pattern you observed in this run."
+        },
+        "suggestedAddition": {
+          "type": "string",
+          "description": "The convention text to add to CLAUDE.md, phrased as a directive (e.g. 'The implement driver must run `sbt scalafmtAll` before settling')."
+        }
+      }
+    }
+  }
+}

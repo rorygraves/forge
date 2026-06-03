@@ -116,22 +116,24 @@ object AssetInstaller:
 
     /** Schemas the §7.1 reviewer connectors bind against (Claude `--json-schema`, Codex `--output-schema`). The
       * `repo-profile.json` schema is the §7.11 `RepoProfiler` sensor's (Phase 3 / Task 3.0.3);
-      * `failure-classifier.json` is the §7.11 `FailureClassifier` sensor's (Phase 3 / Task 3.1.4).
+      * `failure-classifier.json` is the §7.11 `FailureClassifier` sensor's (Phase 3 / Task 3.1.4);
+      * `convention-deltas.json` is the §7.11 `ConventionLearner` sensor's (Phase 3 / Task 3.2).
       */
     val SchemaLeaves: Vector[String] = Vector(
       "design-review.json",
       "code-review.json",
       "refine.json",
       "repo-profile.json",
-      "failure-classifier.json"
+      "failure-classifier.json",
+      "convention-deltas.json"
     )
 
-    /** System-prompt files — sixteen entries: ten reviewer/sensor-method × per-CLI (the five §7.1/§7.11 one-shots —
-      * `design-review`, `code-review`, `refine`, `repo-profile`, `failure-classifier` — each in a `claude` + `codex`
-      * variant) plus the six driver-side prompts (`specify.<cli>.md`, `implement.<cli>.md`, `fixup.<cli>.md`) the
-      * orchestrator binds via `Connector.runStreamingSpec` / `runHeadlessImplementation` / `runFixup` (Task
-      * 1.4.10-d2b). The design-revision phase resumes the spec session (no separate prompt at resume), so
-      * `specify.<cli>.md` covers both spec and design revision.
+    /** System-prompt files — eighteen entries: twelve reviewer/sensor-method × per-CLI (the six §7.1/§7.11 one-shots —
+      * `design-review`, `code-review`, `refine`, `repo-profile`, `failure-classifier`, `learn-conventions` — each in a
+      * `claude` + `codex` variant) plus the six driver-side prompts (`specify.<cli>.md`, `implement.<cli>.md`,
+      * `fixup.<cli>.md`) the orchestrator binds via `Connector.runStreamingSpec` / `runHeadlessImplementation` /
+      * `runFixup` (Task 1.4.10-d2b). The design-revision phase resumes the spec session (no separate prompt at resume),
+      * so `specify.<cli>.md` covers both spec and design revision.
       */
     val PromptLeaves: Vector[String] = Vector(
       "design-review.claude.md",
@@ -144,6 +146,8 @@ object AssetInstaller:
       "repo-profile.codex.md",
       "failure-classifier.claude.md",
       "failure-classifier.codex.md",
+      "learn-conventions.claude.md",
+      "learn-conventions.codex.md",
       "specify.claude.md",
       "specify.codex.md",
       "implement.claude.md",
