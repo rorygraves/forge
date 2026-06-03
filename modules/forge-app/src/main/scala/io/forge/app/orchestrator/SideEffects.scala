@@ -4,7 +4,7 @@ import cats.effect.IO
 import io.forge.agents.{DesignReviewInput, PrReviewInput, RefineInput}
 import io.forge.core.{PieceId, PrNumber}
 import io.forge.core.fsm.{Feature, FsmEvent}
-import io.forge.core.profile.RepoCommand
+import io.forge.core.profile.{ClaudeMdProposal, RepoCommand}
 import io.forge.git.branch.protection.RequiredChecksOverlay
 import io.forge.git.worktree.WorktreeSafety
 
@@ -130,3 +130,13 @@ trait SideEffects:
     * e.g. on a syntax error the build will also catch) is ignored by the caller and the commit proceeds exactly as 1.6.
     */
   def runLocalFormatGate(feature: Feature, piece: PieceId, commands: Vector[RepoCommand]): IO[Either[String, Unit]]
+
+  /** §11.7 (Task 3.2 / D9) — open the `ConventionLearner`'s proposed CLAUDE.md edit as a PR for human approval, out of
+    * band after the feature reached `FeatureDone`. Branches from base, appends `proposal.suggestedAddition` to
+    * CLAUDE.md (creating it if absent), commits, pushes, and `gh pr create`s a PR whose body carries the rationale —
+    * **never merges it** (§11.7 "no autonomous doc mutation — it proposes, the human merges"). Idempotent: an
+    * already-open conventions PR for the branch is reused. Advisory at the call site — a `Left` (dirty tree, push
+    * rejected, gh failure) is logged and the orchestrator falls back to persisting the proposal locally; it never
+    * blocks the already-reached `FeatureDone`.
+    */
+  def openConventionsPr(feature: Feature, proposal: ClaudeMdProposal): IO[Either[String, PrNumber]]

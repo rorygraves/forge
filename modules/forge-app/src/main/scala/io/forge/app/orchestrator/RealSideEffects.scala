@@ -4,12 +4,12 @@ import cats.data.EitherT
 import cats.effect.IO
 import io.forge.agents.{Connector, DesignReviewInput, FixupPrompt, ImplementationPrompt, PrReviewInput, RefineInput}
 import io.forge.app.config.ForgeConfig
-import io.forge.core.{PieceId, PrNumber, Sha}
+import io.forge.core.{BranchName, PieceId, PrNumber, Sha}
 import io.forge.core.fsm.{Feature, FsmEvent, SessionPhase, SettleOutcome}
 import io.forge.core.manifest.Piece
 import io.forge.core.paths.ForgePaths
 import io.forge.core.pr.{CheckResult, CheckRollup, PrSnapshot, PrState}
-import io.forge.core.profile.RepoCommand
+import io.forge.core.profile.{ClaudeMdProposal, RepoCommand}
 import io.forge.git.branch.{BranchError, BranchManager}
 import io.forge.git.branch.protection.RequiredChecksOverlay
 import io.forge.git.cli.{CommitResult, GhClient, GhError, GitClient, GitError, StatusEntry}
@@ -309,6 +309,69 @@ final class RealSideEffects(
     // autofix there is nothing to amend or force-push. Best-effort: commands run in order, short-circuiting to a Left on
     // the first non-zero exit; the caller ignores the Left and proceeds (the failure, if real, surfaces at the CI gate).
     commands.foldLeft(EitherT.pure[IO, String](()))((acc, cmd) => acc.flatMap(_ => runCommand(cmd.argv))).value
+
+  // --- §11.7 / D9 ConventionLearner PR -------------------------------------
+
+  override def openConventionsPr(feature: Feature, proposal: ClaudeMdProposal): IO[Either[String, PrNumber]] =
+    // §11.7: open the learner's proposed CLAUDE.md edit as a PR for human approval — branch from base, append the
+    // proposed convention to CLAUDE.md, commit, push, `gh pr create`. NEVER merges it (the human does). Idempotent: a
+    // conventions PR already open for the branch is reused rather than re-`gh pr create`d. Runs out of band after the
+    // feature reached FeatureDone, so it must not disturb the merged piece history — it branches cleanly from base.
+    val branch = BranchName(s"${feature.manifest.branchPrefix}/conventions/${feature.id.value}")
+    (for
+      existing <- et(gh.prForBranch(branch))(ghErr)
+      pr <- existing match
+        case Some(open) => EitherT.pure[IO, String](open)
+        case None =>
+          for
+            snap <- et(branchManager.syncBase(feature.manifest.baseBranch))(branchErr)
+            _ <- et(git.checkout(branch, Some(snap.sha.value)))(gitErr)
+            _ <- EitherT.liftF[IO, String, Unit](appendConventionToClaudeMd(proposal))
+            _ <- et(git.stage(Vector("CLAUDE.md")))(gitErr)
+            committed <- et(git.commit(s"docs(${feature.id.value}): convention learned by forge"))(gitErr)
+            _ <- EitherT.cond[IO](
+              committed == CommitResult.Committed,
+              (),
+              "convention edit staged no commit (CLAUDE.md already carried it)"
+            )
+            _ <- et(branchManager.pushCurrentBranch())(branchErr)
+            opened <- et(
+              branchManager.createPr(
+                conventionsPrTitle(feature),
+                conventionsPrBody(feature, proposal),
+                feature.manifest.baseBranch
+              )
+            )(branchErr)
+          yield opened
+    yield pr).value
+
+  /** Append the proposed convention to the repo's CLAUDE.md (creating it if absent). Idempotent-ish: if the exact
+    * addition is already present the subsequent `git commit` is a `NothingToCommit` no-op, which [[openConventionsPr]]
+    * surfaces as a `Left` rather than opening an empty PR.
+    */
+  private def appendConventionToClaudeMd(proposal: ClaudeMdProposal): IO[Unit] =
+    IO.blocking {
+      val target = paths.repoRoot / "CLAUDE.md"
+      val existing = if os.exists(target) && os.isFile(target) then os.read(target).stripLineEnd else ""
+      val addition = s"## Convention (learned by forge)\n\n${proposal.suggestedAddition.stripLineEnd}\n"
+      val combined = if existing.isEmpty then addition else s"$existing\n\n$addition"
+      os.write.over(target, combined)
+    }
+
+  private def conventionsPrTitle(feature: Feature): String =
+    s"[forge] convention learned from ${feature.id.value}"
+
+  private def conventionsPrBody(feature: Feature, proposal: ClaudeMdProposal): String =
+    s"""Forge's ConventionLearner proposes adding the convention below to `CLAUDE.md`, mined while driving
+       |`${feature.id.value}` to completion (§11.7). **Forge opened this PR but will not merge it — review and merge if
+       |you agree.**
+       |
+       |## Rationale
+       |${proposal.rationale.stripLineEnd}
+       |
+       |## Proposed addition
+       |${proposal.suggestedAddition.stripLineEnd}
+       |""".stripMargin
 
   /** Run a profile autofix or gate command argv in the repo root. A non-zero exit yields a Left with the tail of its
     * combined output so the caller can surface why the autofix failed before falling back to a driver fix-up.

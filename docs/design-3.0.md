@@ -49,10 +49,10 @@ Concretely:
    showing the collapse end-to-end.
 
 **Landed since (Tier 2/3):** the LLM `RepoProfiler` that *populates* `.forge/profile.json` (Task 3.0.3), the LLM
-`classifyFailure` consulted on rules-`Unknown` (Task 3.1.4), and the `ConventionLearner` sensor + profile-delta apply +
-persisted CLAUDE.md proposal at `FeatureDone` (Task 3.2 — auto-PR deferred). **Still deferred (see §4):** the
-`ConventionLearner`'s **auto-PR-open** of its CLAUDE.md proposal (decision D9) + reviewer-comment mining (D8); the §8.3
-local **Build** gate (decision D2 — needs a pre-PR fix-up FSM path).
+`classifyFailure` consulted on rules-`Unknown` (Task 3.1.4), and the full `ConventionLearner` at `FeatureDone` — sensor +
+profile-delta apply + the proposed CLAUDE.md edit **opened as a PR** for human approval (Task 3.2, D9 resolved). **Still
+deferred (see §4):** reviewer-comment mining (D8 — needs a `review.*` comment-text action kind); the §8.3 local **Build**
+gate (decision D2 — needs a pre-PR fix-up FSM path).
 
 Tiering: **Tier 1** (Tasks 3.0.1, 3.1.1, 3.1.2) is the gating deliverable — it is the
 dogfood-#2 collapse, live and measured. **Tier 2** (Tasks 3.0.2, 3.0.3, 3.1.3, 3.1.4) makes
@@ -217,7 +217,7 @@ real run, not just fakes (the `gh` wire-shape + subprocess-lifecycle discipline 
 
 ### Tier 3 — the learning loop
 
-### Task 3.2 — ConventionLearner at FeatureDone (§11.7) — **sensor + profile deltas landed; auto-PR deferred** [ ]
+### Task 3.2 — ConventionLearner at FeatureDone (§11.7) — **landed** [x] 2026-06-03
 
 - [x] `Connector.learnConventions(ConventionLearnerInput): IO[ConventionDeltas]` — a reviewer-side one-shot mirroring
       `profileRepo`/`classifyFailure` exactly: `convention-deltas.json` Native schema + `learn-conventions.{claude,
@@ -233,33 +233,50 @@ real run, not just fakes (the `gh` wire-shape + subprocess-lifecycle discipline 
       feature actually hit a classified gate failure (`Orchestrator.observedFailures` mines the §19
       `profile.failure_classified` actions from the log) — a clean run learns nothing and spends no reviewer call.
 - [x] `RepoProfile` deltas applied via `ProfileStore.save` (additive command merge, deduped by `(kind, argv)`; the save
-      is skipped when nothing is fresh). The proposed CLAUDE.md edit is **persisted to the feature's audit dir**
-      (`.forge/specs/<feature>/audit/learned-conventions.md`) for human review — **no autonomous doc mutation**. A
-      `profile.conventions_learned` audit action records what was proposed (no-op `Replay` projection, decision D7).
-      Tests: `ConventionDeltasSuite` (forge-core merge/dedup), `ConventionDeltasDecoderSuite`, Claude+Codex
-      `learnConventions` fake-CLI e2e, `RetryingReviewerCallSuite` (shares `reviewRetries`),
-      `OrchestratorConventionLearnerSuite` (e2e: FeatureDone + classified failure → delta saved + proposal persisted +
-      action logged; `conventionLearner = false` ⇒ never consulted; no-failure ⇒ cost-lever skip), and the opt-in
-      `forge-it` `ConventionLearnerSmokeSuite` (`FORGE_IT_RUN_LEARNER_SMOKE=1`).
-- [ ] **Auto-PR-open deferred (decision D9, see §4).** §11.7 also has the learner open its proposed CLAUDE.md edit as a
-      *PR* for human approval. This pass persists the proposal for review instead of auto-opening a PR (an outward-facing
-      action + git/branch/push machinery off the main flow); the auto-PR-open is a scoped follow-up. The header + the
-      roadmap §4 bullet stay **unticked** until it lands (and the §0 live re-run, T5). **`recurring reviewer comments`**
-      mining is also out of scope today — the action log captures classified failures, not reviewer comment text
-      (decision D8).
+      is skipped when nothing is fresh).
+- [x] **The proposed CLAUDE.md edit is opened as a PR for human approval (§11.7, decision D9 resolved 2026-06-03).**
+      `SideEffects.openConventionsPr` (in `RealSideEffects`) branches from base, appends the convention to CLAUDE.md
+      (creating it if absent), commits, pushes, and `gh pr create`s — **never merges it** (the human does); idempotent
+      (an already-open conventions PR for the branch is reused). The open is advisory: on failure (dirty tree / push
+      rejected / gh down) the orchestrator **falls back to persisting** the proposal to
+      `.forge/specs/<feature>/audit/learned-conventions.md` so it is never lost. **No autonomous doc mutation** — Forge
+      opens a PR, never a merge. A `profile.conventions_learned` audit action (no-op `Replay` projection, D7) records the
+      opened PR number (or `null` on the fallback path). Tests: `ConventionDeltasSuite` (forge-core merge/dedup),
+      `ConventionDeltasDecoderSuite`, Claude+Codex `learnConventions` fake-CLI e2e, `RetryingReviewerCallSuite` (shares
+      `reviewRetries`), `RealSideEffectsSuite` (`openConventionsPr` real git sequence + idempotent reuse),
+      `OrchestratorConventionLearnerSuite` (e2e: FeatureDone + classified failure → delta saved + PR opened + number
+      logged; PR-open failure → persist-locally fallback; `conventionLearner = false` ⇒ never consulted; no-failure ⇒
+      cost-lever skip), and the opt-in `forge-it` `ConventionLearnerSmokeSuite` (`FORGE_IT_RUN_LEARNER_SMOKE=1`).
+- [ ] **`recurring reviewer comments` mining still out of scope (decision D8).** The action log captures classified
+      failures (`profile.failure_classified`), not reviewer comment text, so the §7.11 cost lever gates on failures
+      today; widen when a `review.*` comment-text action kind exists. (Not a Task-3.2 blocker — the roadmap §4 bullet
+      ticks at slice close after the §0 live re-run T5 + the whole-section review.)
 
 ---
 
 ## 2. Order of work
 
 3.1.1 ✅ → 3.0.1 ✅ → 3.1.2 (code ✅; live re-run deferred — T5) → 3.0.2 ✅ → 3.1.3 (Format gate
-✅; Build gate deferred — D2) → 3.0.3 ✅ → 3.1.4 ✅ → 3.2 (sensor + profile deltas + persisted CLAUDE.md proposal ✅;
-auto-PR deferred — D9) → **{3.1.3-Build (own slice — D2), 3.2-auto-PR (D9), T5 live re-run} (next)**.
+✅; Build gate deferred — D2) → 3.0.3 ✅ → 3.1.4 ✅ → 3.2 ✅ (sensor + profile deltas + CLAUDE.md PR; D9 resolved) →
+**{3.1.3-Build (own slice — D2), T5 live re-run, D8 reviewer-comment mining} (next)**.
 Tier-1 closes the slice's exit criterion; Tier 2/3 can land incrementally behind it.
 
 ---
 
 ## 3. Status log
+
+- **2026-06-03 — Task 3.2 completed (D9 resolved): the `ConventionLearner`'s proposed CLAUDE.md edit is now opened as a
+  PR.** The deferred half of Task 3.2: `SideEffects.openConventionsPr` (`RealSideEffects`) branches from base, appends the
+  proposed convention to CLAUDE.md (creating it if absent), commits, pushes, and `gh pr create`s — mirroring
+  `commitDesignAndOpenPr`, idempotent (reuses an already-open conventions PR for the branch). `Orchestrator.applyConventionDeltas`
+  opens the PR on a `claudeMdProposal` and records its number in `profile.conventions_learned`; on a `Left` it falls back
+  to persisting the proposal to the audit dir (so it is never lost). Advisory/never-blocking throughout (`handleErrorWith`);
+  **no autonomous doc mutation** — Forge opens a PR, never merges. New/updated tests: `RealSideEffectsSuite` (+2 —
+  `openConventionsPr` real git sequence + idempotent reuse), `OrchestratorConventionLearnerSuite` (PR-opened-and-numbered +
+  the new PR-open-failure → persist-fallback case). Full build green (`forge-core` 429, `forge-agents` 236, `forge-app`
+  402, `forge-it` compiles); `scalafmtCheckAll` clean. **Task 3.2 header now ticked**; the roadmap §4 bullet stays
+  **unticked** until the §0 live re-run (T5) + the whole-section review. Merged to `main` (the branch work was
+  fast-forwarded onto `main` at the user's request before this follow-up).
 
 - **2026-06-03 — Task 3.2 landed (sensor + profile deltas + persisted CLAUDE.md proposal; auto-PR deferred): the §11.7
   `ConventionLearner` at `FeatureDone`.** The Tier-3 learning loop's first runnable: `Connector.learnConventions(
@@ -550,18 +567,20 @@ cost lever gates on `failures.nonEmpty`: the only mineable signal today is a cla
 comment text is logged (a new `review.*` action kind) — at which point the learner input gains a `reviewerComments`
 channel and the cost-lever gate widens to "failures OR comments present".
 
-### D9 — the `ConventionLearner`'s proposed CLAUDE.md edit is persisted, not auto-PR'd (deferred) — open (1.7 §11.7)
+### D9 — the `ConventionLearner`'s proposed CLAUDE.md edit is opened as a PR — ✅ resolved 2026-06-03
 
-§11.7 says the learner's proposed CLAUDE.md edit "is opened as a normal PR for human approval". Task 3.2 instead
-**persists** the proposal to the feature's committed audit dir (`.forge/specs/<feature>/audit/learned-conventions.md`) for
-a human to review and merge by hand. Rationale (scoped via `AskUserQuestion`, 2026-06-03): auto-opening a PR on every
-`FeatureDone` is an outward-facing action needing the full git branch/stage/commit/push/`createPr` machinery wired
-out-of-band off the feature's main flow — the heaviest, least-reversible part of the task. The "thin runnable slice" ships
-the in-repo, fully-reversible half first (sensor + profile-delta save + persisted proposal, all proven e2e); the auto-PR
-is a scoped follow-up. The §11.7 "no autonomous doc mutation — it proposes, the human merges" guarantee is *stronger* in
-the interim (Forge writes a review artifact, never even a branch). The Task 3.2 header + the roadmap §4 bullet stay
-**unticked** until the auto-PR-open lands (and the §0 live re-run, T5). Pick this up with the §8.3-Build slice (both are
-"open a PR / change FSM machinery off the settled path") or as its own follow-up.
+§11.7 says the learner's proposed CLAUDE.md edit "is opened as a normal PR for human approval". Task 3.2 first shipped the
+in-repo half (persist the proposal to the audit dir) and deferred the PR-open as the heaviest, least-reversible part; this
+follow-up landed it. `SideEffects.openConventionsPr` (`RealSideEffects`) branches from base, appends the convention to
+CLAUDE.md (creating it if absent), commits, pushes, and `gh pr create`s — mirroring `commitDesignAndOpenPr`'s
+branch/stage/commit/push/`createPr` seam — and is **idempotent** (an already-open conventions PR for the branch is
+reused, never re-`createPr`'d). It is wired into `Orchestrator.applyConventionDeltas`: on a `claudeMdProposal` it opens
+the PR and records the number in `profile.conventions_learned`; on a `Left` (dirty tree / push rejected / gh down) it
+**falls back** to persisting the proposal to `.forge/specs/<feature>/audit/learned-conventions.md` so the proposal is
+never lost (the original deferred behaviour, now the failure path). The whole thing stays advisory/never-blocking
+(`handleErrorWith` in `maybeLearnConventions`). **`no autonomous doc mutation`** holds: Forge opens a PR, never merges it.
+Decided + landed via the `AskUserQuestion` follow-up (2026-06-03). Revisit only if a repo wants the commit authored under
+the profile's `commitIdentity` rather than the ambient git identity (a `GitClient` identity seam — out of scope here).
 
 ## 5. Cross-references
 

@@ -241,6 +241,38 @@ class RealSideEffectsSuite extends munit.FunSuite:
         assertEquals(snap.state, PrState.Open)
       case other => fail(s"expected DesignPrSnapshotUpdated, got $other")
 
+  // --- openConventionsPr (§11.7 / D9) ---------------------------------------
+
+  private val conventionProposal =
+    io.forge.core.profile.ClaudeMdProposal("two fix-up rounds on formatting", "Run `sbt scalafmtAll` before settling.")
+
+  tempFixture.test(
+    "openConventionsPr: writes the convention into CLAUDE.md and opens a PR (stage→commit→push→createPr)"
+  ): repo =>
+    val calls = ArrayBuffer.empty[String]
+    val se = sut(repo, calls = calls, prNumber = PrNumber(77), prForBranch = Right(None))
+    val res = se.openConventionsPr(feature(FsmState.FeatureDone), conventionProposal).unsafeRunSync()
+    assertEquals(res, Right(PrNumber(77)))
+    // CLAUDE.md now carries the proposed addition (created from scratch in this temp repo).
+    assert(os.exists(repo / "CLAUDE.md"))
+    assert(os.read(repo / "CLAUDE.md").contains("Run `sbt scalafmtAll` before settling."))
+    // The git/gh sequence: stage CLAUDE.md → commit → push → createPr.
+    val staged = calls.indexWhere(_.startsWith("git.stage(CLAUDE.md)"))
+    val committed = calls.indexWhere(_.startsWith("git.commit"))
+    val pushed = calls.indexWhere(_.startsWith("bm.push"))
+    val created = calls.indexWhere(_.startsWith("bm.createPr"))
+    assert(staged >= 0 && committed > staged && pushed > committed && created > pushed, calls.mkString(", "))
+
+  tempFixture.test("openConventionsPr: an already-open conventions PR is reused, createPr + CLAUDE.md edit skipped"):
+    repo =>
+      val calls = ArrayBuffer.empty[String]
+      val se = sut(repo, calls = calls, prForBranch = Right(Some(PrNumber(7))))
+      val res = se.openConventionsPr(feature(FsmState.FeatureDone), conventionProposal).unsafeRunSync()
+      assertEquals(res, Right(PrNumber(7)))
+      // Reuse short-circuits before any edit/commit/createPr.
+      assert(!calls.exists(_.startsWith("bm.createPr")), calls.mkString(", "))
+      assert(!os.exists(repo / "CLAUDE.md"), "CLAUDE.md must not be touched when reusing an open PR")
+
   // --- prReviewInput --------------------------------------------------------
 
   tempFixture.test("prReviewInput pulls the gh diff, piece spec, and parses changed files"): repo =>

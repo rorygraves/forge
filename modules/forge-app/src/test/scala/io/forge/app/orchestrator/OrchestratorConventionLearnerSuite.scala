@@ -120,10 +120,16 @@ class OrchestratorConventionLearnerSuite extends munit.FunSuite:
   /** Drive a single-piece feature DesignReady → FeatureDone, optionally seeding a classified failure into the log
     * first. Returns the terminal feature + the saved-profile slot + the learner call count + the resolved paths.
     */
+  /** A FakeSideEffects whose conventions-PR open fails — exercises the orchestrator's persist-locally fallback. */
+  private class PrFailingSideEffects extends FakeSideEffects(designPr, _ => piecePr):
+    override def openConventionsPr(feature: Feature, proposal: ClaudeMdProposal): IO[Either[String, PrNumber]] =
+      IO.pure(Left("gh unavailable"))
+
   private def driveToDone(
       root: os.Path,
       config: ForgeConfig,
-      seedFailure: Boolean
+      seedFailure: Boolean,
+      sideEffects: SideEffects = new FakeSideEffects(designPr, _ => piecePr)
   ): (Feature, AtomicReference[Option[RepoProfile]], AtomicInteger, ForgePaths) =
     val paths = new ForgePaths(repoRoot = root)
     val saved = new AtomicReference[Option[RepoProfile]](None)
@@ -139,7 +145,7 @@ class OrchestratorConventionLearnerSuite extends munit.FunSuite:
       monitor <- FakeSessionMonitor.make(MonitorOutcome.Settled(SessionPhase.Implement, SettleOutcome.Clean))
       hookCache = new HookStateCache(new FileStateCache(paths), f => offerMergeOnAwaitingMerge(watcher, f))
       orch = new Orchestrator(
-        new FakeSideEffects(designPr, _ => piecePr),
+        sideEffects,
         monitor,
         watcher,
         learningReviewer(learnCalls),
@@ -156,7 +162,7 @@ class OrchestratorConventionLearnerSuite extends munit.FunSuite:
     (out, saved, learnCalls, paths)
 
   tempFixture.test(
-    "FeatureDone with a classified failure: learner consulted → profile delta saved, proposal persisted"
+    "FeatureDone with a classified failure: learner consulted → profile delta saved, CLAUDE.md PR opened"
   ): root =>
     val (out, saved, learnCalls, paths) = driveToDone(root, testConfig, seedFailure = true)
 
@@ -168,12 +174,28 @@ class OrchestratorConventionLearnerSuite extends munit.FunSuite:
     assert(savedProfile.command(CommandKind.Format).exists(_.autofix), savedProfile.commands.toString)
     // The existing Build command is preserved (additive merge).
     assert(savedProfile.command(CommandKind.Build).isDefined)
-    // The proposed CLAUDE.md edit is persisted for human review — never auto-applied, never a PR.
-    val proposal = os.read(paths.audit(featureId, "learned-conventions.md"))
-    assert(proposal.contains("sbt scalafmtAll"), proposal)
-    assert(proposal.contains("Forge does not open this PR itself"), proposal)
-    // The learning is observable in the action log.
-    assert(os.read(paths.featureLog(featureId)).contains("\"profile.conventions_learned\""))
+    // §11.7: the proposed CLAUDE.md edit is opened as a PR (#900 from the fake) — its number is recorded in the audit.
+    val log = os.read(paths.featureLog(featureId))
+    assert(log.contains("\"profile.conventions_learned\""), log)
+    assert(log.contains("\"claudeMdPrNumber\":900"), log)
+    // The PR succeeded, so the local persist-fallback was NOT triggered.
+    assert(!os.exists(paths.audit(featureId, "learned-conventions.md")))
+
+  tempFixture.test("conventions PR fails to open → proposal persisted locally as a fallback, no PR number logged"):
+    root =>
+      val (out, _, learnCalls, paths) =
+        driveToDone(root, testConfig, seedFailure = true, sideEffects = new PrFailingSideEffects)
+
+      assertEquals(out.state, FsmState.FeatureDone: FsmState)
+      assertEquals(learnCalls.get(), 1)
+      // The PR open failed, so the proposal is persisted to the audit dir so it is not lost.
+      val proposal = os.read(paths.audit(featureId, "learned-conventions.md"))
+      assert(proposal.contains("sbt scalafmtAll"), proposal)
+      assert(proposal.contains("could not open a PR"), proposal)
+      // The action still records the learning, with a null PR number.
+      val log = os.read(paths.featureLog(featureId))
+      assert(log.contains("\"profile.conventions_learned\""), log)
+      assert(log.contains("\"claudeMdPrNumber\":null"), log)
 
   tempFixture.test("adapt.conventionLearner = false: learner is never consulted, nothing saved or logged"): root =>
     val cfg = testConfig.copy(adapt = testConfig.adapt.copy(conventionLearner = false))

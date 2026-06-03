@@ -311,7 +311,7 @@ final class Orchestrator(
             readClaudeDoc.flatMap { claudeDoc =>
               val input = ConventionLearnerInput(feature.id, p, claudeDoc, failures)
               reviewer.learnConventions(input, ReviewerLimits(reviewerWallClock)).flatMap {
-                case ReviewerOutcome.Settled(deltas) => applyConventionDeltas(feature.id, p, deltas)
+                case ReviewerOutcome.Settled(deltas) => applyConventionDeltas(feature, p, deltas)
                 case _ => IO.unit // Timeout / AdapterFailure — advisory, dropped (§14.2)
               }
             }
@@ -320,34 +320,45 @@ final class Orchestrator(
     body.handleErrorWith(_ => IO.unit)
 
   /** Apply a settled [[ConventionDeltas]] proposal: merge fresh command deltas into the committed profile (skipping the
-    * `save` when nothing is fresh — see [[ConventionDeltas.freshCommands]]), persist any proposed CLAUDE.md edit for
-    * human review, and record the `profile.conventions_learned` audit action regardless (so the run shows the learner
-    * was consulted, even when it proposed nothing actionable).
+    * `save` when nothing is fresh — see [[ConventionDeltas.freshCommands]]); for a proposed CLAUDE.md edit, **open a
+    * PR** for human approval (§11.7, D9) and, if that fails, fall back to persisting the proposal locally so it is
+    * never lost; then record the `profile.conventions_learned` audit action (carrying the opened PR number) regardless
+    * — so the run shows the learner was consulted even when it proposed nothing actionable.
     */
   private def applyConventionDeltas(
-      featureId: io.forge.core.FeatureId,
+      feature: Feature,
       profile: RepoProfile,
       deltas: ConventionDeltas
   ): IO[Unit] =
+    val featureId = feature.id
     val fresh = deltas.freshCommands(profile)
     val saveProfile = if fresh.isEmpty then IO.unit else profileStore.save(deltas.applyTo(profile))
-    val writeProposal = deltas.claudeMdProposal match
-      case Some(proposal) => writeConventionProposal(featureId, proposal, deltas.summary)
-      case None => IO.unit
+    val proposeClaudeMd: IO[Option[io.forge.core.PrNumber]] = deltas.claudeMdProposal match
+      case None => IO.pure(None)
+      case Some(proposal) =>
+        // §11.7: the proposed CLAUDE.md edit is opened as a PR for human approval. A failure (dirty tree, push
+        // rejected, gh down) is advisory — fall back to persisting the proposal locally so it survives, and record
+        // no PR number.
+        sideEffects.openConventionsPr(feature, proposal).flatMap {
+          case Right(pr) => IO.pure(Some(pr))
+          case Left(_) => persistConventionProposalLocally(featureId, proposal, deltas.summary).as(None)
+        }
     saveProfile >>
-      writeProposal >>
-      log
-        .append(
-          featureId,
-          ConventionsLearnedAction.draft(featureId, fresh, deltas.claudeMdProposal.isDefined, deltas.summary)
-        )
-        .void
+      proposeClaudeMd.flatMap { prNumber =>
+        log
+          .append(
+            featureId,
+            ConventionsLearnedAction
+              .draft(featureId, fresh, deltas.claudeMdProposal.isDefined, prNumber, deltas.summary)
+          )
+          .void
+      }
 
-  /** Persist the proposed CLAUDE.md addition to the feature's committed audit dir (`.forge/specs/<feature>/audit/`) for
-    * human review. **Never** edits CLAUDE.md or opens a PR (§11.7 "no autonomous doc mutation"; the auto-PR-open is a
-    * deferred follow-up, design-3.0 §4).
+  /** Fallback when the §11.7 conventions PR could not be opened: persist the proposed CLAUDE.md addition to the
+    * feature's committed audit dir (`.forge/specs/<feature>/audit/`) so a human can still find and apply it. Never
+    * edits CLAUDE.md directly (§11.7 "no autonomous doc mutation").
     */
-  private def writeConventionProposal(
+  private def persistConventionProposalLocally(
       featureId: io.forge.core.FeatureId,
       proposal: io.forge.core.profile.ClaudeMdProposal,
       summary: String
@@ -358,7 +369,8 @@ final class Orchestrator(
       val md =
         s"""# Proposed CLAUDE.md convention (forge ConventionLearner)
            |
-           |_Proposed for **${featureId.value}** — review and merge into CLAUDE.md by hand; Forge does not open this PR itself (§11.7)._
+           |_Proposed for **${featureId.value}** — Forge could not open a PR for this edit, so it is recorded here;
+           |review and merge into CLAUDE.md by hand (§11.7)._
            |
            |## Summary
            |$summary

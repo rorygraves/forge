@@ -283,6 +283,13 @@ object OrchestratorTestKit:
         commands: Vector[io.forge.core.profile.RepoCommand]
     ): IO[Either[String, Unit]] = IO.pure(Right(()))
 
+    // §11.7 / D9 — default: the conventions PR opens cleanly as #900. The learner suite subclasses to record the call
+    // or to inject a Left (so the orchestrator's persist-locally fallback can be asserted).
+    override def openConventionsPr(
+        feature: Feature,
+        proposal: io.forge.core.profile.ClaudeMdProposal
+    ): IO[Either[String, PrNumber]] = IO.pure(Right(PrNumber(900)))
+
   // --- StateCache wrapper: records every saved state + runs an onSave hook (delivers merge snapshots on demand) ---
 
   final class HookStateCache(delegate: StateCache, onSave: Feature => IO[Unit]) extends StateCache:
