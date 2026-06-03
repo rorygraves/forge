@@ -103,6 +103,15 @@ object EventSources:
         requirePhase(state, activeSession, SessionPhase.Fixup)
         Vector(EventSource.Monitor)
 
+      // §8.3 / §11.4 (1.8) pre-PR Build fix-up — mirrors PieceCiFailed / PieceFixingUp.
+      case _: FsmState.PieceBuildFailed =>
+        requireNoSession(state, activeSession)
+        Vector.empty // entry hook spawns launchBuildFixup, re-loop
+
+      case _: FsmState.PieceBuildFixingUp =>
+        requirePhase(state, activeSession, SessionPhase.Fixup)
+        Vector(EventSource.Monitor)
+
       case s: FsmState.PieceAwaitingMerge =>
         requireNoSession(state, activeSession)
         Vector(EventSource.Watcher(s.prNumber))

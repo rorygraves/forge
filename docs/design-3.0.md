@@ -183,12 +183,12 @@ real run, not just fakes (the `gh` wire-shape + subprocess-lifecycle discipline 
       on a non-zero exit). `forge-app` 384 / `forge-core` 424 green; `scalafmtCheckAll` clean.
 - [x] Gated by `adapt.localGate` (+ `adapt.autofix`); `Heuristic` commands are never run locally
       (the `Deterministic` filter excludes them); `adapt.enabled = false` ⇒ `None` profile ⇒ no-op.
-- [ ] **Build gate — deferred (decision D2, see §4).** A local `Build` `CodeFix` "routes to a pre-PR
-      driver fix-up" needs new FSM machinery — the only fix-up states (`PieceCiFailed` / `PieceFixingUp`)
-      all carry a PR number; there is no pre-PR fix-up path. Doing it without that would *regress* vs
-      1.6 (where a build failure reaches CI and auto-routes to a fix-up with the full log). Deferred to
-      a follow-up slice (§11/1.8 contract change). Build failures keep the 1.6 path: surface at CI,
-      route via §8.2.
+- [x] **Build gate — ✅ landed 2026-06-03 in its own slice ([`design-3.1-build-gate.md`](design-3.1-build-gate.md), decision D2).**
+      A local `Build` `CodeFix` "routes to a pre-PR driver fix-up" needed new FSM machinery — the only fix-up
+      states (`PieceCiFailed` / `PieceFixingUp`) all carry a PR number; there was no pre-PR fix-up path. That
+      slice adds two pre-PR states (`PieceBuildFailed` / `PieceBuildFixingUp`) + a `LocalBuildFailed` event
+      (the §11/1.8 contract change), catching a compile error pre-PR and fixing it with a re-gating driver
+      fix-up — without consuming a CI fix-up round. Contract: [`forge-design-1.8.md`](forge-design-1.8.md).
 
 ### Task 3.1.4 — LLM classifyFailure on Unknown  ✅ 2026-06-02
 
@@ -490,15 +490,19 @@ pre-push). Revisit only if a formatter that touches files *outside* the driver's
 repo with pre-existing violations) must be confined to the piece commit; today such stray changes enter the change set
 exactly as the §8.2 CI autofix already accepts via `git status`.
 
-### D2 — the §8.3 local **Build** gate is deferred; needs a pre-PR fix-up FSM path — open (scoped out 2026-06-02)
+### D2 — the §8.3 local **Build** gate is deferred; needs a pre-PR fix-up FSM path — ✅ resolved 2026-06-03 ([`design-3.1-build-gate.md`](design-3.1-build-gate.md))
 
-§8.3 says a local `Build` `CodeFix` "routes straight to a **pre-PR driver fix-up**". The frozen §11 FSM has no such
+§8.3 says a local `Build` `CodeFix` "routes straight to a **pre-PR driver fix-up**". The frozen §11 FSM had no such
 path: the only fix-up states (`PieceCiFailed` / `PieceFixingUp`) both carry a PR number, and `classifyCommitOpenPr`'s
 `Left` routes to NHI (`ResolveLocalImplementationChanges`), not a fix-up loop. Building a true pre-PR fix-up is a §11
 contract change (new state/events + a 1.7→1.8 revision), beyond a Tier-2 task; and the shortcut (gate a build failure →
 NHI pre-PR) would **regress** vs 1.6, where the same failure reaches CI and auto-routes to a fix-up with the full log
-(§8.2). So Task 3.1.3 shipped the Format gate only (the dogfood-#3 headline); Build failures keep the 1.6 path. Decided
-via `AskUserQuestion` (2026-06-02). Pick this up as its own slice when the pre-PR fix-up FSM path is designed.
+(§8.2). So Task 3.1.3 shipped the Format gate only (the dogfood-#3 headline); Build failures kept the 1.6 path. Decided
+via `AskUserQuestion` (2026-06-02). **Resolved 2026-06-03** as its own slice, [`design-3.1-build-gate.md`](design-3.1-build-gate.md):
+two new pre-PR FSM states (`PieceBuildFailed` / `PieceBuildFixingUp`) + a `LocalBuildFailed` event carry the §8.3 Build
+`CodeFix` to a pre-PR driver fix-up that re-gates before opening the PR — with the fix-up budget in-state (never
+`manifest.attempts`) and a fall-through to the 1.6 PR-open for any non-`CodeFix` route (decision D2a there). Contract:
+[`forge-design-1.8.md`](forge-design-1.8.md).
 
 ### D3 — `profile.local_gate` is a new §19 `profile.*` kind not yet enumerated in the 1.7 contract — open (1.7 §19)
 

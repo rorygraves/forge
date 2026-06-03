@@ -178,6 +178,8 @@ object Generators:
       for p <- genPieceId; pr <- genPrNumber; a <- Gen.choose(0, 5) yield FsmState.PieceCiFailed(p, pr, a),
       for p <- genPieceId; pr <- genPrNumber; a <- Gen.choose(0, 5) yield FsmState.PieceReviewFailed(p, pr, a),
       for p <- genPieceId; pr <- genPrNumber; a <- Gen.choose(0, 5) yield FsmState.PieceFixingUp(p, pr, a),
+      for p <- genPieceId; a <- Gen.choose(0, 5) yield FsmState.PieceBuildFailed(p, a),
+      for p <- genPieceId; a <- Gen.choose(0, 5) yield FsmState.PieceBuildFixingUp(p, a),
       for p <- genPieceId; pr <- genPrNumber yield FsmState.PieceAwaitingMerge(p, pr),
       for p <- genPieceId; pr <- genPrNumber; t <- genInstant yield FsmState.Refining(p, pr, t)
     )

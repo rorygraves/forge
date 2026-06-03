@@ -538,6 +538,28 @@ final class Orchestrator(
                   .flatMap(as => store(driverRef, totalsRef, as).as(Some(spawned(as, Some(s.p)))))
         }
 
+      // §8.3 / §11.4 (1.8) pre-PR Build fix-up — awaiting-spawn state, mirrors PieceCiFailed: launch a fresh fix-up
+      // driver unconditionally (the SessionSpawned drives PieceBuildFixingUp). `launchBuildFixup` reads the build log
+      // the Build gate already wrote to `pieces/<p>.failures.md`; there is no PR-side `writeFailures`.
+      case s: FsmState.PieceBuildFailed =>
+        sideEffects
+          .launchBuildFixup(feature, s.p, s.attempt)
+          .flatMap(as => store(driverRef, totalsRef, as).as(Some(spawned(as, Some(s.p)))))
+
+      // §8.3 / §11.4 (1.8) pre-PR Build fix-up — driver-running state, mirrors PieceFixingUp's D3-3 restart resume-gate
+      // (a durable session id + no live driver ⇒ resume the existing fix-up session; otherwise fresh `launchBuildFixup`).
+      case s: FsmState.PieceBuildFixingUp =>
+        driverRef.get.flatMap {
+          case Some(_) => IO.pure(None)
+          case None =>
+            feature.currentPieceSessionId match
+              case Some(sid) => resumePieceDriver(feature, s.p, sid, SessionPhase.Fixup, driverRef, totalsRef)
+              case None =>
+                sideEffects
+                  .launchBuildFixup(feature, s.p, s.attempt)
+                  .flatMap(as => store(driverRef, totalsRef, as).as(Some(spawned(as, Some(s.p)))))
+        }
+
       // Watcher / reviewer / user-Q&A states have no entry side effect: fall through to the race.
       case _ => IO.pure(None)
 
@@ -800,12 +822,13 @@ final class Orchestrator(
       feature: Feature,
       failureLog: String,
       rulesRouted: RoutedFailure,
-      profile: RepoProfile
+      profile: RepoProfile,
+      gate: String = "ci"
   ): IO[RoutedFailure] =
     if !config.adapt.llmClassifierOnUnknown || rulesRouted.classification.kind != FailureKind.Unknown then
       IO.pure(rulesRouted)
     else
-      val input = FailureClassifierInput(feature.id, gate = "ci", failureLog = failureLog, profile = profile)
+      val input = FailureClassifierInput(feature.id, gate = gate, failureLog = failureLog, profile = profile)
       reviewer.classifyFailure(input, ReviewerLimits(reviewerWallClock)).map {
         case ReviewerOutcome.Settled(llm) =>
           failureRouter.routeFrom(llm, profile, failureLog, config.adapt, source = "llm")
@@ -893,6 +916,113 @@ final class Orchestrator(
       payload = ujson.Obj(
         "gate" -> ujson.Str("local"),
         "kind" -> ujson.Str("format"),
+        "commands" -> ujson.Arr(commands.map(c => ujson.Str(c.argv.mkString(" ")))*)
+      )
+    )
+
+  // ---------------------------------------------------------------------------
+  // §8.3 local Build gate (shift-left, pre-PR — 1.8 / decision D2)
+  // ---------------------------------------------------------------------------
+
+  /** §8.3 / §11.4 (1.8) — the post-settle `ClassifyCommitOpenPr` body for both `PieceImplementing` and a re-gating
+    * `PieceBuildFixingUp`. Runs the local **Format** gate (best-effort in-place autofix, Task 3.1.3) then the local
+    * **Build** gate, before the commit/PR:
+    *
+    *   - no Build gate (unprofiled / `adapt.localGate` off / no required deterministic non-autofix `Build` command) ⇒
+    *     proceed straight to `classifyCommitOpenPr` — byte-identical to 1.6.
+    *   - Build passes ⇒ record `profile.local_gate {kind: build, result: pass}`, then `classifyCommitOpenPr` (→
+    *     `PrOpened`).
+    *   - Build fails ⇒ classify the captured output via §8.2. A `DriverFixup` (`CodeFix`) routes to a **pre-PR** driver
+    *     fix-up: write the full build log to `pieces/<p>.failures.md` and return `LocalBuildFailed` (→
+    *     `PieceBuildFailed`, catching the compile error before the costly CI round-trip). Any other route
+    *     (Env/RateLimit/Retry/Escalate/an unexpected local autofix) falls through to `classifyCommitOpenPr` — the PR
+    *     opens and the existing §8.2 CI path handles it, so the Build gate is strictly additive and never a pre-PR
+    *     regression vs 1.6.
+    */
+  private def runLocalGatesThenOpenPr(
+      feature: Feature,
+      piece: PieceId,
+      profile: Option[RepoProfile]
+  ): IO[Either[String, FsmEvent]] =
+    runLocalFormatGate(feature, piece, profile) >> {
+      (profile, localBuildGateCommands(profile)) match
+        case (Some(p), commands) if commands.nonEmpty =>
+          sideEffects.runLocalBuildGate(feature, piece, commands).flatMap {
+            case Right(()) =>
+              log.append(feature.id, localBuildGateDraft(feature, piece, commands, passed = true)) >>
+                sideEffects.classifyCommitOpenPr(feature, piece)
+            case Left(failureLog) =>
+              log.append(feature.id, localBuildGateDraft(feature, piece, commands, passed = false)) >>
+                routeBuildGateFailure(feature, piece, p, failureLog)
+          }
+        case _ => sideEffects.classifyCommitOpenPr(feature, piece)
+    }
+
+  /** §8.2 classified routing on a **local** Build gate failure (the pre-PR sibling of [[routeCiFailure]]). Records
+    * `profile.failure_classified {gate: local}` before acting. A `DriverFixup` writes the build log to
+    * `pieces/<p>.failures.md` and returns `LocalBuildFailed`; everything else falls through to the PR open (1.6 CI
+    * path).
+    */
+  private def routeBuildGateFailure(
+      feature: Feature,
+      piece: PieceId,
+      profile: RepoProfile,
+      failureLog: String
+  ): IO[Either[String, FsmEvent]] =
+    maybeLlmClassify(
+      feature,
+      failureLog,
+      failureRouter.route(profile, failureLog, config.adapt),
+      profile,
+      gate = "local"
+    )
+      .flatMap { routed =>
+        val classifiedDraft =
+          FailureClassifiedAction.draft(feature.id, piece, "local", routed.classification, routed.route, routed.source)
+        log.append(feature.id, classifiedDraft) >> {
+          routed.route match
+            case _: FixupRoute.DriverFixup =>
+              sideEffects.writeBuildFailures(feature, piece, failureLog).as(Right(FsmEvent.LocalBuildFailed(piece)))
+            case _ => sideEffects.classifyCommitOpenPr(feature, piece)
+        }
+      }
+
+  /** Pure resolver — the profile's `required`, `Deterministic`, **non-`autofix`** `Build` commands, or empty when the
+    * local gate is off (`adapt.localGate`), the run is unprofiled, or the profile declares no such command (each ⇒
+    * exact 1.6 behaviour). Unlike the Format gate this is **not** gated on `adapt.autofix` (a build is a check, not an
+    * autofix — the fix is a driver turn) and filters `!autofix` (a build never rewrites the tree to fix itself).
+    * `Heuristic` commands (a flaky integration suite) stay on the CI side per §8.3. `adapt.enabled = false` is folded
+    * into a `None` profile by [[resolveProfile]].
+    */
+  private def localBuildGateCommands(profile: Option[RepoProfile]): Vector[RepoCommand] =
+    if !config.adapt.localGate then Vector.empty
+    else
+      profile.toVector
+        .flatMap(_.commands)
+        .filter(c =>
+          c.kind == CommandKind.Build && c.required && !c.autofix && c.determinism == Determinism.Deterministic
+        )
+
+  /** §8.3 / §19 — the local Build gate's audit record: which deterministic commands ran pre-PR and whether they passed.
+    * A `profile.*` kind like [[localGateDraft]] (no-op `Replay` projection, consumed by `forge stats` / the TUI). The
+    * §19 enumeration gap is filed in the design doc for the next contract revision.
+    */
+  private def localBuildGateDraft(
+      feature: Feature,
+      piece: PieceId,
+      commands: Vector[RepoCommand],
+      passed: Boolean
+  ): ActionDraft =
+    ActionDraft(
+      feature.id,
+      Some(piece),
+      actor = None,
+      role = None,
+      kind = "profile.local_gate",
+      payload = ujson.Obj(
+        "gate" -> ujson.Str("local"),
+        "kind" -> ujson.Str("build"),
+        "result" -> ujson.Str(if passed then "pass" else "fail"),
         "commands" -> ujson.Arr(commands.map(c => ujson.Str(c.argv.mkString(" ")))*)
       )
     )
@@ -1156,12 +1286,13 @@ final class Orchestrator(
           case s: FsmState.DesignPrFeedback => sideEffects.repushDesignFeedback(feature, s.prNumber, s.round)
           case other => IO.pure(Left(s"RepushDesignFeedback in unexpected state $other"))
       case SettleEffect.ClassifyCommitOpenPr =>
+        // §8.3: run the local Format + Build gates on the working tree BEFORE the commit/PR. Reached from
+        // PieceImplementing (the first post-implement settle) AND PieceBuildFixingUp (a pre-PR build fix-up settled
+        // clean → re-gate). Both pass the piece through the same gate → open-PR logic; the gates are a no-op when
+        // unprofiled / `adapt.localGate` off (exact 1.6 behaviour).
         feature.state match
-          // §8.3 (Task 3.1.3): run the local format gate on the working tree BEFORE the commit so the driver's output
-          // is rewritten in place and the piece commit is format-clean before it reaches CI (dogfood #3). The gate is a
-          // no-op when unprofiled / `adapt.localGate` off (exact 1.6 behaviour), so this preserves the unprofiled path.
-          case s: FsmState.PieceImplementing =>
-            runLocalFormatGate(feature, s.p, profile) >> sideEffects.classifyCommitOpenPr(feature, s.p)
+          case s: FsmState.PieceImplementing => runLocalGatesThenOpenPr(feature, s.p, profile)
+          case s: FsmState.PieceBuildFixingUp => runLocalGatesThenOpenPr(feature, s.p, profile)
           case other => IO.pure(Left(s"ClassifyCommitOpenPr in unexpected state $other"))
       case SettleEffect.ClassifyCommitPush =>
         feature.state match

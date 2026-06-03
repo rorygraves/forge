@@ -100,6 +100,11 @@ object PostSettleSynthesis:
         )
       case (s: FsmState.PieceImplementing, SessionPhase.Implement) =>
         SettlePlan(SettleEffect.ClassifyCommitOpenPr, SettleSynthesis.PrOpenedAfterCreate(s.p))
+      // §8.3 / §11.4 (1.8) — a pre-PR Build fix-up driver settled clean: re-run the local Build gate via the same
+      // ClassifyCommitOpenPr effect as PieceImplementing. Pass ⇒ the effect returns `PrOpened`; re-fail ⇒ it returns
+      // `LocalBuildFailed`. PrOpenedAfterCreate is the optimistic synthesis; the effect supplies the real event.
+      case (s: FsmState.PieceBuildFixingUp, SessionPhase.Fixup) =>
+        SettlePlan(SettleEffect.ClassifyCommitOpenPr, SettleSynthesis.PrOpenedAfterCreate(s.p))
       case (s: FsmState.PieceFixingUp, SessionPhase.Fixup) =>
         val _ = s
         SettlePlan(

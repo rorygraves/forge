@@ -73,6 +73,19 @@ class OrchestratorPostSettleSynthesisSuite extends munit.FunSuite:
       SettlePlan(ClassifyCommitPush, SettleSynthesis.Event(FsmEvent.Settled(SessionPhase.Fixup, SettleOutcome.Clean)))
     )
 
+  test(
+    "PieceBuildFixingUp + Settled(Fixup, Clean) → re-run Build gate via ClassifyCommitOpenPr, synth PrOpenedAfterCreate"
+  ):
+    // §8.3 (1.8): a pre-PR build fix-up settles clean → re-gate via the same ClassifyCommitOpenPr effect as
+    // PieceImplementing (the effect supplies the real PrOpened / LocalBuildFailed event).
+    assertEquals(
+      PostSettleSynthesis.plan(
+        FsmState.PieceBuildFixingUp(P1, 1),
+        MonitorOutcome.Settled(SessionPhase.Fixup, SettleOutcome.Clean)
+      ),
+      SettlePlan(ClassifyCommitOpenPr, SettleSynthesis.PrOpenedAfterCreate(P1))
+    )
+
   // ---------------------------------------------------------------------------
   // Pass-through rows: no side effects, the converted event drives the FSM directly.
   // ---------------------------------------------------------------------------

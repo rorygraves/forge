@@ -15,9 +15,11 @@ deleted; git holds the full lineage either way.)
 | Doc | What it is |
 |---|---|
 | [`roadmap.md`](roadmap.md) | Multi-horizon product plan. Phase 3 = Repo Adaptation (the current pivot); Phase 4 = workspace/workstream platform; Phase 5 = cockpit. |
-| [`forge-design-1.6.md`](forge-design-1.6.md) | **Live implementation contract** (the spec). §-numbers are preserved across revisions, so a "v1.2 §N" reference resolves to the same §N here. |
+| [`forge-design-1.8.md`](forge-design-1.8.md) | **Live implementation contract** (the spec) — latest revision. Standalone-by-freeze over 1.7: restates only §6/§8.3/§11.4/§11.5/§19 (the pre-PR Build gate, design-3.0 D2), freezing the rest at 1.7. §-numbers preserved, so a "v1.2 §N" reference resolves to the same §N. |
+| [`forge-design-1.7.md`](forge-design-1.7.md) | Phase-3 architectural revision (Repo Adaptation): `RepoProfile` / `WorkflowProfile`, sensor surface (§3/§6/§7/§8/§11/§18/§19). 1.8 freezes its unchanged sections; read both together. |
+| [`forge-design-1.6.md`](forge-design-1.6.md) | The pre-Phase-3 base (Phases 1–2). 1.7/1.8 freeze its unchanged sections. |
 | [`design-rationale.md`](design-rationale.md) | Why the spec looks the way it does. Decision/rejected/where-to-read per item. **A5** is the Phase-3 architecture direction. |
-| `forge-design-1.7.md` | *To be opened* — the implementation contract for Phase 3 (Repo Adaptation): `RepoProfile` / `WorkflowProfile`, sensor surface, new lifecycle seams, §19 `profile.snapshot`. |
+| [`design-3.0.md`](design-3.0.md) / [`design-3.1-build-gate.md`](design-3.1-build-gate.md) | Phase-3 implementation plans — Slice 3.0/3.1 (RepoProfile + senses) and the 3.1-D2 pre-PR Build gate. Task breakdowns, status logs, carry-forwards. |
 
 ## Reference / support
 

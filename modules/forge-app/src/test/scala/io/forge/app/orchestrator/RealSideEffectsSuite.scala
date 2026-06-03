@@ -219,6 +219,44 @@ class RealSideEffectsSuite extends munit.FunSuite:
     assert(ev.isLeft, ev.toString)
     assert(!os.exists(repo / "should-not-run"), "a command after a failing one must not run")
 
+  // --- runLocalBuildGate / writeBuildFailures / launchBuildFixup (§8.3 Build gate, 1.8) ---
+
+  private def buildCmd(argv: String*): io.forge.core.profile.RepoCommand =
+    import io.forge.core.profile.{CommandKind, Determinism, RepoCommand}
+    RepoCommand(CommandKind.Build, argv.toVector, Determinism.Deterministic, required = true, autofix = false)
+
+  tempFixture.test("runLocalBuildGate: every command exits 0 → Right(())"): repo =>
+    val se = sut(repo)
+    val ev = se
+      .runLocalBuildGate(feature(FsmState.PieceImplementing(p1)), p1, Vector(buildCmd("sh", "-c", "true")))
+      .unsafeRunSync()
+    assertEquals(ev, Right(()))
+
+  tempFixture.test("runLocalBuildGate: non-zero exit → Left carrying the FULL output (not the 500-char tail)"): repo =>
+    // STARTMARKER is emitted >500 chars before the end, so the truncating `runCommand` tail would drop it; the Build
+    // gate's full-capture must keep it so the fix-up driver sees the whole compile error.
+    val se = sut(repo)
+    val script = "printf STARTMARKER; for i in $(seq 1 600); do printf x; done; exit 1"
+    val ev = se
+      .runLocalBuildGate(feature(FsmState.PieceImplementing(p1)), p1, Vector(buildCmd("sh", "-c", script)))
+      .unsafeRunSync()
+    assert(ev.isLeft, ev.toString)
+    assert(ev.swap.toOption.get.contains("STARTMARKER"), "the full output must be captured, not truncated")
+
+  tempFixture.test("writeBuildFailures writes the build log to <p>.failures.md; launchBuildFixup leaves it intact"):
+    repo =>
+      // No PR exists pre-PR, so the failures.md carries the local build log (not a gh check report), and launchBuildFixup
+      // must NOT overwrite it (unlike launchFixup, which re-derives from gh).
+      val feat =
+        featureAt(featureId, mkManifest(featureId, Vector(piecePending(p1, 1))), FsmState.PieceBuildFailed(p1, 1))
+      val se = sut(repo)
+      se.writeBuildFailures(feat, p1, "[error] type mismatch: found String required Int").unsafeRunSync()
+      val failuresPath = repo / ".forge" / "specs" / "feat" / "pieces" / "p1.failures.md"
+      val written = os.read(failuresPath)
+      assert(written.contains("type mismatch") && written.contains("local build failed"), written)
+      se.launchBuildFixup(feat, p1, 1).unsafeRunSync()
+      assertEquals(os.read(failuresPath), written, "launchBuildFixup must not overwrite the build log")
+
   // --- advancePieceBranch ---------------------------------------------------
 
   tempFixture.test("advancePieceBranch: syncBase + createPieceBranch → BranchCreated"): repo =>

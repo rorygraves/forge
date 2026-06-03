@@ -51,6 +51,8 @@ object RestartRecovery:
         "implementation interrupted by process restart; worktree may have uncommitted changes"
       case (SessionPhase.Fixup, _: FsmState.PieceFixingUp) =>
         "fix-up interrupted by process restart; worktree may have uncommitted changes"
+      case (SessionPhase.Fixup, _: FsmState.PieceBuildFixingUp) =>
+        "pre-PR build fix-up interrupted by process restart; worktree may have uncommitted changes"
       case _ =>
         s"$phase session interrupted by process restart (unexpected state $state)"
 
@@ -82,4 +84,6 @@ object RestartRecovery:
     (phase, state) match
       case (SessionPhase.Implement, _: FsmState.PieceImplementing) => true
       case (SessionPhase.Fixup, _: FsmState.PieceFixingUp) => true
+      // §8.3 / §11.4 (1.8) pre-PR build fix-up — a Fixup-phase piece driver, resumable like PieceFixingUp.
+      case (SessionPhase.Fixup, _: FsmState.PieceBuildFixingUp) => true
       case _ => false

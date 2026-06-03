@@ -17,10 +17,11 @@ import upickle.default.ReadWriter
   *   - `designSessionId`: populated on the first `InteractiveSpec` spawn / design-revision resume; retained through
   *     every design-phase state (`DesignReviewing`, `DesignNeedsHumanInput`, `DesignAwaitingMerge`,
   *     `DesignPrFeedback`); cleared on entering `DesignReady`.
-  *   - `currentPieceSessionId`: populated at `PieceImplementing` or `PieceFixingUp` spawn; retained through
-  *     `PieceAwaitingCi`, `PieceAwaitingReview`, `PieceCiFailed`, `PieceReviewFailed`, `PieceFixingUp`,
-  *     `PieceAwaitingMerge`, `Refining`; cleared at the moment of advancing past the piece (to next
-  *     `PieceImplementing`, `FeatureDone`, `PlanningUpdate`, or `NeedsHumanIntervention`).
+  *   - `currentPieceSessionId`: populated at `PieceImplementing`, `PieceFixingUp`, or `PieceBuildFixingUp` (§8.3 pre-PR
+  *     build fix-up) spawn; retained through `PieceAwaitingCi`, `PieceAwaitingReview`, `PieceCiFailed`,
+  *     `PieceReviewFailed`, `PieceFixingUp`, `PieceBuildFailed`, `PieceBuildFixingUp`, `PieceAwaitingMerge`,
+  *     `Refining`; cleared at the moment of advancing past the piece (to next `PieceImplementing`, `FeatureDone`,
+  *     `PlanningUpdate`, or `NeedsHumanIntervention`).
   *
   * `branchProtectionCacheEpoch` is bumped on every `forge resume` (§8.1) so cached branch-protection results from a
   * prior orchestrator process are invalidated.

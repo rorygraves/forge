@@ -310,6 +310,43 @@ final class RealSideEffects(
     // the first non-zero exit; the caller ignores the Left and proceeds (the failure, if real, surfaces at the CI gate).
     commands.foldLeft(EitherT.pure[IO, String](()))((acc, cmd) => acc.flatMap(_ => runCommand(cmd.argv))).value
 
+  override def runLocalBuildGate(
+      feature: Feature,
+      piece: PieceId,
+      commands: Vector[RepoCommand]
+  ): IO[Either[String, Unit]] =
+    // §8.3 shift-left Build gate: run each required deterministic non-autofix Build command on the working tree, in
+    // order, short-circuiting to a `Left` carrying the FULL captured output (not the 500-char `runCommand` tail) on the
+    // first non-zero exit, so the pre-PR fix-up driver sees the real compile error. No commit/push: the gate is a check.
+    val _ = (feature, piece)
+    commands.foldLeft(EitherT.pure[IO, String](()))((acc, cmd) => acc.flatMap(_ => runCommandFull(cmd.argv))).value
+
+  override def writeBuildFailures(feature: Feature, piece: PieceId, failureLog: String): IO[Unit] =
+    // §8.3 — pre-PR sibling of `writeFailures`: no PR exists, so there are no `gh pr checks` to fetch — just persist the
+    // captured local Build gate log to `pieces/<p>.failures.md`, the same channel the fix-up prompt reads.
+    IO.blocking(
+      os.write.over(failuresFile(feature.id, piece), buildFailuresMd(piece, failureLog), createFolders = true)
+    )
+
+  override def launchBuildFixup(feature: Feature, piece: PieceId, attempt: Int): IO[ActiveSession] =
+    // §8.3 — the pre-PR Build fix-up driver. Unlike `launchFixup`, NO `writeFailures` (no PR / no CI checks): the Build
+    // gate already wrote `pieces/<p>.failures.md` via `writeBuildFailures`, and `fixupBody` points the driver at it.
+    connector
+      .runFixup(FixupPrompt(feature.id, piece, attempt, promptPath("fixup"), fixupBody(feature, piece, attempt)))
+      .map(ActiveSession(SessionPhase.Fixup, _))
+
+  private def buildFailuresMd(piece: PieceId, failureLog: String): String =
+    s"""# Piece ${piece.value} — local build failed (pre-PR)
+       |
+       |The repo's deterministic build command failed on your changes **before** the PR was opened. Fix the underlying
+       |error (a compile / type error, not a formatting issue) so the build passes, then stop; Forge re-runs the build
+       |gate and opens the PR once it is green.
+       |
+       |```
+       |${failureLog.trim}
+       |```
+       |""".stripMargin
+
   // --- §11.7 / D9 ConventionLearner PR -------------------------------------
 
   override def openConventionsPr(feature: Feature, proposal: ClaudeMdProposal): IO[Either[String, PrNumber]] =
@@ -383,6 +420,18 @@ final class RealSideEffects(
       else
         val tail = (res.out.text() + res.err.text()).takeRight(500).trim
         Left(s"local command '${argv.mkString(" ")}' failed (exit ${res.exitCode}): $tail")
+    })
+
+  /** Like [[runCommand]] but the `Left` carries the **full** combined stdout+stderr, not the 500-char tail — the §8.3
+    * Build gate hands this log to a fix-up driver, which needs the whole compile error, not a truncated suffix.
+    */
+  private def runCommandFull(argv: Vector[String]): EitherT[IO, String, Unit] =
+    EitherT(IO.blocking {
+      val res = os.proc(argv).call(cwd = paths.repoRoot, check = false, stderr = os.Pipe, stdout = os.Pipe)
+      if res.exitCode == 0 then Right(())
+      else
+        val full = (res.out.text() + res.err.text()).trim
+        Left(s"local command '${argv.mkString(" ")}' failed (exit ${res.exitCode}):\n$full")
     })
 
   // --- D3-3 worktree-safety classification ----------------------------------

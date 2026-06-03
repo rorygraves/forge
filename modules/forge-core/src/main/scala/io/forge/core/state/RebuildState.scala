@@ -207,6 +207,11 @@ object RebuildState:
       case _: FsmState.DesignPrFeedback => Some((SessionPhase.DesignRevision, None))
       case s: FsmState.PieceImplementing => Some((SessionPhase.Implement, Some(s.p)))
       case s: FsmState.PieceFixingUp => Some((SessionPhase.Fixup, Some(s.p)))
+      // §8.3 / §11.4 (1.8) pre-PR Build fix-up driver — a Fixup-phase piece driver like `PieceFixingUp`. The post-settle
+      // `ClassifyCommitOpenPr` effect writes a `monitor.outcome` marker, so a mid-fix-up crash is recoverable
+      // (in-flight → resume; settled-but-unadvanced → re-run the idempotent Build gate + PR open). `PieceBuildFailed`
+      // (awaiting spawn, no live driver) correctly falls to the `None` default, like `PieceCiFailed`.
+      case s: FsmState.PieceBuildFixingUp => Some((SessionPhase.Fixup, Some(s.p)))
       case _ => None
 
   private def isSpawnOrResumeKind(kind: String): Boolean =

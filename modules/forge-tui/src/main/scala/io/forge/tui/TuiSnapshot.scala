@@ -79,6 +79,7 @@ object ActivePane:
   def forState(s: FsmState): ActivePane = s match
     case _: FsmState.PieceImplementing => Streaming
     case _: FsmState.PieceFixingUp => Streaming
+    case _: FsmState.PieceBuildFixingUp => Streaming // §8.3 (1.8) pre-PR build fix-up driver
     case _: FsmState.Refining => Streaming
     case _: FsmState.DesignNeedsHumanInput => Question
     case _: FsmState.NeedsHumanIntervention => Question

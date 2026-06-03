@@ -80,6 +80,21 @@ enum FsmState derives ReadWriter:
   /** §11.6 — fix-up driver running on the piece. */
   case PieceFixingUp(p: PieceId, prNumber: PrNumber, attempt: Int)
 
+  /** §8.3 / §11.4 (1.8) — the local **pre-PR** Build gate failed and routed to a driver fix-up (a `CodeFix`), so the
+    * piece never reached `createPr`. Awaiting a fresh fix-up driver spawn — the pre-PR analogue of [[PieceCiFailed]],
+    * but **without** a `prNumber` (no PR exists yet) and with `attempt` carried **in the state only**: a pre-PR build
+    * fix-up does **not** increment `manifest[p].attempts` (§11.4 — that budget is reserved for PR-side CI fix-ups). The
+    * driver re-implements, then the Build gate re-runs (catching a compile error before the costly CI round-trip).
+    */
+  case PieceBuildFailed(p: PieceId, attempt: Int)
+
+  /** §8.3 / §11.4 (1.8) — a pre-PR Build fix-up driver is running. The pre-PR analogue of [[PieceFixingUp]] (no
+    * `prNumber`). On a clean settle the Build gate re-runs via the same `ClassifyCommitOpenPr` post-settle effect as
+    * [[PieceImplementing]]: pass ⇒ `PrOpened` → [[PieceAwaitingCi]]; re-fail ⇒ another `LocalBuildFailed` →
+    * [[PieceBuildFailed]] (gated by `maxFixupRounds`, exhausting to `NeedsHumanIntervention`).
+    */
+  case PieceBuildFixingUp(p: PieceId, attempt: Int)
+
   /** §11.5 — CI + reviewer both green; awaiting human merge. */
   case PieceAwaitingMerge(p: PieceId, prNumber: PrNumber)
 

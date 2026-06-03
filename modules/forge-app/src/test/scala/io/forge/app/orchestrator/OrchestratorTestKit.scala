@@ -283,6 +283,17 @@ object OrchestratorTestKit:
         commands: Vector[io.forge.core.profile.RepoCommand]
     ): IO[Either[String, Unit]] = IO.pure(Right(()))
 
+    // §8.3 (1.8) — defaults: the local Build gate passes; failures.md write + build fix-up launch are no-ops. The
+    // build-gate suite subclasses to inject a failing build, record the calls, and return a fix-up session.
+    override def runLocalBuildGate(
+        feature: Feature,
+        piece: PieceId,
+        commands: Vector[io.forge.core.profile.RepoCommand]
+    ): IO[Either[String, Unit]] = IO.pure(Right(()))
+    override def writeBuildFailures(feature: Feature, piece: PieceId, failureLog: String): IO[Unit] = IO.unit
+    override def launchBuildFixup(feature: Feature, piece: PieceId, attempt: Int): IO[ActiveSession] =
+      IO.pure(session(SessionPhase.Fixup, s"buildfix-${piece.value}-$attempt"))
+
     // §11.7 / D9 — default: the conventions PR opens cleanly as #900. The learner suite subclasses to record the call
     // or to inject a Left (so the orchestrator's persist-locally fallback can be asserted).
     override def openConventionsPr(

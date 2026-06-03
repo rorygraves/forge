@@ -41,6 +41,10 @@ object StatusFields:
       s"piece ${p.value} PR #${pr.value} — review requested changes (attempt $attempt)"
     case FsmState.PieceFixingUp(p, pr, attempt) =>
       s"piece ${p.value} PR #${pr.value} — fix-up running (attempt $attempt)"
+    case FsmState.PieceBuildFailed(p, attempt) =>
+      s"piece ${p.value} — local build failed pre-PR (fix-up attempt $attempt)"
+    case FsmState.PieceBuildFixingUp(p, attempt) =>
+      s"piece ${p.value} — pre-PR build fix-up running (attempt $attempt)"
     case FsmState.PieceAwaitingMerge(p, pr) => s"piece ${p.value} PR #${pr.value} — green, awaiting merge"
     case FsmState.Refining(p, pr, _) => s"refining after merge of piece ${p.value} (PR #${pr.value})"
     case FsmState.PlanningUpdate(reason, _) => s"planning update proposed — $reason"
@@ -56,6 +60,8 @@ object StatusFields:
     case FsmState.PieceCiFailed(p, _, _) => Some(p)
     case FsmState.PieceReviewFailed(p, _, _) => Some(p)
     case FsmState.PieceFixingUp(p, _, _) => Some(p)
+    case FsmState.PieceBuildFailed(p, _) => Some(p)
+    case FsmState.PieceBuildFixingUp(p, _) => Some(p)
     case FsmState.PieceAwaitingMerge(p, _) => Some(p)
     case FsmState.Refining(p, _, _) => Some(p)
     case _ => None

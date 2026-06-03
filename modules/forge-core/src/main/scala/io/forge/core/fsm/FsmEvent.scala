@@ -83,6 +83,18 @@ enum FsmEvent derives ReadWriter:
   /** §11.4 step 6 — PR opened against the base. Manifest piece gets `prNumber`. */
   case PrOpened(piece: PieceId, prNumber: PrNumber)
 
+  /** §8.3 / §11.4 (1.8) — the local **pre-PR** Build gate failed and §8.2 classified the failure as a driver fix-up (a
+    * `CodeFix`). The orchestrator emits this from the `ClassifyCommitOpenPr` post-settle effect **instead of**
+    * `PrOpened`, before any PR is created. The full failing build output is durably written to `pieces/<p>.failures.md`
+    * by the orchestrator before this event fires (the same channel the CI fix-up uses), so the event itself carries no
+    * log payload — the FSM routes purely on the piece + the in-state `attempt` gate. From
+    * [[FsmState.PieceImplementing]] (`attempt = 1`) or [[FsmState.PieceBuildFixingUp]] (`attempt + 1`); within
+    * `maxFixupRounds` → [[FsmState.PieceBuildFailed]], else
+    * `NeedsHumanIntervention(ResolveLocalImplementationChanges)`. It never touches `manifest[p].attempts` (§11.4 — that
+    * budget is for PR-side CI fix-ups).
+    */
+  case LocalBuildFailed(piece: PieceId)
+
   /** §11.5 — `PRWatcher` produced a fresh snapshot of a piece PR. */
   case PrSnapshotUpdated(piece: PieceId, snapshot: PrSnapshot)
 

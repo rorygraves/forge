@@ -137,12 +137,14 @@ object Fsm:
       case FsmState.DesignReady => designReadyTransitions(feature, event)
 
       // --- §11.4 / §11.5 / §11.6 Implementation ---
-      case s: FsmState.PieceImplementing => pieceImplementingTransitions(feature, s, event)
+      case s: FsmState.PieceImplementing => pieceImplementingTransitions(feature, s, event, config)
       case s: FsmState.PieceAwaitingCi => pieceAwaitingCiTransitions(feature, s, event, config)
       case s: FsmState.PieceAwaitingReview => pieceAwaitingReviewTransitions(feature, s, event, config)
       case s: FsmState.PieceCiFailed => pieceCiFailedTransitions(feature, s, event)
       case s: FsmState.PieceReviewFailed => pieceReviewFailedTransitions(feature, s, event)
       case s: FsmState.PieceFixingUp => pieceFixingUpTransitions(feature, s, event)
+      case s: FsmState.PieceBuildFailed => pieceBuildFailedTransitions(feature, s, event)
+      case s: FsmState.PieceBuildFixingUp => pieceBuildFixingUpTransitions(feature, s, event, config)
       case s: FsmState.PieceAwaitingMerge => pieceAwaitingMergeTransitions(feature, s, event, config)
 
       // --- §11.7 Refining / planning ---
@@ -427,7 +429,8 @@ object Fsm:
   private def pieceImplementingTransitions(
       feature: Feature,
       state: FsmState.PieceImplementing,
-      event: FsmEvent
+      event: FsmEvent,
+      config: FsmConfig
   ): (Feature, Vector[ActionDraft]) =
     event match
       // §11.4 step 2: SessionSpawned projects currentPieceSessionId, and emits the §19 `<actor>.spawn` durability entry
@@ -461,6 +464,13 @@ object Fsm:
             val to = FsmState.PieceAwaitingCi(piece, prNumber)
             val updated = feature.copy(state = to, manifest = updatedManifest)
             (updated, Vector(fsmTransitionDraft(feature, state, to, piece = Some(piece))))
+
+      // §8.3 / §11.4 (1.8): the post-settle local Build gate failed and routed to a pre-PR driver fix-up (the
+      // orchestrator already wrote the full failing build log to `pieces/<p>.failures.md` and returned this event
+      // instead of `PrOpened`). First failure ⇒ attempt 1; gated by `maxFixupRounds`. NO `manifest.attempts` bump —
+      // the pre-PR build budget lives in the state only (§11.4).
+      case FsmEvent.LocalBuildFailed(p) if p == state.p =>
+        gateBuildFixup(feature, state, state.p, currentAttempt = 0, config)
 
       // §11.4 step 5/6: settle bounds → NHI on timeout/adapter error.
       case FsmEvent.SettleTimeout(SessionPhase.Implement, _) =>
@@ -696,6 +706,72 @@ object Fsm:
           feature,
           s"fix-up adapter error for piece ${state.p.value}: $msg",
           ResumeHint.RunAnotherFixup(state.p, state.prNumber)
+        )
+      case _ => noop(feature)
+
+  /** §8.3 / §11.4 (1.8) — pre-PR Build fix-up, awaiting-spawn state. The pre-PR analogue of `pieceCiFailedTransitions`:
+    * the entry hook spawns a fresh fix-up driver (`launchBuildFixup`) and its `SessionSpawned` drives
+    * `PieceBuildFixingUp`. No `prNumber` and no `manifest.attempts` involvement (the budget is in-state).
+    */
+  private def pieceBuildFailedTransitions(
+      feature: Feature,
+      state: FsmState.PieceBuildFailed,
+      event: FsmEvent
+  ): (Feature, Vector[ActionDraft]) =
+    event match
+      case FsmEvent.SessionSpawned(actor, role, sid, Some(p)) if p == state.p =>
+        spawnBuildFixup(feature, state, state.p, state.attempt, actor, role, sid)
+      case _ => noop(feature)
+
+  /** §8.3 / §11.4 (1.8) — pre-PR Build fix-up, driver-running state. The pre-PR analogue of `pieceFixingUpTransitions`.
+    * Unlike the CI fix-up there is no direct `Settled(Fixup, Clean)` arm here: a clean settle re-runs the Build gate
+    * via the same `ClassifyCommitOpenPr` post-settle effect as `PieceImplementing` (see `PostSettleSynthesis`), which
+    * the orchestrator resolves to either `PrOpened` (gate passed) or another `LocalBuildFailed` (gate re-failed) — both
+    * handled below. `SessionSpawned`/`SessionResumed` mirror `PieceFixingUp`'s projection seams (§6.1 / D3-3).
+    */
+  private def pieceBuildFixingUpTransitions(
+      feature: Feature,
+      state: FsmState.PieceBuildFixingUp,
+      event: FsmEvent,
+      config: FsmConfig
+  ): (Feature, Vector[ActionDraft]) =
+    event match
+      // Defensive late/refreshed spawn for the same piece (mirrors PieceFixingUp): project the id, no state change.
+      case FsmEvent.SessionSpawned(actor, role, sid, Some(p)) if p == state.p =>
+        (
+          feature.copy(currentPieceSessionId = Some(sid)),
+          Vector(sessionSpawnDraft(feature, actor, role, sid, piece = Some(p)))
+        )
+
+      // D3-3 (roadmap §3.5): a fix-up-phase piece-driver resume — symmetric with `PieceFixingUp`.
+      case FsmEvent.SessionResumed(actor, role, oldSid, newSessionId, Some(p)) if p == state.p =>
+        applyPieceResume(feature, actor, role, oldSid, newSessionId, p)
+
+      // Re-run Build gate passed → the orchestrator created the PR → PieceAwaitingCi. Persist `prNumber`; retain
+      // `currentPieceSessionId` per §6.1 (mirrors the `PieceImplementing` PrOpened arm).
+      case FsmEvent.PrOpened(piece, prNumber) if piece == state.p =>
+        mutatePiece(feature, piece)(_.copy(prNumber = Some(prNumber))) match
+          case Left(err) => toNeedsHumanIntervention(feature, err, ResumeHint.AbortOrAbandon)
+          case Right(updatedManifest) =>
+            val to = FsmState.PieceAwaitingCi(piece, prNumber)
+            val updated = feature.copy(state = to, manifest = updatedManifest)
+            (updated, Vector(fsmTransitionDraft(feature, state, to, piece = Some(piece))))
+
+      // Re-run Build gate re-failed → another pre-PR fix-up round (attempt + 1), gated by `maxFixupRounds`.
+      case FsmEvent.LocalBuildFailed(p) if p == state.p =>
+        gateBuildFixup(feature, state, state.p, currentAttempt = state.attempt, config)
+
+      case FsmEvent.SettleTimeout(SessionPhase.Fixup, _) =>
+        toNeedsHumanIntervention(
+          feature,
+          s"pre-PR build fix-up settle timeout for piece ${state.p.value}",
+          ResumeHint.ResolveLocalImplementationChanges(state.p, feature.manifest.pieceBranch(state.p))
+        )
+      case FsmEvent.Settled(SessionPhase.Fixup, SettleOutcome.AdapterError(msg)) =>
+        toNeedsHumanIntervention(
+          feature,
+          s"pre-PR build fix-up adapter error for piece ${state.p.value}: $msg",
+          ResumeHint.ResolveLocalImplementationChanges(state.p, feature.manifest.pieceBranch(state.p))
         )
       case _ => noop(feature)
 
@@ -984,6 +1060,31 @@ object Fsm:
               (mutatedFeature.copy(state = to), Vector(draft))
             else toNeedsHumanIntervention(mutatedFeature, exhaustedReason, exhaustedHint)
 
+  /** §8.3 / §11.4 (1.8) pre-PR Build fix-up gate. The pre-PR sibling of [[bumpAttemptsAndGate]], with two deliberate
+    * differences: (1) it does **not** mutate `manifest[p].attempts` — the pre-PR build budget is tracked in the FSM
+    * *state* only, so the full `maxFixupRounds` remains available for PR-side CI fix-ups (§11.4); (2) it has no PR
+    * number. `currentAttempt` is the attempt already reflected in the state (0 from `PieceImplementing`,
+    * `state.attempt` from `PieceBuildFixingUp`); within the gate → `PieceBuildFailed(p, currentAttempt + 1)`, else →
+    * `NeedsHumanIntervention(ResolveLocalImplementationChanges)`.
+    */
+  private def gateBuildFixup(
+      feature: Feature,
+      from: FsmState,
+      p: PieceId,
+      currentAttempt: Int,
+      config: FsmConfig
+  ): (Feature, Vector[ActionDraft]) =
+    val nextAttempt = currentAttempt + 1
+    if nextAttempt <= config.maxFixupRounds then
+      val to = FsmState.PieceBuildFailed(p, nextAttempt)
+      (feature.copy(state = to), Vector(fsmTransitionDraft(feature, from, to, piece = Some(p))))
+    else
+      toNeedsHumanIntervention(
+        feature,
+        s"piece ${p.value} pre-PR build fix-up exhausted after $currentAttempt attempt(s)",
+        ResumeHint.ResolveLocalImplementationChanges(p, feature.manifest.pieceBranch(p))
+      )
+
   /** Apply a per-piece mutation. Re-validates the resulting manifest; on validation failure, returns the joined error
     * message.
     */
@@ -1088,6 +1189,10 @@ object Fsm:
     case s: FsmState.PieceCiFailed => ResumeHint.RunAnotherFixup(s.p, s.prNumber)
     case s: FsmState.PieceReviewFailed => ResumeHint.RunAnotherFixup(s.p, s.prNumber)
     case s: FsmState.PieceFixingUp => ResumeHint.RunAnotherFixup(s.p, s.prNumber)
+    case s: FsmState.PieceBuildFailed =>
+      ResumeHint.ResolveLocalImplementationChanges(s.p, feature.manifest.pieceBranch(s.p))
+    case s: FsmState.PieceBuildFixingUp =>
+      ResumeHint.ResolveLocalImplementationChanges(s.p, feature.manifest.pieceBranch(s.p))
     case s: FsmState.PieceAwaitingMerge => ResumeHint.RunAnotherFixup(s.p, s.prNumber)
     case s: FsmState.Refining => ResumeHint.RunAnotherFixup(s.p, s.prNumber)
     case _: FsmState.PlanningUpdate => ResumeHint.AbortOrAbandon
@@ -1199,6 +1304,29 @@ object Fsm:
       sid: String
   ): (Feature, Vector[ActionDraft]) =
     val to = FsmState.PieceFixingUp(p, prNumber, attempt)
+    val updated = feature.copy(state = to, currentPieceSessionId = Some(sid))
+    (
+      updated,
+      Vector(
+        fsmTransitionDraft(feature, from, to, piece = Some(p)),
+        sessionSpawnDraft(feature, actor, role, sid, piece = Some(p))
+      )
+    )
+
+  /** §8.3 / §11.4 (1.8) — `PieceBuildFailed` spawns a fresh pre-PR Build fix-up driver: transition to
+    * `PieceBuildFixingUp`, project the new `currentPieceSessionId`, emit the transition + `<actor>.spawn` drafts. The
+    * pre-PR analogue of [[spawnFixup]] (no `prNumber`).
+    */
+  private def spawnBuildFixup(
+      feature: Feature,
+      from: FsmState,
+      p: PieceId,
+      attempt: Int,
+      actor: String,
+      role: String,
+      sid: String
+  ): (Feature, Vector[ActionDraft]) =
+    val to = FsmState.PieceBuildFixingUp(p, attempt)
     val updated = feature.copy(state = to, currentPieceSessionId = Some(sid))
     (
       updated,

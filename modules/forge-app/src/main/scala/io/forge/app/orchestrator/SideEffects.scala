@@ -131,6 +131,30 @@ trait SideEffects:
     */
   def runLocalFormatGate(feature: Feature, piece: PieceId, commands: Vector[RepoCommand]): IO[Either[String, Unit]]
 
+  /** §8.3 / §11.4 (1.8 / decision D2) — the local **Build** gate, shift-left: run the repo's `required` deterministic
+    * non-`autofix` `Build` `commands` on the working tree BEFORE the §11.4-step-6 piece commit/PR. Unlike the Format
+    * gate this is a **check**, not an autofix: `Right(())` when every command exits 0 (the piece may proceed to the
+    * PR); `Left(failureLog)` carrying the **full** captured stdout+stderr of the first failing command (NOT truncated —
+    * the caller classifies it via §8.2 and hands it to a pre-PR fix-up driver, so it must be the real compile error).
+    * `Right(())` ⇒ every command passed. The orchestrator only calls this with a non-empty pre-filtered `commands` list
+    * and owns the audit record + routing.
+    */
+  def runLocalBuildGate(feature: Feature, piece: PieceId, commands: Vector[RepoCommand]): IO[Either[String, Unit]]
+
+  /** §8.3 / §11.4 (1.8) — write the captured local Build gate failure log to `pieces/<p>.failures.md` so the pre-PR
+    * fix-up driver sees the real compile error (the pre-PR sibling of the CI path's `gh run view --log-failed` capture
+    * inside [[launchFixup]]). Called before the `LocalBuildFailed` transition so the file is on disk by the time the
+    * `PieceBuildFailed` entry hook spawns [[launchBuildFixup]]. No PR exists, so there is no `gh pr checks` to fetch.
+    */
+  def writeBuildFailures(feature: Feature, piece: PieceId, failureLog: String): IO[Unit]
+
+  /** §8.3 / §11.4 (1.8) — spawn a fresh **pre-PR** Build fix-up driver (`runFixup`) for the piece. Identical to
+    * [[launchFixup]] except it does **not** re-derive the failing CI checks (there is no PR): the failing build log was
+    * already written to `pieces/<p>.failures.md` by [[writeBuildFailures]] in the Build gate, and the fix-up prompt
+    * reads it from there.
+    */
+  def launchBuildFixup(feature: Feature, piece: PieceId, attempt: Int): IO[ActiveSession]
+
   /** §11.7 (Task 3.2 / D9) — open the `ConventionLearner`'s proposed CLAUDE.md edit as a PR for human approval, out of
     * band after the feature reached `FeatureDone`. Branches from base, appends `proposal.suggestedAddition` to
     * CLAUDE.md (creating it if absent), commits, pushes, and `gh pr create`s a PR whose body carries the rationale —

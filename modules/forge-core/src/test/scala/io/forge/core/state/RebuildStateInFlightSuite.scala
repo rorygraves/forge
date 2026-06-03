@@ -82,6 +82,22 @@ class RebuildStateInFlightSuite extends munit.FunSuite:
       Vector(RebuildState.InFlightSession(SessionPhase.Fixup, "fix-sess", Some(P1)))
     )
 
+  test("PieceBuildFixingUp + spawn, no monitor outcome → Fixup in-flight session (§8.3 pre-PR build fix-up)"):
+    val log = Vector(spawnAction(5, "claude", "buildfix-sess", Some(P1)))
+    assertEquals(
+      RebuildState.inFlightSessions(log, feature(FsmState.PieceBuildFixingUp(P1, attempt = 1))),
+      Vector(RebuildState.InFlightSession(SessionPhase.Fixup, "buildfix-sess", Some(P1)))
+    )
+
+  test("PieceBuildFixingUp + spawn + monitor outcome → settled-but-unadvanced (Fixup, §8.3 re-gate recovery)"):
+    val log = Vector(spawnAction(5, "claude", "buildfix-sess", Some(P1)), monitorOutcome(6, Some(P1)))
+    val state = FsmState.PieceBuildFixingUp(P1, attempt = 1)
+    assertEquals(RebuildState.inFlightSessions(log, feature(state)), Vector.empty)
+    assertEquals(
+      RebuildState.settledButUnadvanced(log, feature(state)),
+      Vector(RebuildState.SettledSession(SessionPhase.Fixup, "buildfix-sess", Some(P1)))
+    )
+
   test("InteractiveSpec + spawn(piece=None), no monitor outcome → Spec in-flight session"):
     val log = Vector(spawnAction(2, "claude", "spec-sess", None))
     assertEquals(
