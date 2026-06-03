@@ -6,9 +6,13 @@
 > the scalafmt CI failure routes to a local `scalafmtAll`, `attempts` stays 0, and
 > `forge stats` shows the avoided round."* Until it lands, Phase 3 is *types-without-teeth*.
 >
-> **Status:** prepared 2026-06-03 — wiring verified green (see §1); **live run not yet
-> driven** (needs real `claude`/`codex`/`gh` + API spend against `szork`, partly
-> interactive). Drive §3, then fill in §5.
+> **Status:** **DRIVEN 2026-06-03 (dogfood #3, `music-poll-config`).** Outcome: spine
+> validated live (`profile.snapshot`, full §11 lifecycle, observability), but the §8.2
+> *trigger* did NOT fire — the driver produced scalafmt-conformant code, so no CI
+> formatting failure occurred. See [`music-poll-config.md`](music-poll-config.md) for the
+> full run + findings (incl. a finding-#5 recurrence and an operator concurrent-git race).
+> The live §8.2-trigger demonstration is carried forward as design-3.0 **T6**. This runbook
+> stays valid for a future engineered-reflow attempt (§3 + Mode A).
 
 ---
 

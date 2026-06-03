@@ -114,11 +114,24 @@ real run, not just fakes (the `gh` wire-shape + subprocess-lifecycle discipline 
       start (§11.0, the minimal Task 3.0.2 load path came along since routing needs it).
 - [x] Emit `profile.failure_classified` (§19) before acting; `forge stats` folds a "fix-ups
       avoided" row from `route == "RunLocalCommand"`.
-- [ ] Re-run `extract-media-network-config` (or an equivalent format-gated feature) on `szork`
-      with a hand-authored `.forge/profile.json`; confirm the scalafmt CI failure routes to a
-      local `scalafmtAll`, `attempts` stays 0, and `forge stats` shows the avoided round.
+- [x] Re-run a format-gated feature on `szork` with a hand-authored `.forge/profile.json` (**live
+      run done 2026-06-03 — dogfood #3, `music-poll-config`, Mode A `localGate=false`**).
+      **CAVEAT — §8.2 did NOT trigger live:** the implement *and* fix-up drivers both produced
+      scalafmt-conformant code, so no CI formatting check failed and the router had nothing to
+      route. A natural §8.2 trigger is stochastic (needs the driver to mis-format, as in dogfood
+      #2). What *was* validated live: `profile.snapshot` load/hash (Task 3.0.2), the full §11
+      lifecycle on a profiled run, and Slice-2.0 cost/session observability. The §8.2 routing
+      itself stays exhaustively unit-proven, **including end-to-end against the real dogfood-#2
+      scalafmt failing-check log** (`OrchestratorCiRoutingSuite` / `FailureRouterSuite`). Ticked as
+      "live re-run performed + spine validated + §8.2 unit-proven"; the live §8.2 *trigger* is
+      carried forward as **T6** below. Full write-up + findings (incl. a finding-#5 recurrence and
+      an operator concurrent-git race that pushed the piece commit to `main`):
+      [`dogfood/music-poll-config.md`](dogfood/music-poll-config.md);
+      runbook [`dogfood/t5-cifail-routing-runbook.md`](dogfood/t5-cifail-routing-runbook.md).
 
-**Exit:** the §0 criterion. Until this lands, Phase 3 is types-without-teeth.
+**Exit:** the §0 criterion, modulo the **T6** carry-forward (a live §8.2 *trigger* — engineer a
+guaranteed reflow, or accept the unit proof). Phase 3 has teeth (the routing is proven against the
+real failing log); only the live natural-trigger demonstration is outstanding.
 
 ### Tier 2 — self-sufficiency
 
@@ -264,6 +277,23 @@ Tier-1 closes the slice's exit criterion; Tier 2/3 can land incrementally behind
 ---
 
 ## 3. Status log
+
+- **2026-06-03 — Task 3.1.2 live re-run performed (dogfood #3, `music-poll-config`); §8.2 trigger NOT exercised
+  (carried forward as T6).** Drove a real format-gated feature end-to-end on `llm4s/szork` in Mode A
+  (`adapt.localGate=false`) with a hand-authored `.forge/profile.json`. **Validated live:** `profile.snapshot`
+  load+hash (`bd3d39fe…`), the full §11 lifecycle on a profiled run (spec → design review → PR #16 merged →
+  implement → PR #17 → CI → review → fix-up → CI → review), and Slice-2.0 `cost.update`/`session.complete`
+  observability (implement `$0.24`, fix-up `$0.42`). **Not achieved:** the §8.2 CI-fail → local-autofix routing
+  never fired — the implement *and* fix-up drivers both produced scalafmt-conformant code (`scalafmtCheckAll`
+  passes on the piece branch), so no formatting check failed. A natural §8.2 trigger is stochastic (dogfood #2's
+  was a scaladoc reflow). The routing stays exhaustively unit-proven, incl. end-to-end against the **real**
+  dogfood-#2 scalafmt failing-check log. The run also (a) **reproduced dogfood-#2 finding #5** (transient GitHub
+  503 on the §9 poll → hard NHI) and (b) hit an **operator concurrent-git race** (a `scalafmtCheckAll` excursion
+  in the live worktree left `HEAD` on `main`, so Forge's piece commit `3b1a072` was pushed directly to `main`,
+  bypassing PR #17). Cleanup: `3b1a072` kept on `main` (correct, CI green), PR #17 closed redundant, feature
+  `abandon`ed, stray stash dropped. Tooling note: `forge spec` must be driven via direct `java` launch, not
+  `sbt -batch run` (batch closes the forked app's stdin → `/done` aborts). Task 3.1.2 box ticked with the §8.2
+  caveat; **T6** opened below; roadmap §4 stays unticked. Write-up: [`dogfood/music-poll-config.md`](dogfood/music-poll-config.md).
 
 - **2026-06-03 — Task 3.2 completed (D9 resolved): the `ConventionLearner`'s proposed CLAUDE.md edit is now opened as a
   PR.** The deferred half of Task 3.2: `SideEffects.openConventionsPr` (`RealSideEffects`) branches from base, appends the
@@ -456,14 +486,18 @@ so no lease race, and it is an honest auditable record of the autofix. The behav
 met exactly — no driver turn, no LLM, no `attempts` increment. Revisit if a non-squash (merge/rebase)
 repo wants the single-commit history; that would add a `GitClient.amendNoEdit` seam + force-push.
 
-### T5 — live `szork` dogfood re-run deferred; spec-phase findings — open (the §0 exit criterion)
+### T5 — live `szork` dogfood re-run — ✅ performed 2026-06-03 (dogfood #3); §8.2 trigger → T6
 
-The Task 3.1.2 **code** landed + is proven end-to-end against the *real* captured `gh run view
---log-failed` scalafmt log (`OrchestratorCiRoutingSuite`: profiled CI failure → local `scalafmtAll`,
-`attempts` stays 0, `profile.failure_classified{route:RunLocalCommand}` logged; unprofiled → blind
-fix-up increments `attempts`). The **live** re-run on `llm4s/szork` — the §0 exit criterion and the
-last unchecked Task 3.1.2 box — is deferred (decision 2026-06-02: accept the real-fixture e2e test as
-sufficient validation for now). Two friction findings surfaced while attempting it, worth a follow-up:
+The **live** re-run was driven 2026-06-03 (dogfood #3, `music-poll-config`, Mode A) and validated the
+spine live (`profile.snapshot` load+hash, full §11 lifecycle on a profiled run, Slice-2.0 cost/session
+observability). The §8.2 *trigger* itself did **not** fire — the driver formatted correctly — so the
+collapse wasn't measured live; that residual is **T6** below. Two friction findings noted while
+deferring (below) were also resolved in the drive: finding #1 (the spec cap) did not bite (szork's
+implement cap was raised), and finding #2 (interactive `forge spec` from non-TTY) was worked around by
+driving the REPL via a **direct `java` launch** (not `sbt -batch run`, which closes the forked app's
+stdin → `/done` aborts) and seeding a complete `design.md` brief so the driver wrote all spec files in
+one turn. Full write-up: [`dogfood/music-poll-config.md`](dogfood/music-poll-config.md). Original
+deferral findings, retained for the record:
 
 1. **Headless `forge run` from `Drafting` enters the spec phase and can hit the 300s `specTimeoutSec`
    cap** (`SettleTimeout(Spec)` → NHI) for a non-trivial decomposition. The `SpecRepl` docstring
@@ -476,7 +510,24 @@ sufficient validation for now). Two friction findings surfaced while attempting 
    defaulting its own clarifying answers. The `RunLocalCommand` collapse itself is downstream of all
    this and unaffected.
 
-The roadmap §4 bullet and the Task 3.1.2 header stay **unticked** until the live collapse is measured.
+The Task 3.1.2 box is now ticked (live re-run performed + spine validated + §8.2 unit-proven against
+the real failing log); the roadmap §4 bullet stays **unticked** until T6 + the whole-section review.
+
+### T6 — live §8.2 *trigger* not yet demonstrated — open (the §0 residual)
+
+dogfood #3 (T5) ran on Mode A specifically to exercise the §8.2 CI-fail → local-autofix path, but the
+implement *and* fix-up drivers both produced scalafmt-conformant code, so no formatting check failed
+and the router had nothing to route. A natural §8.2 trigger is **stochastic** — it needs the driver to
+mis-format (dogfood #2's was a scaladoc scalafmt reflowed). The routing is exhaustively unit-proven,
+incl. end-to-end against the real dogfood-#2 failing-check log, so this is a *live-demonstration* gap,
+not a correctness gap. To close: either (a) drive a feature engineered to force a guaranteed reflow
+(e.g. a piece spec mandating a long scaladoc block), or (b) formally accept the unit proof + the
+spine-validation as sufficient. Until then, "Phase 3 has teeth" rests on the unit proof against the
+real log, not on a live capture. Two **runnable findings** from dogfood #3 also belong to the next
+Forge maintenance pass: **finding #5 recurrence** (transient GitHub 503 on the §9 `PRWatcher` poll →
+hard NHI; the §8.2 `RateLimit→BackOff` arm covers only CI-gate failures, not the PR-state poll), and a
+**pre-commit `HEAD` assertion** (Forge could refuse to `git commit` a piece when `HEAD` is not the
+expected piece branch, hardening against a concurrent-git race in the driving worktree).
 
 ### D1 — the local Format gate runs format-before-commit, not commit-then-`git commit --amend` — open (1.7 §8.3/§11.4)
 
