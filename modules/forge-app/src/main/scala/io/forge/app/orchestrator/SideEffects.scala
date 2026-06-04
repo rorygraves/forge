@@ -108,6 +108,16 @@ trait SideEffects:
     */
   def classifyCommitPush(feature: Feature, piece: PieceId, pr: PrNumber): IO[Either[String, FsmEvent]]
 
+  /** design-3.3 W3 — the trunk sibling of [[classifyCommitOpenPr]]: `ChangeCollector` classify → commit the piece
+    * **straight to the trunk branch** → push; success → `CommittedToTrunk(piece, commitSha, committedAt, observedAt)`
+    * (no `createPr`, no PR tail); `Deny` → `Left` (mapped to `HarnessError` → `ResolveLocalImplementationChanges`,
+    * exactly as the PR path). The pre-commit `assertHeadIs(trunkBranch)` guard applies (the §11.4-step-6
+    * worktree-safety precedent). Only reached when the orchestrator has resolved `branchModel = TrunkBased` (gated on
+    * `adapt.workflowGate`); an unprofiled / gate-off / `GitFlow` run never calls it, so the 1.10 PR lifecycle is
+    * byte-identical.
+    */
+  def commitToTrunk(feature: Feature, piece: PieceId): IO[Either[String, FsmEvent]]
+
   /** §8.2 — pull the real failing log for the run, ANSI stripped. This is what the FailureRouter classifies so it sees
     * the real scalafmt error line rather than the gh pr checks summary; see dogfood number four. A Left reason on a gh
     * failure means the caller falls back to the 1.6 blind fix up.

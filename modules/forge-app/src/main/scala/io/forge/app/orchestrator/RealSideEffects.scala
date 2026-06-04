@@ -26,6 +26,8 @@ import io.forge.specs.{
   SpecStoreError
 }
 
+import java.time.Instant
+
 /** Task 1.4.10-d2b — the real [[SideEffects]] implementation. The -d1 loop engine drives the §11 lifecycle entirely
   * through this seam; this is where the abstract events become actual driver spawns, reviewer-input assembly, and
   * git/gh mutations.
@@ -266,6 +268,31 @@ final class RealSideEffects(
           _ <- et(git.commit(s"fix(${feature.id.value}): ${p.title}"))(gitErr)
           _ <- et(branchManager.pushCurrentBranch())(branchErr)
         yield settled(SessionPhase.Fixup)).value
+
+  override def commitToTrunk(feature: Feature, piece: PieceId): IO[Either[String, FsmEvent]] =
+    // design-3.3 W3 — the trunk sibling of `classifyCommitOpenPr`: classify the working tree, commit the piece STRAIGHT
+    // TO THE TRUNK BRANCH, push, and emit `CommittedToTrunk` (no `createPr`, no PR tail). `assertHeadIs(baseBranch)` is
+    // the trunk analogue of the PR path's `assertHeadIs(pieceBranch)` guard: under `TrunkBased` the driver works on the
+    // trunk branch directly, so a HEAD that drifted off it (a concurrent git in the worktree) must not be committed.
+    // `committedAt` and `observedAt` coincide here — the commit just landed and is observed synchronously; the FSM
+    // stores the former on the piece's `mergedAt` and seeds `Refining.startedAt` from the latter (see `CommittedToTrunk`).
+    //
+    // NOTE (D5 carry-forward): under `TrunkBased`, `advancePieceBranch` should sync the trunk branch rather than cut a
+    // `forge/<feat>/<piece>` branch; wiring that is part of the carried-forward live `TrunkBased`-repo demonstration
+    // (there is no real trunk fixture repo to validate against yet — design-3.3-trunk D5).
+    pieceOf(feature, piece) match
+      case None => IO.pure(Left(s"piece not found in manifest: ${piece.value}"))
+      case Some(p) =>
+        (for
+          included <- classifyChanges
+          _ <- et(docSync.writeDecomposition(feature.id))(docErr)
+          _ <- stageChanges(included)
+          _ <- assertHeadIs(feature.manifest.baseBranch)
+          _ <- et(git.commit(s"feat(${feature.id.value}): ${p.title}"))(gitErr)
+          sha <- et(git.currentSha)(gitErr)
+          _ <- et(branchManager.pushCurrentBranch())(branchErr)
+          now <- EitherT.liftF[IO, String, Instant](IO.realTimeInstant)
+        yield FsmEvent.CommittedToTrunk(piece, sha, committedAt = now, observedAt = now)).value
 
   // --- §8.2 classified failure routing --------------------------------------
 

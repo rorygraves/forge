@@ -55,7 +55,7 @@ class OrchestratorCiRoutingSuite extends munit.FunSuite:
     workflow = WorkflowProfile(
       reviewRequired = true,
       ciRequiredChecks = Vector("backend"),
-      branchModel = BranchModel.TrunkBased,
+      branchModel = BranchModel.GitFlow,
       mergeStrategy = MergeStrategy.Squash
     )
   )

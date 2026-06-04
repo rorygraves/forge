@@ -31,6 +31,7 @@ import io.forge.core.log.ActionDraft
 import io.forge.core.manifest.{ManifestPatch, ManifestStore}
 import io.forge.core.pr.{PrState, ReviewDecision}
 import io.forge.core.profile.{
+  BranchModel,
   CommandKind,
   ConventionDeltas,
   ConventionsLearnedAction,
@@ -194,8 +195,14 @@ final class Orchestrator(
     settled.headOption match
       case None => IO.pure(feature)
       case Some(s) =>
-        PostSettleSynthesis.plan(feature.state, MonitorOutcome.Settled(s.phase, SettleOutcome.Clean)).effect match
-          case eff @ (SettleEffect.ClassifyCommitOpenPr | SettleEffect.ClassifyCommitPush) =>
+        val recoveredEff =
+          withTrunkBranchModel(
+            PostSettleSynthesis.plan(feature.state, MonitorOutcome.Settled(s.phase, SettleOutcome.Clean)).effect,
+            profile
+          )
+        recoveredEff match
+          case eff @ (SettleEffect.ClassifyCommitOpenPr | SettleEffect.ClassifyCommitToTrunk |
+              SettleEffect.ClassifyCommitPush) =>
             runSettleEffect(feature, eff, profile).flatMap(applyAndPersist(feature, _))
           case _ =>
             applyAndPersist(
@@ -933,6 +940,26 @@ final class Orchestrator(
   private def skipReview(profile: Option[RepoProfile]): Boolean =
     config.adapt.workflowGate && profile.exists(!_.workflow.reviewRequired)
 
+  /** design-3.3 W3 — pure decision: should a piece commit straight to trunk (no PR) on this run? True only when
+    * `adapt.workflowGate` is on AND the resolved profile declares `workflow.branchModel = TrunkBased`. An unprofiled
+    * run (incl. `adapt.enabled = false`, folded into a `None` profile by [[resolveProfile]]), `workflowGate = false`,
+    * or a `GitFlow` repo keeps the 1.10 PR lifecycle. Consumed by [[withTrunkBranchModel]], which rewrites the pure
+    * table's `ClassifyCommitOpenPr` to `ClassifyCommitToTrunk` — the FSM stays profile-agnostic (the §6.1 replay
+    * invariant: the branch-model decision lives here in the orchestrator, never in `Fsm.transition`).
+    */
+  private def shouldCommitToTrunk(profile: Option[RepoProfile]): Boolean =
+    config.adapt.workflowGate && profile.exists(_.workflow.branchModel == BranchModel.TrunkBased)
+
+  /** Rewrite a post-settle [[SettleEffect]] for the resolved branch model: under `TrunkBased` (see
+    * [[shouldCommitToTrunk]]) the piece-driver `ClassifyCommitOpenPr` becomes `ClassifyCommitToTrunk`; every other
+    * effect (and the whole PR/GitFlow path) is unchanged. Keeping the rewrite here, off the pure
+    * [[PostSettleSynthesis.plan]] table, is what lets the table stay profile-agnostic.
+    */
+  private def withTrunkBranchModel(eff: SettleEffect, profile: Option[RepoProfile]): SettleEffect =
+    eff match
+      case SettleEffect.ClassifyCommitOpenPr if shouldCommitToTrunk(profile) => SettleEffect.ClassifyCommitToTrunk
+      case other => other
+
   /** §8.3 / §19 — the local format gate's audit record: which deterministic autofix commands ran pre-PR. A new
     * `profile.*` kind (the 1.7 §19 table enumerates only `profile.snapshot` / `profile.failure_classified`; this gap is
     * filed in design-3.0 §4 for the next revision). A no-op `Replay` projection (default branch), consumed by `forge
@@ -976,30 +1003,56 @@ final class Orchestrator(
       piece: PieceId,
       profile: Option[RepoProfile]
   ): IO[Either[String, FsmEvent]] =
+    runLocalGatesThenIntegrate(feature, piece, profile, sideEffects.classifyCommitOpenPr(feature, piece))
+
+  /** design-3.3 W3 — the trunk sibling of [[runLocalGatesThenOpenPr]]: byte-identical local Format + Build gating, but
+    * the integration action is [[SideEffects.commitToTrunk]] (commit straight to trunk, no PR) rather than
+    * `classifyCommitOpenPr`. The Build gate's pre-PR fix-up arm (`LocalBuildFailed`) is shared and unchanged — a trunk
+    * repo must not push a broken compile to mainline (§0 exit criterion), so a build failure still routes to a driver
+    * fix-up before integration.
+    */
+  private def runLocalGatesThenCommitToTrunk(
+      feature: Feature,
+      piece: PieceId,
+      profile: Option[RepoProfile]
+  ): IO[Either[String, FsmEvent]] =
+    runLocalGatesThenIntegrate(feature, piece, profile, sideEffects.commitToTrunk(feature, piece))
+
+  /** The shared §8.3 / §11.4 local-gate body, parameterized on the `integrate` action (open-PR vs commit-to-trunk). The
+    * `integrate` IO is a lazy description — it runs only on the clean-build / no-build-gate paths. A build failure
+    * routes through [[routeBuildGateFailure]], whose own fall-through (a non-`DriverFixup` classification) is the same
+    * `integrate` action, so the Build gate stays strictly additive on both branch models.
+    */
+  private def runLocalGatesThenIntegrate(
+      feature: Feature,
+      piece: PieceId,
+      profile: Option[RepoProfile],
+      integrate: => IO[Either[String, FsmEvent]]
+  ): IO[Either[String, FsmEvent]] =
     runLocalFormatGate(feature, piece, profile) >> {
       (profile, localBuildGateCommands(profile)) match
         case (Some(p), commands) if commands.nonEmpty =>
           sideEffects.runLocalBuildGate(feature, piece, commands).flatMap {
             case Right(()) =>
-              log.append(feature.id, localBuildGateDraft(feature, piece, commands, passed = true)) >>
-                sideEffects.classifyCommitOpenPr(feature, piece)
+              log.append(feature.id, localBuildGateDraft(feature, piece, commands, passed = true)) >> integrate
             case Left(failureLog) =>
               log.append(feature.id, localBuildGateDraft(feature, piece, commands, passed = false)) >>
-                routeBuildGateFailure(feature, piece, p, failureLog)
+                routeBuildGateFailure(feature, piece, p, failureLog, integrate)
           }
-        case _ => sideEffects.classifyCommitOpenPr(feature, piece)
+        case _ => integrate
     }
 
   /** §8.2 classified routing on a **local** Build gate failure (the pre-PR sibling of [[routeCiFailure]]). Records
     * `profile.failure_classified {gate: local}` before acting. A `DriverFixup` writes the build log to
-    * `pieces/<p>.failures.md` and returns `LocalBuildFailed`; everything else falls through to the PR open (1.6 CI
-    * path).
+    * `pieces/<p>.failures.md` and returns `LocalBuildFailed`; everything else falls through to the caller's `integrate`
+    * action — the PR open (1.6 CI path) under GitFlow, or the commit-to-trunk under `TrunkBased` (design-3.3 W3).
     */
   private def routeBuildGateFailure(
       feature: Feature,
       piece: PieceId,
       profile: RepoProfile,
-      failureLog: String
+      failureLog: String,
+      integrate: => IO[Either[String, FsmEvent]]
   ): IO[Either[String, FsmEvent]] =
     maybeLlmClassify(
       feature,
@@ -1015,7 +1068,7 @@ final class Orchestrator(
           routed.route match
             case _: FixupRoute.DriverFixup =>
               sideEffects.writeBuildFailures(feature, piece, failureLog).as(Right(FsmEvent.LocalBuildFailed(piece)))
-            case _ => sideEffects.classifyCommitOpenPr(feature, piece)
+            case _ => integrate
         }
       }
 
@@ -1147,15 +1200,15 @@ final class Orchestrator(
     )
 
   /** roadmap §3.5 Unit B — append the `monitor.outcome` marker for a piece-driver post-settle effect
-    * (`ClassifyCommitOpenPr` / `ClassifyCommitPush`), the discriminator the cold rebuild uses (`RebuildState`'s
-    * `settledButUnadvanced` vs `inFlightSessions`) to route the post-settle crash window to recovery rather than NHI or
-    * a silent driver re-spawn. A no-op for every other effect — the design-phase settles keep the conservative
-    * in-flight → NHI behaviour, so no marker must exist for them (a marker without recovery would re-spawn the design
-    * driver, strictly worse than NHI).
+    * (`ClassifyCommitOpenPr` / `ClassifyCommitToTrunk` / `ClassifyCommitPush`), the discriminator the cold rebuild uses
+    * (`RebuildState`'s `settledButUnadvanced` vs `inFlightSessions`) to route the post-settle crash window to recovery
+    * rather than NHI or a silent driver re-spawn. A no-op for every other effect — the design-phase settles keep the
+    * conservative in-flight → NHI behaviour, so no marker must exist for them (a marker without recovery would re-spawn
+    * the design driver, strictly worse than NHI).
     */
   private def recordSettleMarker(feature: Feature, report: MonitorReport, eff: SettleEffect): IO[Unit] =
     eff match
-      case SettleEffect.ClassifyCommitOpenPr | SettleEffect.ClassifyCommitPush =>
+      case SettleEffect.ClassifyCommitOpenPr | SettleEffect.ClassifyCommitToTrunk | SettleEffect.ClassifyCommitPush =>
         log.append(feature.id, monitorOutcomeDraft(feature, report)).void
       case _ => IO.unit
 
@@ -1271,7 +1324,9 @@ final class Orchestrator(
           totalsRef.get.flatMap { totals =>
             val auditDrafts = settleAuditDrafts(feature, report, totals, resumed = active.exists(_.resumed))
             val plan = PostSettleSynthesis.plan(feature.state, report.outcome)
-            plan.effect match
+            // design-3.3 W3: rewrite the (profile-agnostic) ClassifyCommitOpenPr → ClassifyCommitToTrunk under a
+            // TrunkBased branch model, so the piece integrates straight to trunk with no PR. No-op for every other path.
+            withTrunkBranchModel(plan.effect, profile) match
               case SettleEffect.None =>
                 // Pass-through outcome. Apply the converted event directly; if it no-ops (an unhandled driver settle
                 // such as HitQuestionLimit), route to NHI rather than spin on a now-session-less state.
@@ -1327,6 +1382,14 @@ final class Orchestrator(
           case s: FsmState.PieceImplementing => runLocalGatesThenOpenPr(feature, s.p, profile)
           case s: FsmState.PieceBuildFixingUp => runLocalGatesThenOpenPr(feature, s.p, profile)
           case other => IO.pure(Left(s"ClassifyCommitOpenPr in unexpected state $other"))
+      case SettleEffect.ClassifyCommitToTrunk =>
+        // design-3.3 W3 — the trunk sibling: same local Format + Build gates before integration, but on a clean build
+        // the piece commits STRAIGHT TO TRUNK (no PR). Reached from PieceImplementing AND a re-gating PieceBuildFixingUp,
+        // exactly like ClassifyCommitOpenPr; the Build gate's LocalBuildFailed arm (pre-PR fix-up) is unchanged.
+        feature.state match
+          case s: FsmState.PieceImplementing => runLocalGatesThenCommitToTrunk(feature, s.p, profile)
+          case s: FsmState.PieceBuildFixingUp => runLocalGatesThenCommitToTrunk(feature, s.p, profile)
+          case other => IO.pure(Left(s"ClassifyCommitToTrunk in unexpected state $other"))
       case SettleEffect.ClassifyCommitPush =>
         feature.state match
           case s: FsmState.PieceFixingUp => sideEffects.classifyCommitPush(feature, s.p, s.prNumber)

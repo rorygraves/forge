@@ -267,6 +267,11 @@ object OrchestratorTestKit:
     override def classifyCommitPush(feature: Feature, piece: PieceId, pr: PrNumber): IO[Either[String, FsmEvent]] =
       IO.pure(Right(FsmEvent.Settled(SessionPhase.Fixup, SettleOutcome.Clean)))
 
+    // design-3.3 W3 — default: the piece commits cleanly to trunk (MergeCommit sha, MergedAt timestamps). The trunk
+    // suite subclasses to count the call and to assert `classifyCommitOpenPr` is never reached.
+    override def commitToTrunk(feature: Feature, piece: PieceId): IO[Either[String, FsmEvent]] =
+      IO.pure(Right(FsmEvent.CommittedToTrunk(piece, MergeCommit, MergedAt, MergedAt)))
+
     // §8.2 — defaults: no failing log, autofix is a no-op success. Routing suites subclass to inject a real log and to
     // record the autofix call (e.g. assert `attempts` stays 0 on a RunLocalCommand).
     override def fetchFailingLog(runId: String): IO[Either[String, String]] = IO.pure(Right(""))

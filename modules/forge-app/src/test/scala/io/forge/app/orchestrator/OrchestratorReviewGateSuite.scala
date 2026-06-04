@@ -64,7 +64,7 @@ class OrchestratorReviewGateSuite extends munit.FunSuite:
     workflow = WorkflowProfile(
       reviewRequired = reviewRequired,
       ciRequiredChecks = Vector("ci"),
-      branchModel = BranchModel.TrunkBased,
+      branchModel = BranchModel.GitFlow,
       mergeStrategy = MergeStrategy.Squash
     )
   )

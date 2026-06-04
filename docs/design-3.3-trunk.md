@@ -22,8 +22,9 @@
 >
 > **Status:** 🟡 open — 2026-06-04. **Task 1 ✅ landed** (the FSM trunk lifecycle core — the thin
 > runnable slice that proves the riskiest contract: the new §11 branch + the manifest-invariant
-> relaxation + reconcile, all green in `forge-core`). **Tasks 2 (orchestrator wiring + e2e) and 3
-> (spec revision + close-out) remain.**
+> relaxation + reconcile, all green in `forge-core`). **Task 2 ✅ landed** (orchestrator branch-model
+> wiring + `SideEffects.commitToTrunk` + e2e `OrchestratorTrunkPathSuite`, `forge-app` 428/428).
+> **Task 3 (the 1.11 spec revision + whole-section review + roadmap tick) remains.**
 
 ---
 
@@ -119,22 +120,37 @@ yet (Task 2).
 **Exit:** the §0 criteria 1–3 (the FSM contract), green in `forge-core`, with the §6.1 replay
 invariant intact.
 
-### Task 2 — orchestrator wiring + trunk side effect (forge-app)  [ ]
+### Task 2 — orchestrator wiring + trunk side effect (forge-app)  [x] 2026-06-04
 
-- [ ] **Branch-model decision** — the orchestrator resolves `TrunkBased` from the already-resolved
+- [x] **Branch-model decision** — the orchestrator resolves `TrunkBased` from the already-resolved
       `WorkflowProfile` (gated on `adapt.workflowGate`, the same umbrella flag W1/Half-A use), and
       routes the `PieceImplementing` / `PieceBuildFixingUp` post-settle effect to a new
-      `ClassifyCommitToTrunk` instead of `ClassifyCommitOpenPr`. Unprofiled / gate-off / `GitFlow`
-      keeps the exact 1.10 PR path.
-- [ ] **`SideEffects.commitToTrunk`** (`RealSideEffects`) — run the local format/Build gates (reusing
-      `runLocalFormatGate` / the Build-gate seam), then commit the piece to the trunk branch and
-      push, returning the trunk commit sha; the orchestrator emits `CommittedToTrunk`. The pre-commit
-      `assertHeadIs(trunkBranch)` guard (T6 finding #2 precedent) applies. On a build failure it
-      emits `LocalBuildFailed` (unchanged pre-PR fix-up path); on a clean build it integrates.
-- [ ] **e2e `OrchestratorTrunkPathSuite`** — a scripted-fakes run on a `TrunkBased` profile reaches
-      `FeatureDone` with no PR opened, no CI poll, no reviewer one-shot; plus a build-fail → pre-PR
-      fix-up → trunk-integrate variant.
-- [ ] **Design phase keeps its PR** (decision **D3**) — trunk-based scopes to the piece tail; the
+      `ClassifyCommitToTrunk` instead of `ClassifyCommitOpenPr`. Implemented as a rewrite
+      (`withTrunkBranchModel` over the pure `PostSettleSynthesis.plan` result, keyed on
+      `shouldCommitToTrunk`) so the §11 recipe table stays profile-agnostic (D1). Applied at both
+      live-settle (`handleWinner`) and cold-rebuild (`postSettleRecover`) sites; `recordSettleMarker`
+      and the rebuild recovery discriminator now include `ClassifyCommitToTrunk` alongside
+      `ClassifyCommitOpenPr` / `ClassifyCommitPush`. Unprofiled / gate-off / `GitFlow` keeps the exact
+      1.10 PR path.
+- [x] **`SideEffects.commitToTrunk`** (`RealSideEffects`) — `ChangeCollector` classify + `docSync`,
+      `assertHeadIs(baseBranch)` (the trunk analogue of the PR path's `assertHeadIs(pieceBranch)`
+      guard), `git.commit`, `git.currentSha`, push, then emit
+      `CommittedToTrunk(piece, sha, committedAt = now, observedAt = now)`. The shared
+      `runLocalGatesThenIntegrate` helper (extracted from `runLocalGatesThenOpenPr`) parameterizes the
+      integration action so the local Format + Build gates — and `routeBuildGateFailure`'s
+      non-`DriverFixup` fall-through — are byte-identical across PR and trunk; a build failure still
+      routes to the pre-PR `LocalBuildFailed` fix-up (the §0 "no broken compile to mainline" rule).
+      *D5 carry-forward noted in code:* under `TrunkBased`, `advancePieceBranch` should sync trunk
+      rather than cut a piece branch — part of the carried-forward live demonstration.
+- [x] **e2e `OrchestratorTrunkPathSuite`** — scripted-fakes runs on a `TrunkBased` profile: (1)
+      `PieceImplementing → commit-to-trunk → Refining → FeatureDone` with no PR / no CI poll / no
+      review (asserted via `audit.piece_merged` with `prNumber: null`, and the absence of
+      `PieceAwaitingCi` / `PieceAwaitingReview`); (2) build-fail → pre-PR fix-up → re-gate → trunk
+      integrate, attempts stays 0; (3) two-piece trunk run to `FeatureDone`; plus GitFlow and
+      `workflowGate = false` negatives proving the PR path is taken (open-PR called, trunk not). The
+      five PR-lifecycle suites that incidentally used `BranchModel.TrunkBased` while it was inert were
+      flipped to `GitFlow` (the branch model is now load-bearing).
+- [x] **Design phase keeps its PR** (decision **D3**) — trunk-based scopes to the piece tail; the
       design doc still goes through `DesignReviewing → DesignAwaitingMerge` (the human plan-approval
       gate). Documented; revisit if a fully-trunk repo wants the design committed to trunk too.
 
@@ -157,6 +173,28 @@ reconcile the spec.
 ---
 
 ## 3. Status log
+
+- **2026-06-04 — Task 2 landed: orchestrator trunk wiring + side effect + e2e (forge-app), green.**
+  The branch-model decision lives in the orchestrator (D1): `shouldCommitToTrunk(profile)` (=
+  `adapt.workflowGate && branchModel == TrunkBased`) drives `withTrunkBranchModel`, which rewrites the
+  pure `PostSettleSynthesis.plan`'s `ClassifyCommitOpenPr → ClassifyCommitToTrunk` at both the
+  live-settle (`handleWinner`) and cold-rebuild (`postSettleRecover`) sites — the §11 recipe table
+  itself stays profile-agnostic (`OrchestratorPostSettleSynthesisSuite` still asserts
+  `ClassifyCommitOpenPr` unconditionally). A new `SettleEffect.ClassifyCommitToTrunk` dispatches in
+  `runSettleEffect` to `runLocalGatesThenCommitToTrunk`, the trunk arm of the extracted
+  `runLocalGatesThenIntegrate` helper (the Format + Build gates and `routeBuildGateFailure`'s
+  non-`DriverFixup` fall-through are now shared verbatim between PR and trunk, differing only in the
+  integration action). `SideEffects.commitToTrunk` (+ `RealSideEffects` impl: classify → `docSync` →
+  stage → `assertHeadIs(baseBranch)` → commit → `currentSha` → push → `CommittedToTrunk`) integrates a
+  piece straight to trunk with no PR; the `FakeSideEffects` default returns `CommittedToTrunk` for the
+  e2e. `recordSettleMarker` + the rebuild recovery discriminator now include `ClassifyCommitToTrunk`
+  for crash-window symmetry (D4). New `OrchestratorTrunkPathSuite` (5 tests) proves the trunk path to
+  `FeatureDone` (no PR/CI/review), the build-fail → pre-PR fix-up → trunk-integrate variant, a
+  two-piece run, and the GitFlow / `workflowGate=false` PR-path negatives; the five PR-lifecycle
+  suites that incidentally used `TrunkBased` (build-gate, local-gate, review-gate, ci-routing,
+  convention-learner) were flipped to `GitFlow` now that the branch model is load-bearing. `forge-app`
+  428/428; full `sbt test` + `scalafmtCheckAll` clean. **Task 2 ticked**; the roadmap §4 W3 bullet
+  stays **unticked** (Task 3 — the 1.11 spec revision + whole-section review — remains).
 
 - **2026-06-04 — Task 1 landed: the FSM trunk lifecycle core (forge-core), green.** The new §11
   trunk branch is in: a neutral `FsmEvent.CommittedToTrunk(piece, commitSha, committedAt, observedAt)`

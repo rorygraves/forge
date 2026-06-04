@@ -56,7 +56,7 @@ class OrchestratorConventionLearnerSuite extends munit.FunSuite:
     workflow = WorkflowProfile(
       reviewRequired = true,
       ciRequiredChecks = Vector("ci"),
-      branchModel = BranchModel.TrunkBased,
+      branchModel = BranchModel.GitFlow,
       mergeStrategy = MergeStrategy.Squash
     )
   )

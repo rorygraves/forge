@@ -55,7 +55,7 @@ class OrchestratorBuildGateSuite extends munit.FunSuite:
       reviewRequired = true,
       // matches the shared `ciReadySnapshot` green check so the Half A sensed required set is satisfied on advance.
       ciRequiredChecks = Vector("ci"),
-      branchModel = BranchModel.TrunkBased,
+      branchModel = BranchModel.GitFlow,
       mergeStrategy = MergeStrategy.Squash
     )
   )

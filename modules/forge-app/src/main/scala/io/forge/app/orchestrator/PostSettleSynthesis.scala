@@ -35,6 +35,16 @@ enum SettleEffect:
   /** §11.6 — `ChangeCollector` classify; on `Allow`: commit + push (the PR already exists, so no `createPr`). */
   case ClassifyCommitPush
 
+  /** design-3.3 W3 — the trunk sibling of [[ClassifyCommitOpenPr]]: `ChangeCollector` classify; on `Allow`: commit the
+    * piece **straight to the trunk branch** and push, emitting `CommittedToTrunk` (no `createPr`, no PR tail). This
+    * variant is **never produced by the pure [[PostSettleSynthesis.plan]] table** — the table stays profile-agnostic
+    * and always returns `ClassifyCommitOpenPr` for a piece-driver settle. The orchestrator (which holds the resolved
+    * `WorkflowProfile`) rewrites `ClassifyCommitOpenPr → ClassifyCommitToTrunk` when the repo's `branchModel` is
+    * `TrunkBased` (gated on `adapt.workflowGate`). It shares `PrOpenedAfterCreate`'s post-settle-recovery treatment
+    * (the effect supplies the real `CommittedToTrunk` event, exactly as the PR path supplies the real `PrOpened`).
+    */
+  case ClassifyCommitToTrunk
+
 /** The event the orchestrator synthesizes back into `Fsm.transition` once the plan's side effects succeed. On
   * side-effect failure (e.g. `ChangeCollector` `Deny`, push rejected, `createPr` failed) the loop synthesizes a
   * `HarnessError` instead per the §11 "side effects bracket the FSM transition" contract — that failure path is the
