@@ -130,7 +130,7 @@ class ResumeHintCoverageSuite extends munit.FunSuite:
     assertNhi(
       "refine settle timeout",
       featureIn(
-        FsmState.Refining(P1, P1Pr, ObservedAt),
+        FsmState.Refining(P1, Some(P1Pr), ObservedAt),
         pieces = Vector(pieceMerged(P1, 1, P1Pr), piecePending(P2, 2)),
         currentPieceSessionId = Some("s")
       ),
@@ -156,7 +156,7 @@ class ResumeHintCoverageSuite extends munit.FunSuite:
     assertNhi(
       "refinery reopen",
       featureIn(
-        FsmState.Refining(P1, P1Pr, ObservedAt),
+        FsmState.Refining(P1, Some(P1Pr), ObservedAt),
         pieces = Vector(pieceMerged(P1, 1, P1Pr), piecePending(P2, 2))
       ),
       FsmEvent.RefineOutcome(RefineVerdict.ReopenDesign("design drift"))

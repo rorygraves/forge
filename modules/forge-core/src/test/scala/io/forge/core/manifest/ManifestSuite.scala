@@ -92,7 +92,7 @@ class ManifestSuite extends munit.FunSuite:
     val errs = emptyManifest.copy(pieces = Vector(bad)).validate.swap.toOption.get
     assert(errs.exists(_.contains("requires non-null baseSha")))
 
-  test("validator rejects a merged piece missing prNumber/mergeCommit/mergedAt"):
+  test("validator rejects a merged piece missing mergeCommit/mergedAt (prNumber now optional — D2/W3)"):
     val bad = basePending.copy(
       status = PieceStatus.Merged,
       baseSha = Some(Sha("abc1234")),
@@ -101,9 +101,21 @@ class ManifestSuite extends munit.FunSuite:
       mergedAt = None
     )
     val errs = emptyManifest.copy(pieces = Vector(bad)).validate.swap.toOption.get
-    assert(errs.exists(_.contains("requires prNumber")))
+    // design-3.3-trunk / W3 decision D2: a trunk-committed piece is merged into mainline with no PR, so `prNumber` is
+    // no longer required — only the universal facts of integration (mergeCommit + mergedAt) are.
+    assert(!errs.exists(_.contains("requires prNumber")), s"prNumber should no longer be required: $errs")
     assert(errs.exists(_.contains("requires mergeCommit")))
     assert(errs.exists(_.contains("requires mergedAt")))
+
+  test("validator accepts a merged piece with no prNumber (trunk-committed — D2/W3)"):
+    val trunk = basePending.copy(
+      status = PieceStatus.Merged,
+      baseSha = Some(Sha("abc1234")),
+      prNumber = None,
+      mergeCommit = Some(Sha("def5678")),
+      mergedAt = Some(java.time.Instant.parse("2026-06-04T10:00:00Z"))
+    )
+    assert(emptyManifest.copy(pieces = Vector(trunk)).validate.isRight)
 
   test("validator rejects duplicate piece ids"):
     val a = basePending

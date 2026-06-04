@@ -465,6 +465,14 @@ object Fsm:
             val updated = feature.copy(state = to, manifest = updatedManifest)
             (updated, Vector(fsmTransitionDraft(feature, state, to, piece = Some(piece))))
 
+      // §11.4 / §11.5 (design-3.3-trunk / W3): the repo is `TrunkBased`, so the orchestrator's `ClassifyCommitToTrunk`
+      // post-settle effect committed the piece straight to trunk (no PR) and emitted this instead of `PrOpened`.
+      // Integrate the piece into mainline (manifest → merged, prNumber = None) and go straight to Refining — no
+      // PieceAwaitingCi / PieceAwaitingReview / PieceAwaitingMerge tail. The FSM stays profile-agnostic (the decision
+      // was the orchestrator's). Shares `handleIntegrated` with the PR `Merged` path.
+      case FsmEvent.CommittedToTrunk(piece, commitSha, committedAt, observedAt) if piece == state.p =>
+        handleIntegrated(feature, state, piece, prNumber = None, commitSha, committedAt, observedAt)
+
       // §8.3 / §11.4 (1.8): the post-settle local Build gate failed and routed to a pre-PR driver fix-up (the
       // orchestrator already wrote the full failing build log to `pieces/<p>.failures.md` and returned this event
       // instead of `PrOpened`). First failure ⇒ attempt 1; gated by `maxFixupRounds`. NO `manifest.attempts` bump —
@@ -766,6 +774,11 @@ object Fsm:
             val updated = feature.copy(state = to, manifest = updatedManifest)
             (updated, Vector(fsmTransitionDraft(feature, state, to, piece = Some(piece))))
 
+      // design-3.3-trunk / W3: re-run Build gate passed on a `TrunkBased` repo → the orchestrator committed straight to
+      // trunk → Refining (no PR). Mirrors the `PieceImplementing` CommittedToTrunk arm; shares `handleIntegrated`.
+      case FsmEvent.CommittedToTrunk(piece, commitSha, committedAt, observedAt) if piece == state.p =>
+        handleIntegrated(feature, state, piece, prNumber = None, commitSha, committedAt, observedAt)
+
       // Re-run Build gate re-failed → another pre-PR fix-up round (attempt + 1), gated by `maxFixupRounds`.
       case FsmEvent.LocalBuildFailed(p) if p == state.p =>
         gateBuildFixup(feature, state, state.p, currentAttempt = state.attempt, config)
@@ -813,11 +826,12 @@ object Fsm:
       // so the recovery hint is RunAnotherFixup (matching hintFromState for Refining); `toNeedsHumanIntervention`
       // clears the stale currentPieceSessionId per §6.1.
       case FsmEvent.SettleTimeout(SessionPhase.Refine, _) =>
-        toNeedsHumanIntervention(
-          feature,
-          s"refine settle timeout for piece ${state.p.value}",
-          ResumeHint.RunAnotherFixup(state.p, state.prNumber)
-        )
+        // PR path → RunAnotherFixup on the merged PR; trunk path (no PR) → AbortOrAbandon (there is no fix-up PR to
+        // re-run — the piece is already integrated into trunk; design-3.3-trunk / W3).
+        val hint = state.prNumber match
+          case Some(pr) => ResumeHint.RunAnotherFixup(state.p, pr)
+          case None => ResumeHint.AbortOrAbandon
+        toNeedsHumanIntervention(feature, s"refine settle timeout for piece ${state.p.value}", hint)
 
       case _ => noop(feature)
 
@@ -870,25 +884,45 @@ object Fsm:
       mergedAt: java.time.Instant,
       observedAt: java.time.Instant
   ): (Feature, Vector[ActionDraft]) =
+    handleIntegrated(feature, state, piece, Some(prNumber), mergeCommit, mergedAt, observedAt)
+
+  /** §11.5 — shared piece-integration handler for both the PR merge path (`prNumber = Some`, from `PieceAwaitingMerge`)
+    * and the trunk-commit path (`prNumber = None`, from `PieceImplementing` / `PieceBuildFixingUp` — design-3.3-trunk /
+    * W3). Both mark the piece `merged` in the manifest, transition to `Refining(piece, prNumber, observedAt)`, and emit
+    * the `fsm.transition` + `audit.piece_merged` drafts. Idempotent w.r.t. the manifest mutation: if the existing
+    * merged record matches the event, the mutation is a no-op but the state still transitions and the drafts still fire
+    * — which is what makes `RebuildState.reconcile`'s crash-window recovery (PR case (c) and the trunk analogue) safe.
+    * Shared so the two integration paths cannot drift (the consistency-sweep discipline).
+    */
+  private def handleIntegrated(
+      feature: Feature,
+      from: FsmState,
+      piece: PieceId,
+      prNumber: Option[PrNumber],
+      mergeCommit: Sha,
+      mergedAt: java.time.Instant,
+      observedAt: java.time.Instant
+  ): (Feature, Vector[ActionDraft]) =
     feature.manifest.pieces.find(_.id == piece) match
       case None =>
         toNeedsHumanIntervention(
           feature,
-          s"Merged event for unknown piece ${piece.value}",
+          s"merge event for unknown piece ${piece.value}",
           ResumeHint.AbortOrAbandon
         )
 
       case Some(p) if p.status == PieceStatus.Merged =>
         // Idempotency rule: if the existing merged record matches, the mutation is a no-op but the state still
         // transitions to Refining and the drafts still fire (this is what makes RebuildState.reconcile case (c) safe).
-        val matches = p.prNumber.contains(prNumber) &&
+        // `p.prNumber == prNumber` covers both paths structurally — Some==Some for PR, None==None for trunk.
+        val matches = p.prNumber == prNumber &&
           p.mergeCommit.contains(mergeCommit) &&
           p.mergedAt.contains(mergedAt)
         if matches then
           val to = FsmState.Refining(piece, prNumber, observedAt)
           val updated = feature.copy(state = to)
           val drafts = Vector(
-            fsmTransitionDraft(feature, state, to, piece = Some(piece)),
+            fsmTransitionDraft(feature, from, to, piece = Some(piece)),
             auditPieceMergedDraft(feature, piece, prNumber, mergeCommit, mergedAt)
           )
           (updated, drafts)
@@ -905,7 +939,7 @@ object Fsm:
               "kind" -> ujson.Str("merged_field_mismatch"),
               "piece" -> ujson.Str(piece.value),
               "expected" -> ujson.Obj(
-                "prNumber" -> ujson.Num(prNumber.value.toDouble),
+                "prNumber" -> prNumber.map(n => ujson.Num(n.value.toDouble)).getOrElse(ujson.Null),
                 "mergeCommit" -> ujson.Str(mergeCommit.value),
                 "mergedAt" -> ujson.Str(mergedAt.toString)
               ),
@@ -917,19 +951,19 @@ object Fsm:
             )
           )
           val to = FsmState.NeedsHumanIntervention(
-            reason = s"manifest merged record disagrees with Merged event for piece ${piece.value}",
+            reason = s"manifest merged record disagrees with merge event for piece ${piece.value}",
             resumeHint = ResumeHint.AbortOrAbandon
           )
           // §6.1: NHI from a piece state clears currentPieceSessionId.
           val updated = feature.copy(state = to, currentPieceSessionId = None)
-          (updated, Vector(fsmTransitionDraft(feature, state, to, piece = Some(piece)), mismatchDraft))
+          (updated, Vector(fsmTransitionDraft(feature, from, to, piece = Some(piece)), mismatchDraft))
 
       case Some(_) =>
-        // Normal merge path: mutate manifest atomically + transition + audit draft.
+        // Normal integration path: mutate manifest atomically + transition + audit draft.
         mutatePiece(feature, piece) { p =>
           p.copy(
             status = PieceStatus.Merged,
-            prNumber = Some(prNumber),
+            prNumber = prNumber,
             mergeCommit = Some(mergeCommit),
             mergedAt = Some(mergedAt)
           )
@@ -940,7 +974,7 @@ object Fsm:
             val to = FsmState.Refining(piece, prNumber, observedAt)
             val updated = feature.copy(state = to, manifest = updatedManifest)
             val drafts = Vector(
-              fsmTransitionDraft(feature, state, to, piece = Some(piece)),
+              fsmTransitionDraft(feature, from, to, piece = Some(piece)),
               auditPieceMergedDraft(feature, piece, prNumber, mergeCommit, mergedAt)
             )
             (updated, drafts)
@@ -1203,7 +1237,11 @@ object Fsm:
     case s: FsmState.PieceBuildFixingUp =>
       ResumeHint.ResolveLocalImplementationChanges(s.p, feature.manifest.pieceBranch(s.p))
     case s: FsmState.PieceAwaitingMerge => ResumeHint.RunAnotherFixup(s.p, s.prNumber)
-    case s: FsmState.Refining => ResumeHint.RunAnotherFixup(s.p, s.prNumber)
+    case s: FsmState.Refining =>
+      // PR path → RunAnotherFixup on the merged PR; trunk path (no PR) → AbortOrAbandon (design-3.3-trunk / W3).
+      s.prNumber match
+        case Some(pr) => ResumeHint.RunAnotherFixup(s.p, pr)
+        case None => ResumeHint.AbortOrAbandon
     case _: FsmState.PlanningUpdate => ResumeHint.AbortOrAbandon
     case s: FsmState.NeedsHumanIntervention => s.resumeHint
     case FsmState.FeatureDone => ResumeHint.AbortOrAbandon
@@ -1443,10 +1481,13 @@ object Fsm:
   private def auditPieceMergedDraft(
       feature: Feature,
       piece: PieceId,
-      prNumber: PrNumber,
+      prNumber: Option[PrNumber],
       mergeCommit: Sha,
       mergedAt: java.time.Instant
   ): ActionDraft =
+    // §19: `prNumber` is `null` on the trunk-commit path (design-3.3-trunk / W3 — a trunk piece has no PR);
+    // `Replay.applyAuditPieceMerged` collects the piece id and cross-checks the number against the manifest only when
+    // both carry one.
     ActionDraft(
       feature = feature.id,
       piece = Some(piece),
@@ -1455,7 +1496,7 @@ object Fsm:
       kind = "audit.piece_merged",
       payload = ujson.Obj(
         "p" -> ujson.Str(piece.value),
-        "prNumber" -> ujson.Num(prNumber.value.toDouble),
+        "prNumber" -> prNumber.map(n => ujson.Num(n.value.toDouble)).getOrElse(ujson.Null),
         "mergeCommit" -> ujson.Str(mergeCommit.value),
         "mergedAt" -> ujson.Str(mergedAt.toString)
       )

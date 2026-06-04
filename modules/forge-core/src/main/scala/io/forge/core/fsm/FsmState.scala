@@ -100,8 +100,13 @@ enum FsmState derives ReadWriter:
 
   /** §11.7 — refinery running on the just-merged piece. `startedAt` is the orchestrator's observation time, not the
     * upstream `mergedAt` (see PR-B B4 `Merged` note: §14.1 "Refining piece (Xs)" elapsed clock starts here).
+    *
+    * `prNumber` is `Some` for the PR (GitFlow) merge path and `None` for the trunk-commit path (design-3.3-trunk / W3):
+    * a `TrunkBased` repo integrates a piece by committing straight to the trunk branch with no PR, so the refining step
+    * that follows carries no PR number. The FSM reaches the trunk variant via the neutral `CommittedToTrunk` event (the
+    * orchestrator decides the branch model; the FSM stays profile-agnostic — the §6.1 replay invariant).
     */
-  case Refining(p: PieceId, prNumber: PrNumber, startedAt: Instant)
+  case Refining(p: PieceId, prNumber: Option[PrNumber], startedAt: Instant)
 
   /** §14.3 — refinery proposed a manifest update; awaiting operator approval. */
   case PlanningUpdate(reason: String, patch: ManifestPatch)

@@ -49,7 +49,7 @@ class F13AtomicMergeCrashSuite extends munit.FunSuite:
         f.state match
           case FsmState.Refining(p, pr, startedAt) =>
             assertEquals(p, P1)
-            assertEquals(pr, P1Pr)
+            assertEquals(pr, Some(P1Pr))
             // observedAt = mergedAt per B4 (closest historical fact available).
             assertEquals(startedAt, MergedAt)
           case other => fail(s"expected Refining, got $other")
@@ -72,7 +72,7 @@ class F13AtomicMergeCrashSuite extends munit.FunSuite:
       writeManifest(paths, manifest)
       val initial = Feature.initial(FeatureA, manifest)
       val transitions = transitionsToAwaitingMerge(P1, P1Pr) :+
-        (FsmState.PieceAwaitingMerge(P1, P1Pr) -> FsmState.Refining(P1, P1Pr, startedAt = MergedAt))
+        (FsmState.PieceAwaitingMerge(P1, P1Pr) -> FsmState.Refining(P1, Some(P1Pr), startedAt = MergedAt))
       appendTransitions(log, initial.id, transitions)
 
       val result = RebuildState.run(FeatureA, paths, manifestStore, log, cache).unsafeRunSync()
@@ -81,7 +81,7 @@ class F13AtomicMergeCrashSuite extends munit.FunSuite:
           f.state match
             case FsmState.Refining(p, pr, _) =>
               assertEquals(p, P1)
-              assertEquals(pr, P1Pr)
+              assertEquals(pr, Some(P1Pr))
             case other => fail(s"expected Refining, got $other")
         case Left(err) => fail(s"expected Right, got Left($err)")
 
@@ -101,8 +101,8 @@ class F13AtomicMergeCrashSuite extends munit.FunSuite:
       writeManifest(paths, manifest)
       val initial = Feature.initial(FeatureA, manifest)
       val transitions = transitionsToAwaitingMerge(P1, P1Pr) ++ Vector[(FsmState, FsmState)](
-        FsmState.PieceAwaitingMerge(P1, P1Pr) -> FsmState.Refining(P1, P1Pr, startedAt = MergedAt),
-        FsmState.Refining(P1, P1Pr, startedAt = MergedAt) -> FsmState.PieceImplementing(P2)
+        FsmState.PieceAwaitingMerge(P1, P1Pr) -> FsmState.Refining(P1, Some(P1Pr), startedAt = MergedAt),
+        FsmState.Refining(P1, Some(P1Pr), startedAt = MergedAt) -> FsmState.PieceImplementing(P2)
       )
       appendTransitions(log, initial.id, transitions)
 

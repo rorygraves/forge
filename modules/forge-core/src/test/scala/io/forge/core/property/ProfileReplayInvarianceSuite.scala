@@ -103,6 +103,31 @@ class ProfileReplayInvarianceSuite extends ScalaCheckSuite:
     }
   }
 
+  test("R1 (trunk) — a trunk-commit trajectory folds identically with/without an injected profile.snapshot"):
+    // design-3.3-trunk / W3: build a real trunk integration stream (PieceImplementing → Refining(None) via
+    // CommittedToTrunk, then RefineOutcome → FeatureDone) by running the FSM, then fold it with and without a
+    // profile.snapshot injected. The trunk `audit.piece_merged` carries a null prNumber — this proves Replay tolerates
+    // it and that the profile action stays inert on a trunk stream.
+    import io.forge.core.fsm.FsmFixtures.*
+    val start = featureIn(
+      FsmState.PieceImplementing(P1),
+      pieces = Vector(pieceInProgress(P1, 1))
+    )
+    val (afterCommit, d1) =
+      Fsm.transition(start, FsmEvent.CommittedToTrunk(P1, Sha40Other, MergedAt, ObservedAt))
+    val (_, d2) = Fsm.transition(afterCommit, FsmEvent.RefineOutcome(io.forge.core.review.RefineVerdict.NoChange))
+    val baseDrafts = d1 ++ d2
+    val augmented = ProfileSnapshot.draft(start.id, profile) +: baseDrafts
+
+    // Seed the fold where the stream starts (PieceImplementing(P1)) with the post-integration manifest (P1 merged, no
+    // PR) — the same "final manifest + replay the state trajectory" idiom the happy-path R1 above uses.
+    val seed0 = Feature.initial(start.id, afterCommit.manifest).copy(state = FsmState.PieceImplementing(P1))
+    (Feature.foldEvents(seed0, stampDrafts(baseDrafts)), Feature.foldEvents(seed0, stampDrafts(augmented))) match
+      case (Right(base), Right(aug)) =>
+        assertEquals(aug.feature, base.feature, "profile.snapshot perturbed a trunk replay")
+        assertEquals(base.feature.state, FsmState.FeatureDone: FsmState)
+      case (b, a) => fail(s"foldEvents returned Left (base=$b, aug=$a)")
+
   test("R2 — no io.forge.core.fsm source references the io.forge.core.profile package"):
     val fsmDir = os.pwd / "modules" / "forge-core" / "src" / "main" / "scala" / "io" / "forge" / "core" / "fsm"
     assert(os.exists(fsmDir), s"expected the fsm package under ${os.pwd}; sbt working dir misconfigured?")

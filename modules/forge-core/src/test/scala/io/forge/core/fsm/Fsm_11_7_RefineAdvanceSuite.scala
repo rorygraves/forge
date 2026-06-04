@@ -9,7 +9,7 @@ class Fsm_11_7_RefineAdvanceSuite extends munit.FunSuite:
 
   test("Refining(p) + NoChange + nextPending defined → PieceImplementing(next); currentPieceSessionId cleared"):
     val f = featureIn(
-      FsmState.Refining(P1, P1Pr, ObservedAt),
+      FsmState.Refining(P1, Some(P1Pr), ObservedAt),
       pieces = Vector(pieceMerged(P1, 1, P1Pr), piecePending(P2, 2)),
       currentPieceSessionId = Some("impl-1")
     )
@@ -21,7 +21,7 @@ class Fsm_11_7_RefineAdvanceSuite extends munit.FunSuite:
 
   test("Refining(p) + NoChange + no pending pieces → FeatureDone"):
     val f = featureIn(
-      FsmState.Refining(P1, P1Pr, ObservedAt),
+      FsmState.Refining(P1, Some(P1Pr), ObservedAt),
       pieces = Vector(pieceMerged(P1, 1, P1Pr)),
       currentPieceSessionId = Some("impl-1")
     )
@@ -32,7 +32,7 @@ class Fsm_11_7_RefineAdvanceSuite extends munit.FunSuite:
   test("Refining(p) + UpdatePlan(patch) → PlanningUpdate(reason, patch); currentPieceSessionId cleared"):
     val patch = ManifestPatch("reorder", Vector(ManifestPatchOp.ReorderPieces(Vector(P2))))
     val f = featureIn(
-      FsmState.Refining(P1, P1Pr, ObservedAt),
+      FsmState.Refining(P1, Some(P1Pr), ObservedAt),
       pieces = Vector(pieceMerged(P1, 1, P1Pr), piecePending(P2, 2)),
       currentPieceSessionId = Some("impl-1")
     )
@@ -46,7 +46,7 @@ class Fsm_11_7_RefineAdvanceSuite extends munit.FunSuite:
 
   test("Refining(p) + ReopenDesign(reason) → NHI(ReopenDesign(None)); currentPieceSessionId cleared"):
     val f = featureIn(
-      FsmState.Refining(P1, P1Pr, ObservedAt),
+      FsmState.Refining(P1, Some(P1Pr), ObservedAt),
       pieces = Vector(pieceMerged(P1, 1, P1Pr), piecePending(P2, 2)),
       currentPieceSessionId = Some("impl-1"),
       designPr = Some(DesignPr)

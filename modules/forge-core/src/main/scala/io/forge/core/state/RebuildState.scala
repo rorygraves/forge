@@ -232,10 +232,12 @@ object RebuildState:
     * **Per-piece classification.** For each piece `p` in `manifest.pieces.filter(_.status == Merged)` (in manifest
     * order):
     *
-    *   - `transitionLogged(p)` — exists in `foldResult.observedTransitions` with `from == PieceAwaitingMerge(p.id,
-    *     p.prNumber.get)` AND `to` is `Refining(p.id, p.prNumber.get, _)`. Anchored on **both** piece id and PR number;
-    *     piece-id-only would silently accept an unrelated PR's merge as the recovery target. `p.prNumber.get` is safe
-    *     because `Manifest.validate` (§5.1) guarantees it's non-None for merged pieces.
+    *   - `transitionLogged(p)` — exists in `foldResult.observedTransitions` anchored on the integration transition for
+    *     `p` (see `transitionAnchorsIntegration`). PR path (`p.prNumber = Some`): `from == PieceAwaitingMerge(p.id,
+    *     pr)` AND `to == Refining(p.id, Some(pr), _)`, anchored on **both** piece id and PR number (piece-id-only would
+    *     silently accept an unrelated PR's merge as the recovery target). Trunk path (`p.prNumber = None`,
+    *     design-3.3-trunk / W3): `from == PieceImplementing(p.id) | PieceBuildFixingUp(p.id, _)` AND `to ==
+    *     Refining(p.id, None, _)`.
     *   - `auditLogged(p)` — `foldResult.observedPieceMerges` contains `p.id`. Piece-id-only is sufficient at this layer
     *     because the per-line PR-number check happens inside `Replay.foldEvents` (`AuditPrNumberMismatch`).
     *
@@ -247,13 +249,14 @@ object RebuildState:
     *     `Refining(p, _, _)` or any forward state if the log captured later transitions). The repair synthesizes the
     *     missing `audit.piece_merged` from the manifest's piece record + a paired `harness.crash_recovered` draft. The
     *     feature is **not** mutated.
-    *   - **(c) !transitionLogged && !auditLogged** — the §11.5 crash window proper. Requires `feature.state ==
-    *     PieceAwaitingMerge(p.id, p.prNumber.get)`; anything else means the fold-state is structurally incompatible
-    *     (e.g. log says we're still in `PieceAwaitingReview`) and we return `Left(InconsistentRecovery)`. Applies
-    *     `Fsm.transition(feature, syntheticMerged)` where `syntheticMerged = FsmEvent.Merged(p.id, p.prNumber.get,
-    *     p.mergeCommit.get, p.mergedAt.get, observedAt = p.mergedAt.get)`. The B4 idempotency rule makes this safe
-    *     (manifest is already merged, so the mutation is a no-op; the state transition + drafts still fire). `feature`
-    *     is updated to the post-transition value; `drafts ++ Vector(harnessCrashRecoveredDraft)` are appended.
+    *   - **(c) !transitionLogged && !auditLogged** — the §11.5 crash window proper. PR path: requires `feature.state ==
+    *     PieceAwaitingMerge(p.id, pr)` and applies a synthetic `FsmEvent.Merged`. Trunk path (design-3.3-trunk / W3):
+    *     requires `feature.state == PieceImplementing(p.id) | PieceBuildFixingUp(p.id, _)` and applies a synthetic
+    *     `FsmEvent.CommittedToTrunk(p.id, p.mergeCommit.get, p.mergedAt.get, observedAt = p.mergedAt.get)`. Anything
+    *     else means the fold-state is structurally incompatible (e.g. log says we're still in `PieceAwaitingReview`)
+    *     and we return `Left(InconsistentRecovery)`. The B4 idempotency rule makes this safe (manifest is already
+    *     merged, so the mutation is a no-op; the state transition + drafts still fire). `feature` is updated to the
+    *     post-transition value; `drafts ++ Vector(harnessCrashRecoveredDraft)` are appended.
     *   - **(d) !transitionLogged && auditLogged** — structurally impossible under §11.5 ordering (audit comes after
     *     transition in the batch). Return `Left(InconsistentRecovery)` — refuse to invent transitions.
     *
@@ -322,13 +325,11 @@ object RebuildState:
     case Impossible(reason: String)
 
   private def classify(piece: Piece, foldResult: FoldResult): PieceCase =
-    val prNumber = piece.prNumber.getOrElse(
-      throw new IllegalStateException(
-        s"reconcile invariant: merged piece ${piece.id.value} has no prNumber — Manifest.validate should have caught"
-      )
-    )
+    // design-3.3-trunk / W3: a merged piece reaches `Refining` via the PR path (`PieceAwaitingMerge → Refining`, with a
+    // PR number) or the trunk path (`PieceImplementing | PieceBuildFixingUp → Refining`, no PR number). `piece.prNumber`
+    // selects which anchor applies; a trunk piece legitimately has none (no `.get` throw).
     val transitionLogged = foldResult.observedTransitions.exists { t =>
-      transitionAnchorsMerge(t, piece.id, prNumber)
+      transitionAnchorsIntegration(t, piece)
     }
     val auditLogged = foldResult.observedPieceMerges.contains(piece.id)
     (transitionLogged, auditLogged) match
@@ -339,21 +340,34 @@ object RebuildState:
         // (d) Structurally impossible under §11.5 ordering: audit comes after transition in the rendered-batch write.
         // An audit-only orphan implies the log was hand-edited or corrupted.
         PieceCase.Impossible(
-          s"piece ${piece.id.value}: audit.piece_merged present but PieceAwaitingMerge → Refining missing"
+          s"piece ${piece.id.value}: audit.piece_merged present but the integration transition (→ Refining) is missing"
         )
 
-  /** A transition `t` anchors `piece`'s merge iff its `from` is `PieceAwaitingMerge(piece, prNumber)` AND its `to` is
-    * `Refining` for the same piece + PR number. PR number must match on both ends; piece-id-only would accept an
-    * unrelated PR's transition (e.g. a hand-edited log).
+  /** A transition `t` anchors `piece`'s integration. For a PR piece (`piece.prNumber = Some`): `from` is
+    * `PieceAwaitingMerge(piece, prNumber)` AND `to` is `Refining(piece, Some(prNumber), _)` — the PR number must match
+    * on both ends (piece-id-only would accept an unrelated PR's transition from a hand-edited log). For a trunk piece
+    * (`piece.prNumber = None`, design-3.3-trunk / W3): `from` is `PieceImplementing(piece)` or
+    * `PieceBuildFixingUp(piece, _)` AND `to` is `Refining(piece, None, _)`.
     */
-  private def transitionAnchorsMerge(t: ObservedTransition, piece: PieceId, prNumber: PrNumber): Boolean =
-    val fromMatches = t.from match
-      case FsmState.PieceAwaitingMerge(p, pr) => p == piece && pr == prNumber
-      case _ => false
-    val toMatches = t.to match
-      case FsmState.Refining(p, pr, _) => p == piece && pr == prNumber
-      case _ => false
-    fromMatches && toMatches
+  private def transitionAnchorsIntegration(t: ObservedTransition, piece: Piece): Boolean =
+    piece.prNumber match
+      case Some(prNumber) =>
+        val fromMatches = t.from match
+          case FsmState.PieceAwaitingMerge(p, pr) => p == piece.id && pr == prNumber
+          case _ => false
+        val toMatches = t.to match
+          case FsmState.Refining(p, pr, _) => p == piece.id && pr.contains(prNumber)
+          case _ => false
+        fromMatches && toMatches
+      case None =>
+        val fromMatches = t.from match
+          case FsmState.PieceImplementing(p) => p == piece.id
+          case FsmState.PieceBuildFixingUp(p, _) => p == piece.id
+          case _ => false
+        val toMatches = t.to match
+          case FsmState.Refining(p, pr, _) => p == piece.id && pr.isEmpty
+          case _ => false
+        fromMatches && toMatches
 
   private def applyRepair(
       acc: ReconcileAccumulator,
@@ -376,35 +390,45 @@ object RebuildState:
         Right(acc.copy(drafts = acc.drafts ++ Vector(syntheticAudit, harness)))
 
       case PieceCase.CrashWindow =>
-        // §11.5 crash window proper: synthesize the `Merged` event and let `Fsm.transition` produce both the
+        // §11.5 crash window proper: synthesize the integration event and let `Fsm.transition` produce both the
         // fsm.transition draft and the audit.piece_merged draft. The B4 idempotency rule makes this safe (manifest is
-        // already merged; mutation is a no-op).
-        val prNumber = piece.prNumber.get
+        // already merged; mutation is a no-op). observedAt = mergedAt because at recovery time it's the closest
+        // historical fact available; using rebuild-time `now` would distort the Refining.startedAt elapsed clock more
+        // aggressively (see PR-B B4).
         val mergeCommit = piece.mergeCommit.get
         val mergedAt = piece.mergedAt.get
-        if !isPieceAwaitingMergeForPiece(acc.feature.state, piece.id, prNumber) then
-          Left(
-            RebuildError.InconsistentRecovery(
-              s"piece ${piece.id.value}: manifest says merged but fold-state is ${acc.feature.state} (expected " +
-                s"PieceAwaitingMerge(${piece.id.value}, ${prNumber.value}))"
-            )
-          )
-        else
-          // observedAt = mergedAt because at recovery time it's the closest historical fact available; using rebuild-
-          // time `now` would distort the Refining.startedAt elapsed clock more aggressively (see PR-B B4).
-          val syntheticMerged = FsmEvent.Merged(piece.id, prNumber, mergeCommit, mergedAt, observedAt = mergedAt)
-          val (updatedFeature, fsmDrafts) = Fsm.transition(acc.feature, syntheticMerged)
-          val harness = harnessCrashRecoveredDraft(
-            acc.feature.id,
-            piece,
-            reason = "crash_window_synthetic_merged"
-          )
-          Right(
-            ReconcileAccumulator(
-              feature = updatedFeature,
-              drafts = acc.drafts ++ fsmDrafts ++ Vector(harness)
-            )
-          )
+        piece.prNumber match
+          case Some(prNumber) =>
+            if !isPieceAwaitingMergeForPiece(acc.feature.state, piece.id, prNumber) then
+              Left(
+                RebuildError.InconsistentRecovery(
+                  s"piece ${piece.id.value}: manifest says merged but fold-state is ${acc.feature.state} (expected " +
+                    s"PieceAwaitingMerge(${piece.id.value}, ${prNumber.value}))"
+                )
+              )
+            else
+              val syntheticMerged = FsmEvent.Merged(piece.id, prNumber, mergeCommit, mergedAt, observedAt = mergedAt)
+              val (updatedFeature, fsmDrafts) = Fsm.transition(acc.feature, syntheticMerged)
+              val harness = harnessCrashRecoveredDraft(acc.feature.id, piece, reason = "crash_window_synthetic_merged")
+              Right(ReconcileAccumulator(updatedFeature, acc.drafts ++ fsmDrafts ++ Vector(harness)))
+
+          case None =>
+            // design-3.3-trunk / W3: trunk crash window — the orchestrator committed straight to trunk and mutated the
+            // manifest to merged, but crashed before the `fsm.transition`/`audit` drafts persisted. The fold-state is
+            // still the implementing/build-fix-up state. Synthesize `CommittedToTrunk` (the trunk analogue of `Merged`).
+            if !isPieceImplementingOrBuildFixingUp(acc.feature.state, piece.id) then
+              Left(
+                RebuildError.InconsistentRecovery(
+                  s"piece ${piece.id.value}: manifest says merged (no PR) but fold-state is ${acc.feature.state} " +
+                    s"(expected PieceImplementing(${piece.id.value}) or PieceBuildFixingUp(${piece.id.value}, _))"
+                )
+              )
+            else
+              val syntheticCommit = FsmEvent.CommittedToTrunk(piece.id, mergeCommit, mergedAt, observedAt = mergedAt)
+              val (updatedFeature, fsmDrafts) = Fsm.transition(acc.feature, syntheticCommit)
+              val harness =
+                harnessCrashRecoveredDraft(acc.feature.id, piece, reason = "crash_window_synthetic_committed_to_trunk")
+              Right(ReconcileAccumulator(updatedFeature, acc.drafts ++ fsmDrafts ++ Vector(harness)))
 
       case PieceCase.Impossible(reason) =>
         // Already short-circuited in the pre-pass, but keep the match exhaustive.
@@ -413,6 +437,12 @@ object RebuildState:
   private def isPieceAwaitingMergeForPiece(state: FsmState, piece: PieceId, prNumber: PrNumber): Boolean =
     state match
       case FsmState.PieceAwaitingMerge(p, pr) => p == piece && pr == prNumber
+      case _ => false
+
+  private def isPieceImplementingOrBuildFixingUp(state: FsmState, piece: PieceId): Boolean =
+    state match
+      case FsmState.PieceImplementing(p) => p == piece
+      case FsmState.PieceBuildFixingUp(p, _) => p == piece
       case _ => false
 
   private def syntheticAuditDraft(feature: FeatureId, piece: Piece): ActionDraft =
@@ -424,7 +454,8 @@ object RebuildState:
       kind = "audit.piece_merged",
       payload = ujson.Obj(
         "p" -> ujson.Str(piece.id.value),
-        "prNumber" -> ujson.Num(piece.prNumber.get.value.toDouble),
+        // Nullable on the trunk path (design-3.3-trunk / W3).
+        "prNumber" -> piece.prNumber.map(n => ujson.Num(n.value.toDouble)).getOrElse(ujson.Null),
         "mergeCommit" -> ujson.Str(piece.mergeCommit.get.value),
         "mergedAt" -> ujson.Str(piece.mergedAt.get.toString)
       )
@@ -440,6 +471,6 @@ object RebuildState:
       payload = ujson.Obj(
         "piece" -> ujson.Str(piece.id.value),
         "reason" -> ujson.Str(reason),
-        "manifestPrNumber" -> ujson.Num(piece.prNumber.get.value.toDouble)
+        "manifestPrNumber" -> piece.prNumber.map(n => ujson.Num(n.value.toDouble)).getOrElse(ujson.Null)
       )
     )

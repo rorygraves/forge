@@ -45,7 +45,7 @@ class F2NhiLegalitySuite extends ScalaCheckSuite:
     FsmState.PieceAwaitingCi(PieceId("p1"), PrNumber(5001)),
     FsmState.PieceAwaitingReview(PieceId("p1"), PrNumber(5001)),
     FsmState.PieceAwaitingMerge(PieceId("p1"), PrNumber(5001)),
-    FsmState.Refining(PieceId("p1"), PrNumber(5001), startedAt = java.time.Instant.parse("2026-05-26T12:00:00Z"))
+    FsmState.Refining(PieceId("p1"), Some(PrNumber(5001)), startedAt = java.time.Instant.parse("2026-05-26T12:00:00Z"))
   )
 
   property("F2 — every NHI from a reachable state carries a legal ResumeHint") {

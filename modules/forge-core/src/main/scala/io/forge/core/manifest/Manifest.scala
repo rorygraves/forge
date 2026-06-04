@@ -23,7 +23,12 @@ final case class Manifest(
     *   - pending: baseSha, prNumber, mergeCommit, mergedAt all null
     *   - in_progress: baseSha non-null; mergeCommit, mergedAt null (prNumber may be set after PR creation, §11.4 step
     *     6)
-    *   - merged: every field set (baseSha + prNumber + mergeCommit + mergedAt)
+    *   - merged: baseSha + mergeCommit + mergedAt set; prNumber set on the PR (GitFlow) path, **null on the
+    *     trunk-commit path** (design-3.3-trunk / W3 decision D2 — a `TrunkBased` piece is integrated by committing
+    *     straight to trunk with no PR, so it is a genuine merge into mainline that has no PR number). The manifest
+    *     stays profile-agnostic, so the universal merged invariant is `mergeCommit` + `mergedAt` (the facts of
+    *     integration); `prNumber` is optional. The PR path still sets it (FSM behaviour), it is simply no longer
+    *     *validated*.
     *
     * Structural rules:
     *   - piece ids are unique
@@ -52,8 +57,9 @@ final case class Manifest(
           if p.mergeCommit.isDefined then errs += s"$tag: in_progress status requires null mergeCommit"
           if p.mergedAt.isDefined then errs += s"$tag: in_progress status requires null mergedAt"
         case PieceStatus.Merged =>
+          // D2 (design-3.3-trunk / W3): `prNumber` is no longer required — a trunk-committed piece is merged into
+          // mainline with no PR. The universal facts of integration are `mergeCommit` + `mergedAt`.
           if p.baseSha.isEmpty then errs += s"$tag: merged status requires non-null baseSha"
-          if p.prNumber.isEmpty then errs += s"$tag: merged status requires prNumber"
           if p.mergeCommit.isEmpty then errs += s"$tag: merged status requires mergeCommit"
           if p.mergedAt.isEmpty then errs += s"$tag: merged status requires mergedAt"
 

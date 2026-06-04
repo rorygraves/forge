@@ -181,7 +181,7 @@ object Generators:
       for p <- genPieceId; a <- Gen.choose(0, 5) yield FsmState.PieceBuildFailed(p, a),
       for p <- genPieceId; a <- Gen.choose(0, 5) yield FsmState.PieceBuildFixingUp(p, a),
       for p <- genPieceId; pr <- genPrNumber yield FsmState.PieceAwaitingMerge(p, pr),
-      for p <- genPieceId; pr <- genPrNumber; t <- genInstant yield FsmState.Refining(p, pr, t)
+      for p <- genPieceId; pr <- genPrNumber; t <- genInstant yield FsmState.Refining(p, Some(pr), t)
     )
     Gen.oneOf(singletons, parametric)
 

@@ -79,7 +79,7 @@ class OrchestratorSourceSelectionSuite extends munit.FunSuite:
     ("PieceReviewFailed", FsmState.PieceReviewFailed(P1, Pr, 1), None, Vector.empty),
     ("PieceFixingUp", FsmState.PieceFixingUp(P1, Pr, 1), session(SessionPhase.Fixup), Vector(Monitor)),
     ("PieceAwaitingMerge", FsmState.PieceAwaitingMerge(P1, Pr), None, Vector(Watcher(Pr))),
-    ("Refining", FsmState.Refining(P1, Pr, Started), None, Vector(Reviewer(ReviewerMethod.Refine))),
+    ("Refining", FsmState.Refining(P1, Some(Pr), Started), None, Vector(Reviewer(ReviewerMethod.Refine))),
     ("PlanningUpdate", FsmState.PlanningUpdate("reason", Patch), None, Vector(UserQa)),
     ("NeedsHumanIntervention", FsmState.NeedsHumanIntervention("stuck", ResumeHint.AbortOrAbandon), None, Vector.empty),
     ("FeatureDone", FsmState.FeatureDone, None, Vector.empty),

@@ -125,7 +125,7 @@ class FeatureFoldEventsSuite extends munit.FunSuite:
     val seed = Feature
       .initial(FeatureA, FsmFixtures.manifest(Vector(piecePending(P1, 1))))
       .copy(state = FsmState.PieceAwaitingMerge(P1, P1Pr))
-    val refining = FsmState.Refining(P1, P1Pr, startedAt = at(2))
+    val refining = FsmState.Refining(P1, Some(P1Pr), startedAt = at(2))
     val log = Vector(
       fsmTransitionAction(0L, FsmState.PieceAwaitingMerge(P1, P1Pr), refining, piece = Some(P1))
     )
@@ -419,13 +419,13 @@ class FeatureFoldEventsSuite extends munit.FunSuite:
     val seed = Feature
       .initial(FeatureA, FsmFixtures.manifest(Vector(pieceMerged(P1, 1, prNumber = P1Pr), piecePending(P2, 2))))
       .copy(
-        state = FsmState.Refining(P1, P1Pr, startedAt = ObservedAt),
+        state = FsmState.Refining(P1, Some(P1Pr), startedAt = ObservedAt),
         currentPieceSessionId = Some("sess-p1")
       )
     val log = Vector(
       fsmTransitionAction(
         0L,
-        FsmState.Refining(P1, P1Pr, startedAt = ObservedAt),
+        FsmState.Refining(P1, Some(P1Pr), startedAt = ObservedAt),
         FsmState.PieceImplementing(P2),
         piece = Some(P1)
       )
@@ -438,13 +438,13 @@ class FeatureFoldEventsSuite extends munit.FunSuite:
     val seed = Feature
       .initial(FeatureA, FsmFixtures.manifest(Vector(pieceMerged(P1, 1, prNumber = P1Pr))))
       .copy(
-        state = FsmState.Refining(P1, P1Pr, startedAt = ObservedAt),
+        state = FsmState.Refining(P1, Some(P1Pr), startedAt = ObservedAt),
         currentPieceSessionId = Some("sess-p1")
       )
     val log = Vector(
       fsmTransitionAction(
         0L,
-        FsmState.Refining(P1, P1Pr, startedAt = ObservedAt),
+        FsmState.Refining(P1, Some(P1Pr), startedAt = ObservedAt),
         FsmState.FeatureDone,
         piece = Some(P1)
       )

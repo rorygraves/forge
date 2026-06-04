@@ -120,6 +120,23 @@ object FsmFixtures:
       attempts = attempts
     )
 
+  /** A trunk-committed merged piece (design-3.3-trunk / W3): merged into mainline with **no PR number**. */
+  def pieceMergedTrunk(
+      id: PieceId,
+      order: Int,
+      mergeCommit: Sha = Sha40Other,
+      mergedAt: Instant = MergedAt,
+      attempts: Int = 0
+  ): Piece =
+    piecePending(id, order).copy(
+      status = PieceStatus.Merged,
+      baseSha = Some(Sha40),
+      prNumber = None,
+      mergeCommit = Some(mergeCommit),
+      mergedAt = Some(mergedAt),
+      attempts = attempts
+    )
+
   def manifest(pieces: Vector[Piece], designPr: Option[PrNumber] = None): Manifest =
     Manifest(
       schemaVersion = Manifest.CurrentSchemaVersion,

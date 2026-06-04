@@ -115,7 +115,7 @@ class OrchestratorAtomicMergeSuite extends munit.FunSuite:
           f.state match
             case FsmState.Refining(p, pr, _) =>
               assertEquals(p, p1)
-              assertEquals(pr, piecePr)
+              assertEquals(pr, Some(piecePr))
             case other => fail(s"expected Refining after reconcile, got $other")
           assertEquals(inFlight, Vector.empty, "recovered to Refining — no live driver session")
         case Left(err) => fail(s"expected Right after reconcile, got Left($err)")

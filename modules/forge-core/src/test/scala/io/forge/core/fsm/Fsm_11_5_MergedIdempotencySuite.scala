@@ -23,7 +23,7 @@ class Fsm_11_5_MergedIdempotencySuite extends munit.FunSuite:
       f,
       FsmEvent.Merged(P1, P1Pr, Sha40Other, MergedAt, ObservedAt)
     )
-    assertEquals(out.state, FsmState.Refining(P1, P1Pr, startedAt = ObservedAt))
+    assertEquals(out.state, FsmState.Refining(P1, Some(P1Pr), startedAt = ObservedAt))
     val p1 = out.manifest.pieces.find(_.id == P1).get
     assertEquals(p1.status, PieceStatus.Merged)
     assertEquals(p1.prNumber, Some(P1Pr))
@@ -47,7 +47,7 @@ class Fsm_11_5_MergedIdempotencySuite extends munit.FunSuite:
       f,
       FsmEvent.Merged(P1, P1Pr, Sha40Other, MergedAt, ObservedAt)
     )
-    assertEquals(out.state, FsmState.Refining(P1, P1Pr, startedAt = ObservedAt))
+    assertEquals(out.state, FsmState.Refining(P1, Some(P1Pr), startedAt = ObservedAt))
     assertEquals(out.manifest.pieces.find(_.id == P1).get, pre, "manifest left untouched on idempotent re-apply")
     assertEquals(drafts.size, 2, "still emits fsm.transition + audit.piece_merged drafts")
     assertEquals(drafts(0).kind, "fsm.transition")

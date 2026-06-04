@@ -61,7 +61,7 @@ class RebuildStateInFlightSuite extends munit.FunSuite:
         FsmState.PieceAwaitingCi(P1, P1Pr),
         FsmState.PieceAwaitingReview(P1, P1Pr),
         FsmState.PieceAwaitingMerge(P1, P1Pr),
-        FsmState.Refining(P1, P1Pr, startedAt = MergedAt),
+        FsmState.Refining(P1, Some(P1Pr), startedAt = MergedAt),
         FsmState.FeatureDone
       )
     do assertEquals(RebuildState.inFlightSessions(log, feature(state)), Vector.empty, s"state=$state")

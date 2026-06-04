@@ -46,7 +46,9 @@ object StatusFields:
     case FsmState.PieceBuildFixingUp(p, attempt) =>
       s"piece ${p.value} — pre-PR build fix-up running (attempt $attempt)"
     case FsmState.PieceAwaitingMerge(p, pr) => s"piece ${p.value} PR #${pr.value} — green, awaiting merge"
-    case FsmState.Refining(p, pr, _) => s"refining after merge of piece ${p.value} (PR #${pr.value})"
+    case FsmState.Refining(p, pr, _) =>
+      val where = pr.map(n => s"PR #${n.value}").getOrElse("on trunk")
+      s"refining after merge of piece ${p.value} ($where)"
     case FsmState.PlanningUpdate(reason, _) => s"planning update proposed — $reason"
     case FsmState.NeedsHumanIntervention(reason, _) => s"needs human intervention — $reason"
     case FsmState.FeatureDone => "✓ complete (all pieces merged and refined)"

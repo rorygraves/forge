@@ -122,7 +122,7 @@ class TuiSnapshotBuilderSuite extends munit.FunSuite:
     assertEquals(ActivePane.forState(FsmState.PieceImplementing(p1)), ActivePane.Streaming)
     assertEquals(ActivePane.forState(FsmState.PieceFixingUp(p1, pr7, 1)), ActivePane.Streaming)
     assertEquals(
-      ActivePane.forState(FsmState.Refining(p1, pr7, Instant.parse("2026-06-01T10:00:00Z"))),
+      ActivePane.forState(FsmState.Refining(p1, Some(pr7), Instant.parse("2026-06-01T10:00:00Z"))),
       ActivePane.Streaming
     )
     assertEquals(ActivePane.forState(FsmState.DesignNeedsHumanInput(1, Vector.empty)), ActivePane.Question)

@@ -95,6 +95,29 @@ enum FsmEvent derives ReadWriter:
     */
   case LocalBuildFailed(piece: PieceId)
 
+  /** §11.4 / §11.5 (design-3.3-trunk / W3) — the repo's `WorkflowProfile.branchModel` is `TrunkBased`, so the
+    * orchestrator's `ClassifyCommitToTrunk` post-settle effect committed the piece **straight to the trunk branch with
+    * no PR** and emits this **instead of** `PrOpened`. The trunk sibling of [[Merged]], minus the PR number: a trunk
+    * piece is a genuine integration into mainline, so the FSM mutates `manifest[p]` to `merged` (with `prNumber =
+    * None`, `mergeCommit = Some(commitSha)`, `mergedAt = Some(committedAt)`) and transitions `PieceImplementing |
+    * PieceBuildFixingUp → Refining(p, None, observedAt)` — no `PieceAwaitingCi` / `PieceAwaitingReview` /
+    * `PieceAwaitingMerge` tail. Two timestamps, for the same reason [[Merged]] carries them:
+    *
+    *   - `committedAt`: the historical fact (when the commit landed on trunk). Stored on the piece's `mergedAt`.
+    *   - `observedAt`: when the orchestrator processed it. Seeds `Refining.startedAt` (the §14.1 elapsed clock).
+    *
+    * The decision lives in the orchestrator (which holds the resolved `WorkflowProfile`); the FSM routes purely on the
+    * piece, staying profile-agnostic (the §6.1 replay invariant). An unprofiled run, `adapt.workflowGate = false`, or a
+    * `GitFlow` repo never emits this, so the 1.10 PR lifecycle is byte-identical. Idempotent w.r.t. the manifest
+    * mutation, exactly like [[Merged]] (`RebuildState.reconcile`'s trunk crash-window recovery relies on it).
+    */
+  case CommittedToTrunk(
+      piece: PieceId,
+      commitSha: Sha,
+      committedAt: Instant,
+      observedAt: Instant
+  )
+
   /** §11.5 — `PRWatcher` produced a fresh snapshot of a piece PR. */
   case PrSnapshotUpdated(piece: PieceId, snapshot: PrSnapshot)
 

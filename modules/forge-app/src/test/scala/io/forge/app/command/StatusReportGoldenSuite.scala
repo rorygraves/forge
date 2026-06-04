@@ -111,7 +111,7 @@ class StatusReportGoldenSuite extends munit.FunSuite:
     "piece-review-failed" -> FsmState.PieceReviewFailed(p1, pr7, 1),
     "piece-fixing-up" -> FsmState.PieceFixingUp(p1, pr7, 1),
     "piece-awaiting-merge" -> FsmState.PieceAwaitingMerge(p1, pr7),
-    "refining" -> FsmState.Refining(p1, pr7, refiningAt),
+    "refining" -> FsmState.Refining(p1, Some(pr7), refiningAt),
     "planning-update" -> FsmState.PlanningUpdate("add a piece", ManifestPatch("add a piece", Vector.empty)),
     "needs-human-intervention" -> FsmState.NeedsHumanIntervention(
       "ci failed after 3 fix-up attempts",

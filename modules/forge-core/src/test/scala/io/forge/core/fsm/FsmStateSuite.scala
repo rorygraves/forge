@@ -61,7 +61,7 @@ class FsmStateSuite extends munit.FunSuite:
     roundTrip[FsmState](FsmState.PieceReviewFailed(p1, prNumber, attempt = 2))
     roundTrip[FsmState](FsmState.PieceFixingUp(p1, prNumber, attempt = 3))
     roundTrip[FsmState](FsmState.PieceAwaitingMerge(p1, prNumber))
-    roundTrip[FsmState](FsmState.Refining(p1, prNumber, startedAt = Instant.parse("2026-05-26T12:00:00Z")))
+    roundTrip[FsmState](FsmState.Refining(p1, Some(prNumber), startedAt = Instant.parse("2026-05-26T12:00:00Z")))
     roundTrip[FsmState](
       FsmState.PlanningUpdate(
         reason = "p3 needs to come first",

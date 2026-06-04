@@ -353,36 +353,43 @@ object Replay:
   /** §19 `audit.piece_merged` payload: `{ p, prNumber, mergeCommit, mergedAt }`. Replay collects the piece id into
     * `observedPieceMerges` and cross-checks `prNumber` against the manifest's record (which the seed `Feature`
     * carries). Mismatch surfaces as `AuditPrNumberMismatch`; the manifest is the §4 source of truth. The accepted
-    * payload key is `"p"`; any other spelling surfaces as `MalformedPayload` (a hand-edited log with a different key is
+    * payload key is `"p"`; a missing `p` surfaces as `MalformedPayload` (a hand-edited log with a different key is
     * treated as corruption rather than silently rewritten).
+    *
+    * `prNumber` is **nullable** (design-3.3-trunk / W3): a trunk-committed piece has no PR, so the draft emits
+    * `prNumber: null` and the manifest carries `None`. When the number is present the cross-check runs as before; when
+    * it is null/absent the piece id is still collected (the manifest remains the source of truth for the trunk piece).
     */
   private def applyAuditPieceMerged(st: FoldState, action: Action): Either[ReplayError, FoldState] =
     val obj = action.payload.objOpt.getOrElse(ujson.Obj().obj)
-    val pieceStr = obj.get("p").flatMap(_.strOpt)
-    val prNumberJs = obj.get("prNumber").flatMap(_.numOpt)
-    (pieceStr, prNumberJs) match
-      case (Some(pStr), Some(pr)) =>
-        val piece = PieceId(pStr)
-        val logPr = PrNumber(pr.toInt)
-        val manifestPr = st.feature.manifest.pieces.find(_.id == piece).flatMap(_.prNumber)
-        if !manifestPr.contains(logPr) then
-          Left(
-            ReplayError.AuditPrNumberMismatch(
-              at = action.seq,
-              piece = piece,
-              logPrNumber = logPr,
-              manifestPrNumber = manifestPr
-            )
-          )
-        else Right(st.copy(observedPieceMerges = st.observedPieceMerges + piece))
-      case _ =>
+    obj.get("p").flatMap(_.strOpt) match
+      case None =>
         Left(
           ReplayError.MalformedPayload(
             at = action.seq,
             kind = "audit.piece_merged",
-            reason = "missing p/prNumber on audit.piece_merged"
+            reason = "missing p on audit.piece_merged"
           )
         )
+      case Some(pStr) =>
+        val piece = PieceId(pStr)
+        obj.get("prNumber").flatMap(_.numOpt) match
+          case Some(pr) =>
+            val logPr = PrNumber(pr.toInt)
+            val manifestPr = st.feature.manifest.pieces.find(_.id == piece).flatMap(_.prNumber)
+            if !manifestPr.contains(logPr) then
+              Left(
+                ReplayError.AuditPrNumberMismatch(
+                  at = action.seq,
+                  piece = piece,
+                  logPrNumber = logPr,
+                  manifestPrNumber = manifestPr
+                )
+              )
+            else Right(st.copy(observedPieceMerges = st.observedPieceMerges + piece))
+          case None =>
+            // Trunk piece (prNumber null) — no PR to cross-check; collect the piece id.
+            Right(st.copy(observedPieceMerges = st.observedPieceMerges + piece))
 
   // --- helpers ---
 

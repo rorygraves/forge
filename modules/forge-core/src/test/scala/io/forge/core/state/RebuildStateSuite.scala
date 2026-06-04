@@ -28,13 +28,13 @@ class RebuildStateSuite extends munit.FunSuite:
     val manifest = FsmFixtures.manifest(Vector(pieceMerged(P1, 1, P1Pr)))
     val seed = Feature
       .initial(FeatureA, manifest)
-      .copy(state = FsmState.Refining(P1, P1Pr, startedAt = MergedAt))
+      .copy(state = FsmState.Refining(P1, Some(P1Pr), startedAt = MergedAt))
     val foldResult = FoldResult(
       feature = seed,
       observedTransitions = Vector(
         ObservedTransition(
           from = FsmState.PieceAwaitingMerge(P1, P1Pr),
-          to = FsmState.Refining(P1, P1Pr, startedAt = MergedAt),
+          to = FsmState.Refining(P1, Some(P1Pr), startedAt = MergedAt),
           piece = Some(P1),
           at = at(0)
         )
@@ -51,13 +51,13 @@ class RebuildStateSuite extends munit.FunSuite:
     val manifest = FsmFixtures.manifest(Vector(pieceMerged(P1, 1, P1Pr)))
     val seed = Feature
       .initial(FeatureA, manifest)
-      .copy(state = FsmState.Refining(P1, P1Pr, startedAt = MergedAt))
+      .copy(state = FsmState.Refining(P1, Some(P1Pr), startedAt = MergedAt))
     val foldResult = FoldResult(
       feature = seed,
       observedTransitions = Vector(
         ObservedTransition(
           from = FsmState.PieceAwaitingMerge(P1, P1Pr),
-          to = FsmState.Refining(P1, P1Pr, startedAt = MergedAt),
+          to = FsmState.Refining(P1, Some(P1Pr), startedAt = MergedAt),
           piece = Some(P1),
           at = at(0)
         )
@@ -87,12 +87,12 @@ class RebuildStateSuite extends munit.FunSuite:
       observedTransitions = Vector(
         ObservedTransition(
           from = FsmState.PieceAwaitingMerge(P1, P1Pr),
-          to = FsmState.Refining(P1, P1Pr, startedAt = MergedAt),
+          to = FsmState.Refining(P1, Some(P1Pr), startedAt = MergedAt),
           piece = Some(P1),
           at = at(0)
         ),
         ObservedTransition(
-          from = FsmState.Refining(P1, P1Pr, startedAt = MergedAt),
+          from = FsmState.Refining(P1, Some(P1Pr), startedAt = MergedAt),
           to = FsmState.PieceImplementing(P2),
           piece = Some(P1),
           at = at(1)
@@ -122,7 +122,7 @@ class RebuildStateSuite extends munit.FunSuite:
     result.feature.state match
       case FsmState.Refining(p, pr, startedAt) =>
         assertEquals(p, P1)
-        assertEquals(pr, P1Pr)
+        assertEquals(pr, Some(P1Pr))
         assertEquals(startedAt, MergedAt)
       case other => fail(s"expected Refining, got $other")
     // The drafts should include fsm.transition + audit.piece_merged + harness.crash_recovered (synthetic_merged reason).
@@ -132,6 +132,57 @@ class RebuildStateSuite extends munit.FunSuite:
     )
     val harness = result.draftsToAppend(2)
     assertEquals(harness.payload("reason").str, "crash_window_synthetic_merged")
+
+  // --- reconcile, trunk-commit path (design-3.3-trunk / W3) ---
+
+  test("reconcile trunk (a) — PieceImplementing → Refining(p, None) transition + audit logged → fully recovered"):
+    val manifest = FsmFixtures.manifest(Vector(pieceMergedTrunk(P1, 1)))
+    val seed = Feature
+      .initial(FeatureA, manifest)
+      .copy(state = FsmState.Refining(P1, None, startedAt = MergedAt))
+    val foldResult = FoldResult(
+      feature = seed,
+      observedTransitions = Vector(
+        ObservedTransition(
+          from = FsmState.PieceImplementing(P1),
+          to = FsmState.Refining(P1, None, startedAt = MergedAt),
+          piece = Some(P1),
+          at = at(0)
+        )
+      ),
+      observedPieceMerges = Set(P1)
+    )
+    val Right(result) = RebuildState.reconcile(foldResult, manifest): @unchecked
+    assertEquals(result.feature, seed)
+    assertEquals(result.draftsToAppend, Vector.empty)
+
+  test("reconcile trunk (c) — crash window, fold-state=PieceImplementing(p) → synthetic CommittedToTrunk"):
+    val manifest = FsmFixtures.manifest(Vector(pieceMergedTrunk(P1, 1)))
+    val seed = Feature
+      .initial(FeatureA, manifest)
+      .copy(state = FsmState.PieceImplementing(P1))
+    val foldResult = FoldResult(feature = seed, observedTransitions = Vector.empty, observedPieceMerges = Set.empty)
+    val Right(result) = RebuildState.reconcile(foldResult, manifest): @unchecked
+    result.feature.state match
+      case FsmState.Refining(p, pr, startedAt) =>
+        assertEquals(p, P1)
+        assertEquals(pr, None, "trunk recovery produces a PR-less Refining")
+        assertEquals(startedAt, MergedAt)
+      case other => fail(s"expected Refining, got $other")
+    assertEquals(
+      result.draftsToAppend.map(_.kind),
+      Vector("fsm.transition", "audit.piece_merged", "harness.crash_recovered")
+    )
+    assertEquals(result.draftsToAppend(1).payload("prNumber"), ujson.Null)
+    assertEquals(result.draftsToAppend(2).payload("reason").str, "crash_window_synthetic_committed_to_trunk")
+
+  test("reconcile trunk (c) — fold-state incompatible (PieceAwaitingReview) → InconsistentRecovery"):
+    val manifest = FsmFixtures.manifest(Vector(pieceMergedTrunk(P1, 1)))
+    val seed = Feature
+      .initial(FeatureA, manifest)
+      .copy(state = FsmState.PieceAwaitingReview(P1, P1Pr))
+    val foldResult = FoldResult(feature = seed, observedTransitions = Vector.empty, observedPieceMerges = Set.empty)
+    assert(RebuildState.reconcile(foldResult, manifest).isLeft)
 
   test("reconcile case (c) bad fold-state — fold ended at PieceAwaitingReview → InconsistentRecovery"):
     val manifest = FsmFixtures.manifest(Vector(pieceMerged(P1, 1, P1Pr)))
@@ -194,13 +245,13 @@ class RebuildStateSuite extends munit.FunSuite:
       observedTransitions = Vector(
         ObservedTransition(
           from = FsmState.PieceAwaitingMerge(P1, P1Pr),
-          to = FsmState.Refining(P1, P1Pr, startedAt = MergedAt),
+          to = FsmState.Refining(P1, Some(P1Pr), startedAt = MergedAt),
           piece = Some(P1),
           at = at(0)
         ),
         ObservedTransition(
           from = FsmState.PieceAwaitingMerge(P2, P2Pr),
-          to = FsmState.Refining(P2, P2Pr, startedAt = MergedAt),
+          to = FsmState.Refining(P2, Some(P2Pr), startedAt = MergedAt),
           piece = Some(P2),
           at = at(1)
         )
@@ -269,7 +320,7 @@ class RebuildStateSuite extends munit.FunSuite:
         f.state match
           case FsmState.Refining(p, pr, _) =>
             assertEquals(p, P1)
-            assertEquals(pr, P1Pr)
+            assertEquals(pr, Some(P1Pr))
           case other => fail(s"expected Refining, got $other")
         assertEquals(inFlight, Vector.empty) // recovered to Refining — no live driver
       case Left(err) => fail(s"expected Right, got Left($err)")
