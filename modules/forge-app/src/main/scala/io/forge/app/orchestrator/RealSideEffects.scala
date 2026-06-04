@@ -210,6 +210,7 @@ final class RealSideEffects(
     (for
       _ <- et(docSync.writeDecomposition(feature.id))(docErr)
       _ <- et(git.stage(Vector(relPath(paths.featureSpecDir(feature.id)))))(gitErr)
+      _ <- assertHeadIs(feature.manifest.designBranch)
       _ <- et(git.commit(s"[design] ${feature.manifest.title}"))(gitErr)
       _ <- et(branchManager.pushCurrentBranch())(branchErr)
       body <- EitherT.liftF[IO, String, String](designPrBody(feature))
@@ -237,6 +238,7 @@ final class RealSideEffects(
           included <- classifyChanges
           _ <- et(docSync.writeDecomposition(feature.id))(docErr)
           _ <- stageChanges(included)
+          _ <- assertHeadIs(feature.manifest.pieceBranch(piece))
           _ <- et(git.commit(s"feat(${feature.id.value}): ${p.title}"))(gitErr)
           _ <- et(branchManager.pushCurrentBranch())(branchErr)
           // Idempotency (roadmap §3.5 driver-respawn-avoidance, Unit A): if a prior post-settle pass already opened the
@@ -260,6 +262,7 @@ final class RealSideEffects(
         (for
           included <- classifyChanges
           _ <- stageChanges(included)
+          _ <- assertHeadIs(feature.manifest.pieceBranch(piece))
           _ <- et(git.commit(s"fix(${feature.id.value}): ${p.title}"))(gitErr)
           _ <- et(branchManager.pushCurrentBranch())(branchErr)
         yield settled(SessionPhase.Fixup)).value
@@ -288,6 +291,7 @@ final class RealSideEffects(
         s"autofix '${command.argv.mkString(" ")}' rewrote nothing — the failure is not a formatting issue"
       )
       _ <- et(git.stage(changedPaths))(gitErr)
+      _ <- assertHeadIs(feature.manifest.pieceBranch(piece))
       committed <- et(git.commit(s"style(${feature.id.value}): ${command.argv.mkString(" ")}"))(gitErr)
       _ <- EitherT.cond[IO](
         committed == CommitResult.Committed,
@@ -365,6 +369,7 @@ final class RealSideEffects(
             _ <- et(git.checkout(branch, Some(snap.sha.value)))(gitErr)
             _ <- EitherT.liftF[IO, String, Unit](appendConventionToClaudeMd(proposal))
             _ <- et(git.stage(Vector("CLAUDE.md")))(gitErr)
+            _ <- assertHeadIs(branch)
             committed <- et(git.commit(s"docs(${feature.id.value}): convention learned by forge"))(gitErr)
             _ <- EitherT.cond[IO](
               committed == CommitResult.Committed,
@@ -655,6 +660,25 @@ final class RealSideEffects(
 
   private def et[E, A](io: IO[Either[E, A]])(render: E => String): EitherT[IO, String, A] =
     EitherT(io.map(_.left.map(render)))
+
+  /** Pre-commit safety (dogfood #3 finding #2): refuse to `git commit` unless `HEAD` is the branch Forge expects to be
+    * on. Forge checks out the design / piece branch, then a *long* driver session runs before the matching commit/push
+    * — a window in which a concurrent external git operation in the shared driving worktree can move `HEAD`. In dogfood
+    * #3 an operator excursion left `HEAD` on `main`, so Forge's piece commit landed on `main` and was pushed straight
+    * to the shared remote, bypassing the PR. Asserting `HEAD == expected` immediately before every `git.commit` turns
+    * that silent corruption into a `Left` → `HarnessError` → `NeedsHumanIntervention`: no commit is made, so nothing
+    * reaches the wrong branch. A detached `HEAD` (empty `git branch --show-current`) surfaces as the
+    * `git.currentBranch` `ParseFailure`, which is also refused here.
+    */
+  private def assertHeadIs(expected: BranchName): EitherT[IO, String, Unit] =
+    et(git.currentBranch)(gitErr).flatMap { actual =>
+      EitherT.cond[IO](
+        actual == expected,
+        (),
+        s"refusing to commit: HEAD is '${actual.value}' but Forge expected the '${expected.value}' branch — the " +
+          "driving worktree was moved off the expected branch (concurrent git in the worktree?); no commit was made"
+      )
+    }
 
   private def specErr(e: SpecStoreError): String = e match
     case SpecStoreError.NotFound(p) => s"spec not found: $p"

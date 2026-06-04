@@ -278,6 +278,19 @@ Tier-1 closes the slice's exit criterion; Tier 2/3 can land incrementally behind
 
 ## 3. Status log
 
+- **2026-06-04 — T6 finding #2 resolved: a pre-commit `HEAD` assertion guards every commit site.**
+  `RealSideEffects.assertHeadIs(expected)` runs immediately before each `git.commit` (design /
+  `classifyCommitOpenPr` / `classifyCommitPush` / `runLocalAutofixAndPush` / `openConventionsPr`) and
+  refuses with a `Left` → `HarnessError` → NHI when `HEAD` is not the expected design/piece/conventions
+  branch — closing the dogfood-#3 concurrent-git race where an operator excursion left `HEAD` on `main` and
+  Forge's piece commit was pushed straight to the shared remote, bypassing the PR. The expected branch is
+  derived from `feature.manifest` at each site; a detached `HEAD` is refused via `git.currentBranch`'s
+  `ParseFailure`. Guarding *all* commit sites (not just the cited piece one) follows the
+  invariant-enforcement discipline. New test in `RealSideEffectsSuite` (HEAD-on-wrong-branch → Left, no
+  commit/push); the test-local `FakeGitClient` now tracks the checked-out branch. `forge-app` + `forge-git`
+  green, `scalafmtCheckAll` clean. **Both T6 runnable findings (#5, #2) are now resolved**; the only T6
+  residual is the live §8.2 *trigger* demonstration (stochastic / human-gated). Roadmap §4 stays **unticked**.
+
 - **2026-06-04 — T6 finding #5 resolved: transient §9 poll errors back off instead of hard-NHI'ing.** A transient
   GitHub 503 on the `PRWatcher` PR-state poll (which recurred live in dogfood #2 and #3, hard-routing
   `PieceAwaitingReview → NeedsHumanIntervention` after CI was already green) is now a soft, retry-worthy signal.
@@ -548,10 +561,15 @@ Forge maintenance pass:
   watcher/poll-consumer seam where the rate-limit soft-cliff already lives. Contract + rejected
   alternatives: design-rationale **S3-4b**. Tests: `PRWatcherTransientSuite`,
   `OrchestratorTransientPollSuite`, `GhErrorClassifierSuite` (503→Transient).
-- **pre-commit `HEAD` assertion — still open.** Forge could refuse to `git commit` a piece when `HEAD`
-  is not the expected piece branch, hardening against a concurrent-git race in the driving worktree
-  (the dogfood-#3 operator git excursion). Primarily an operator-discipline lesson; carried for the next
-  maintenance pass.
+- **pre-commit `HEAD` assertion — ✅ resolved 2026-06-04.** `RealSideEffects.assertHeadIs(expected)` runs
+  immediately before **every** `git.commit` (design / piece-open / fix-up / §8.2 CI autofix / conventions
+  PR), refusing with a `Left` → `HarnessError` → NHI when `HEAD` is not the branch Forge expects — so a
+  concurrent-git race in the shared driving worktree (the dogfood-#3 excursion that left `HEAD` on `main`
+  and pushed a piece commit straight to the remote, bypassing the PR) can no longer corrupt the base
+  branch. The expected branch is `feature.manifest.designBranch` / `pieceBranch(piece)` (or the explicit
+  conventions branch); a detached `HEAD` is refused too (via `git.currentBranch`'s `ParseFailure`).
+  Guarding *all* commit sites, not just the cited piece one, follows the invariant-enforcement discipline.
+  Test: `RealSideEffectsSuite` ("HEAD on the wrong branch → Left, no commit / push").
 
 ### D1 — the local Format gate runs format-before-commit, not commit-then-`git commit --amend` — open (1.7 §8.3/§11.4)
 

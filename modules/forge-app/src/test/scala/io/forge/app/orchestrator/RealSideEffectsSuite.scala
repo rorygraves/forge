@@ -62,13 +62,14 @@ class RealSideEffectsSuite extends munit.FunSuite:
       design: String = "the design",
       prNumber: PrNumber = PrNumber(42),
       prForBranch: Either[GhError, Option[PrNumber]] = Right(None),
-      connector: Connector = new FakeConnector
+      connector: Connector = new FakeConnector,
+      headBranch: BranchName = BranchName("forge/feat/p1")
   ): RealSideEffects =
     val paths = ForgePaths(repoRoot, repoRoot / "home")
     new RealSideEffects(
       connector = connector,
       branchManager = new FakeBranchManager(calls, prNumber),
-      git = new FakeGitClient(calls, status),
+      git = new FakeGitClient(calls, status, headBranch),
       gh = new FakeGhClient(diff, prForBranchResult = prForBranch),
       changeCollector = new DefaultChangeCollector,
       specStore = new FakeSpecStore(design, Map(p1 -> pieceSpec)),
@@ -161,6 +162,23 @@ class RealSideEffectsSuite extends munit.FunSuite:
     assert(stage.contains("src/Main.scala") && stage.contains(".forge/specs/feat/manifest.json"), stage)
     assert(!stage.contains("target") && !stage.contains("node_modules") && !stage.contains(".env"), stage)
     assert(!stage.contains(".forge/state"), stage)
+
+  tempFixture.test(
+    "classifyCommitOpenPr: HEAD on the wrong branch → Left (refuses to commit), no commit / push (finding #2)"
+  ): repo =>
+    // Concurrent-git race (dogfood #3): the driving worktree was left on `main`, not the piece branch. Forge must
+    // refuse to commit rather than land the piece commit on `main` and push it directly, bypassing the PR.
+    val calls = ArrayBuffer.empty[String]
+    val status = Vector(StatusEntry('M', ' ', "src/Main.scala", None, ignored = false))
+    val se = sut(repo, calls = calls, status = status, headBranch = BranchName("main"))
+    val ev = se.classifyCommitOpenPr(feature(FsmState.PieceImplementing(p1)), p1).unsafeRunSync()
+    assert(ev.isLeft, s"expected Left, got $ev")
+    assert(
+      ev.left.exists(r => r.contains("refusing to commit") && r.contains("main") && r.contains("forge/feat/p1")),
+      ev.toString
+    )
+    assert(!calls.exists(_.startsWith("git.commit")), s"must not commit: ${calls.mkString(" | ")}")
+    assert(!calls.exists(_.startsWith("bm.push")), s"must not push: ${calls.mkString(" | ")}")
 
   tempFixture.test("launchFixup writes pieces/<p>.failures.md with the gh check report (gap #12)"): repo =>
     // The fix-up driver must know which CI checks failed instead of running blind: launchFixup captures
@@ -271,7 +289,7 @@ class RealSideEffectsSuite extends munit.FunSuite:
   // --- commitDesignAndOpenPr ------------------------------------------------
 
   tempFixture.test("commitDesignAndOpenPr → DesignPrSnapshotUpdated(open) with the new PR number"): repo =>
-    val se = sut(repo, prNumber = PrNumber(99))
+    val se = sut(repo, prNumber = PrNumber(99), headBranch = BranchName("forge/feat/design"))
     val ev = se.commitDesignAndOpenPr(feature(FsmState.DesignReviewing(1))).unsafeRunSync()
     ev match
       case Right(FsmEvent.DesignPrSnapshotUpdated(snap)) =>
@@ -379,13 +397,22 @@ class RealSideEffectsSuite extends munit.FunSuite:
     def schemaMechanism: SchemaMechanism = SchemaMechanism.Native
     def costFrom(event: AgentEvent): Option[Cost] = None
 
-  private final class FakeGitClient(calls: ArrayBuffer[String], statusEntries: Vector[StatusEntry]) extends GitClient:
-    def currentBranch: IO[Either[GitError, BranchName]] = IO.pure(Right(BranchName("forge/feat/p1")))
+  private final class FakeGitClient(
+      calls: ArrayBuffer[String],
+      statusEntries: Vector[StatusEntry],
+      initialBranch: BranchName = BranchName("forge/feat/p1")
+  ) extends GitClient:
+    // Track the current HEAD so `currentBranch` reflects an in-method `checkout` (e.g. openConventionsPr) and the
+    // pre-commit HEAD assertion (`RealSideEffects.assertHeadIs`) sees the branch Forge expects. Flows whose branch was
+    // checked out by an earlier side-effect call (design / piece) seed it via `initialBranch`.
+    private var head: BranchName = initialBranch
+    def currentBranch: IO[Either[GitError, BranchName]] = IO(Right(head))
     def currentSha: IO[Either[GitError, Sha]] = IO.pure(Right(HeadSha))
     def fetch(remote: String): IO[Either[GitError, Unit]] = IO.pure(Right(()))
     def fastForwardBase(base: BranchName): IO[Either[GitError, FastForwardResult]] =
       IO.pure(Right(FastForwardResult.AlreadyUpToDate(BaseSha)))
-    def checkout(branch: BranchName, startPoint: Option[String]): IO[Either[GitError, Unit]] = IO.pure(Right(()))
+    def checkout(branch: BranchName, startPoint: Option[String]): IO[Either[GitError, Unit]] =
+      IO { head = branch; Right(()) }
     def push(branch: BranchName, force: Boolean, forceWithLease: Boolean): IO[Either[GitError, Unit]] =
       IO.pure(Right(()))
     def tag(name: String, sha: Sha): IO[Either[GitError, Unit]] = IO.pure(Right(()))
