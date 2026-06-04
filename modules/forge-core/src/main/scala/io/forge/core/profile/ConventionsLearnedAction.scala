@@ -15,9 +15,10 @@ import io.forge.core.log.ActionDraft
   * `claudeMdPrNumber` is the PR Forge opened for that edit (§11.7), or `null` when there was no proposal or the open
   * failed and the proposal was persisted locally as a fallback (D9).
   *
-  * **§19 schema gap (decision D7, design-3.0 §4):** the 1.7 §19 table enumerates only `profile.snapshot` /
-  * `profile.failure_classified`; `profile.local_gate` (D3) and this kind are additive `profile.*` audit kinds to fold
-  * into the table in the next contract revision.
+  * **§19 enumeration (decision D7, design-3.0 §4 — resolved 2026-06-04):** this kind is enumerated in the contract at
+  * `forge-design-1.12.md` §19 (a focused standalone-by-freeze revision; `profile.local_gate` was already enumerated in
+  * 1.8 §19). With 1.12 the full Phase-3 `profile.*` audit set (`snapshot` / `failure_classified` / `local_gate` /
+  * `conventions_learned`) is in the contract.
   */
 object ConventionsLearnedAction:
   val Kind: String = "profile.conventions_learned"

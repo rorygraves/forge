@@ -278,6 +278,18 @@ Tier-1 closes the slice's exit criterion; Tier 2/3 can land incrementally behind
 
 ## 3. Status log
 
+- **2026-06-04 — D7 resolved: `profile.conventions_learned` enumerated in the §19 contract
+  ([`forge-design-1.12.md`](forge-design-1.12.md)).** A pure spec-text reconciliation — no code change. The
+  `ConventionLearner` (Task 3.2) has emitted the `profile.conventions_learned` audit action since it landed, but no
+  contract revision enumerated the kind (1.7 §19 listed only `profile.snapshot` / `profile.failure_classified`; 1.8 §19
+  added `profile.local_gate`, decision D3, but not this sibling). 1.12 is a focused standalone-by-freeze revision
+  restating only §19 to add the kind with its real payload (`{ addedCommands: [string…], hasClaudeMdProposal: bool,
+  claudeMdPrNumber: int|null, summary }`, captured from `ConventionsLearnedAction`), documenting it as a no-op `Replay`
+  projection (the replayability invariant holds). With 1.12 the full Phase-3 `profile.*` audit set
+  (`snapshot` / `failure_classified` / `local_gate` / `conventions_learned`) is in the contract. README live-contract
+  pointer + the `ConventionsLearnedAction` D7-gap docstring updated to point at 1.12; the build is unchanged (no source
+  touched beyond the doc comment). Closes the last open §19 schema gap.
+
 - **2026-06-04 — T6 finding #2 resolved: a pre-commit `HEAD` assertion guards every commit site.**
   `RealSideEffects.assertHeadIs(expected)` runs immediately before each `git.commit` (design /
   `classifyCommitOpenPr` / `classifyCommitPush` / `runLocalAutofixAndPush` / `openConventionsPr`) and
@@ -642,15 +654,20 @@ a future rules classifier emits a genuine `confidence` band (not just `Unknown`)
 make the gate a threshold rather than a kind-match. The `FailureClassifierInput` carries the full `RepoProfile` (so the
 prompt can list Known commands); revisit if that proves too large a prompt for a big multi-command profile.
 
-### D7 — `profile.conventions_learned` is a new §19 `profile.*` kind not yet enumerated in the 1.7 contract — open (1.7 §19)
+### D7 — `profile.conventions_learned` is a new §19 `profile.*` kind not yet enumerated in the contract — ✅ resolved 2026-06-04 ([`forge-design-1.12.md`](forge-design-1.12.md))
 
-Task 3.2 emits a `profile.conventions_learned` action `{ addedCommands: [argv...], hasClaudeMdProposal: bool, summary }`
-after the learner settles, to keep the learning observable (TUI / `forge stats`). The 1.7 §19 table lists only
-`profile.snapshot` / `profile.failure_classified`; like `profile.local_gate` (D3) this is an additive `profile.*` audit
-kind. It is a no-op `Replay` projection (the default branch; the replayability invariant holds — the FSM never reads it,
-the profile delta reaches a later run only as the committed `.forge/profile.json` input) and `forge stats` ignores
-unrecognised kinds, so it is safe today. Enumerate both D3's and this kind in §19 in the next contract revision (and
-decide whether `forge stats` should fold a "conventions learned" row).
+Task 3.2 emits a `profile.conventions_learned` action `{ addedCommands: [string…], hasClaudeMdProposal: bool,
+claudeMdPrNumber: int|null, summary }` after the learner settles, to keep the learning observable (TUI / `forge stats`).
+The 1.7 §19 table listed only `profile.snapshot` / `profile.failure_classified`; like `profile.local_gate` (D3) this is
+an additive `profile.*` audit kind. It is a no-op `Replay` projection (the default branch; the replayability invariant
+holds — the FSM never reads it, the profile delta reaches a later run only as the committed `.forge/profile.json` input)
+and `forge stats` ignores unrecognised kinds, so it was safe-but-undocumented. **Resolved 2026-06-04** by
+[`forge-design-1.12.md`](forge-design-1.12.md), a focused standalone-by-freeze revision restating only §19 to enumerate
+the kind (a pure spec-text reconciliation — no code change; the kind has been emitted since Task 3.2). D3's
+`profile.local_gate` was already enumerated in 1.8 §19, so with 1.12 the full Phase-3 `profile.*` set
+(`snapshot` / `failure_classified` / `local_gate` / `conventions_learned`) is in the contract. The "should `forge stats`
+fold a conventions-learned row" question is left to the consuming pass, not the contract (1.12 §19 notes it as a
+candidate future fold).
 
 ### D8 — the `ConventionLearner` mines classified failures, not reviewer-comment text (deferred) — open (1.7 §7.11/§11.7)
 

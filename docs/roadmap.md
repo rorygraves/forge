@@ -42,7 +42,7 @@
 | 4 — v2.0 | Workspace (multi-repo) + workstreams + daemon + multi-workstream cockpit TUI | needs `forge-design-2.0.md` first |
 | 5 — v3.0+ | Agentic-dev cockpit (knowledge base, reactive review, custom triggers) | concept |
 
-**Live docs:** this roadmap · spec [`forge-design-1.10.md`](forge-design-1.10.md) · [`design-rationale.md`](design-rationale.md) · index [`README.md`](README.md). The per-slice `design-*.md` files (`design-1.4.md` … `design-3.5.md`) are *closed* audit trails kept for historical reference — the index sorts live-vs-historical.
+**Live docs:** this roadmap · spec [`forge-design-1.12.md`](forge-design-1.12.md) · [`design-rationale.md`](design-rationale.md) · index [`README.md`](README.md). The per-slice `design-*.md` files (`design-1.4.md` … `design-3.5.md`) are *closed* audit trails kept for historical reference — the index sorts live-vs-historical.
 
 ---
 

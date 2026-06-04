@@ -15,12 +15,13 @@ deleted; git holds the full lineage either way.)
 | Doc | What it is |
 |---|---|
 | [`roadmap.md`](roadmap.md) | Multi-horizon product plan. Phase 3 = Repo Adaptation (the current pivot); Phase 4 = workspace/workstream platform; Phase 5 = cockpit. |
-| [`forge-design-1.11.md`](forge-design-1.11.md) | **Live implementation contract** (the spec) — latest revision. Standalone-by-freeze over 1.10: restates only §6/§8.3/§11.4/§11.5/§19 for the `WorkflowProfile.branchModel` **trunk-commit (no-PR) lifecycle** — a `TrunkBased` piece commits straight to mainline and refines with no PR tail (design-3.3-trunk / W3), freezing the rest at 1.10. §-numbers preserved, so a "v1.2 §N" reference resolves to the same §N. |
-| [`forge-design-1.10.md`](forge-design-1.10.md) | Phase-3 revision: `Mode` becomes a *configuration* of `Driver`/`Reviewer`/`Sensor` roles resolved once via `RolePairing.of` (cross-model review reconciled to same-CLI — §7, design-3.5). 1.11 freezes its unchanged sections; read together. |
-| [`forge-design-1.9.md`](forge-design-1.9.md) | Phase-3 revision: the `WorkflowProfile` begins parameterizing the §11 FSM — review-required (§6/§11.5/§18, design-3.3). 1.10/1.11 freeze its unchanged sections; read together. |
-| [`forge-design-1.8.md`](forge-design-1.8.md) | Phase-3 revision: the pre-PR Build gate (§6/§8.3/§11.4/§11.5/§19, design-3.0 D2). 1.9→1.11 freeze its unchanged sections; read together. |
-| [`forge-design-1.7.md`](forge-design-1.7.md) | Phase-3 architectural revision (Repo Adaptation): `RepoProfile` / `WorkflowProfile`, sensor surface (§3/§6/§7/§8/§11/§18/§19). 1.8→1.11 freeze its unchanged sections. |
-| [`forge-design-1.6.md`](forge-design-1.6.md) | The pre-Phase-3 base (Phases 1–2). 1.7→1.11 freeze its unchanged sections. |
+| [`forge-design-1.12.md`](forge-design-1.12.md) | **Live implementation contract** (the spec) — latest revision. Standalone-by-freeze over 1.11: restates only §19 to enumerate the `profile.conventions_learned` audit kind (a pure spec-text reconciliation — decision **D7**, no code change), freezing the rest at 1.11. §-numbers preserved, so a "v1.2 §N" reference resolves to the same §N. |
+| [`forge-design-1.11.md`](forge-design-1.11.md) | Phase-3 revision. Standalone-by-freeze over 1.10: restates only §6/§8.3/§11.4/§11.5/§19 for the `WorkflowProfile.branchModel` **trunk-commit (no-PR) lifecycle** — a `TrunkBased` piece commits straight to mainline and refines with no PR tail (design-3.3-trunk / W3), freezing the rest at 1.10. 1.12 freezes its unchanged sections; read together. |
+| [`forge-design-1.10.md`](forge-design-1.10.md) | Phase-3 revision: `Mode` becomes a *configuration* of `Driver`/`Reviewer`/`Sensor` roles resolved once via `RolePairing.of` (cross-model review reconciled to same-CLI — §7, design-3.5). 1.11→1.12 freeze its unchanged sections; read together. |
+| [`forge-design-1.9.md`](forge-design-1.9.md) | Phase-3 revision: the `WorkflowProfile` begins parameterizing the §11 FSM — review-required (§6/§11.5/§18, design-3.3). 1.10→1.12 freeze its unchanged sections; read together. |
+| [`forge-design-1.8.md`](forge-design-1.8.md) | Phase-3 revision: the pre-PR Build gate (§6/§8.3/§11.4/§11.5/§19, design-3.0 D2). 1.9→1.12 freeze its unchanged sections; read together. |
+| [`forge-design-1.7.md`](forge-design-1.7.md) | Phase-3 architectural revision (Repo Adaptation): `RepoProfile` / `WorkflowProfile`, sensor surface (§3/§6/§7/§8/§11/§18/§19). 1.8→1.12 freeze its unchanged sections. |
+| [`forge-design-1.6.md`](forge-design-1.6.md) | The pre-Phase-3 base (Phases 1–2). 1.7→1.12 freeze its unchanged sections. |
 | [`design-rationale.md`](design-rationale.md) | Why the spec looks the way it does. Decision/rejected/where-to-read per item. **A5** is the Phase-3 architecture direction. |
 | [`design-3.0.md`](design-3.0.md) / [`design-3.1-build-gate.md`](design-3.1-build-gate.md) | Phase-3 implementation plans — Slice 3.0/3.1 (RepoProfile + senses) and the 3.1-D2 pre-PR Build gate. Task breakdowns, status logs, carry-forwards. (Slices 3.3 / 3.3-W3 closed — see the historical table below.) |
 | [`design-3.5-role-trait.md`](design-3.5-role-trait.md) | **✅ closed 2026-06-04** — Slice 3.5 (the last Phase-3 sub-slice): the role-trait refactor (roadmap §4.2). Generalised `Mode` into an `Agent` base + `Driver`/`Reviewer`/`Sensor` role configurations resolved once via `RolePairing.of`; contract in [`forge-design-1.10.md`](forge-design-1.10.md) §7. Not to be confused with the closed [`design-3.5.md`](design-3.5.md) (Phase-2 D3 driver-respawn). |
@@ -39,7 +40,7 @@ deleted; git holds the full lineage either way.)
 
 These are **closed**; they record *how* a slice was built (Task breakdowns, status
 logs, review rounds, carry-forwards). They are not the live contract — that is
-`forge-design-1.11.md`. Kept for history.
+`forge-design-1.12.md`. Kept for history.
 
 | Doc | Slice | Closed |
 |---|---|---|
