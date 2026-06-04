@@ -4,13 +4,15 @@ import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import io.forge.app.config.ForgeConfig
 import io.forge.app.monitor.MonitorOutcome
-import io.forge.app.reviewer.ReviewerOutcome
+import io.forge.agents.ConventionLearnerInput
+import io.forge.app.reviewer.{ReviewerCall, ReviewerLimits, ReviewerOutcome}
 import io.forge.core.*
-import io.forge.core.fsm.{Feature, FsmState, SessionPhase, SettleOutcome}
+import io.forge.core.fsm.{Feature, FsmEvent, FsmState, SessionPhase, SettleOutcome}
 import io.forge.core.log.FileActionLog
 import io.forge.core.manifest.FileManifestStore
 import io.forge.core.paths.ForgePaths
 import io.forge.core.profile.*
+import io.forge.core.review.{DesignReviewVerdict, PrReviewVerdict, ReviewRequestedChangesAction}
 import io.forge.core.state.FileStateCache
 import io.forge.specs.FileSpecStore
 
@@ -81,13 +83,22 @@ class OrchestratorConventionLearnerSuite extends munit.FunSuite:
     def load(): IO[Option[RepoProfile]] = IO.pure(Some(baseProfile))
     def save(profile: RepoProfile): IO[Unit] = IO(saved.set(Some(profile)))
 
-  private def learningReviewer(learnCalls: AtomicInteger): FakeReviewerCall =
-    new FakeReviewerCall(
-      FakeReviewerCall.approveDesign,
-      FakeReviewerCall.approvePr,
-      FakeReviewerCall.refineNoChange,
-      learnOutcome = IO { learnCalls.incrementAndGet(); ReviewerOutcome.Settled(deltas) }
-    )
+  /** A learner reviewer that records its call count and captures the `ConventionLearnerInput` it was handed, so a test
+    * can assert the §7.11 cost lever fired and that the mined signals (failures / reviewer comments) reached the input.
+    * `FakeReviewerCall` is `final`, so this implements `ReviewerCall` directly, delegating the non-learn methods.
+    */
+  private class CapturingLearner(
+      learnCalls: AtomicInteger,
+      captured: AtomicReference[Option[ConventionLearnerInput]]
+  ) extends ReviewerCall:
+    private val delegate =
+      new FakeReviewerCall(FakeReviewerCall.approveDesign, FakeReviewerCall.approvePr, FakeReviewerCall.refineNoChange)
+    export delegate.{classifyFailure, designReview, prReview, profileRepo, refine}
+    override def learnConventions(
+        input: ConventionLearnerInput,
+        limits: ReviewerLimits
+    ): IO[ReviewerOutcome[ConventionDeltas]] =
+      IO { captured.set(Some(input)); learnCalls.incrementAndGet(); ReviewerOutcome.Settled(deltas) }
 
   private val featureId = FeatureId("feat")
   private val designPr = PrNumber(100)
@@ -117,6 +128,19 @@ class OrchestratorConventionLearnerSuite extends munit.FunSuite:
       source = "rules"
     )
 
+  /** A reviewer `RequestChanges` blocker to seed into the log before driving — the recurring-reviewer-comment signal
+    * the learner mines (decision D8). Distinct from a classified failure: a run can hit *only* this and still be worth
+    * learning from.
+    */
+  private val seededReviewComment =
+    ReviewRequestedChangesAction.draft(
+      featureId,
+      gate = "code",
+      round = None,
+      piece = Some(p1),
+      blockers = Vector("add ScalaDoc to the new public method")
+    )
+
   /** Drive a single-piece feature DesignReady → FeatureDone, optionally seeding a classified failure into the log
     * first. Returns the terminal feature + the saved-profile slot + the learner call count + the resolved paths.
     */
@@ -129,17 +153,26 @@ class OrchestratorConventionLearnerSuite extends munit.FunSuite:
       root: os.Path,
       config: ForgeConfig,
       seedFailure: Boolean,
+      seedReviewComment: Boolean = false,
       sideEffects: SideEffects = new FakeSideEffects(designPr, _ => piecePr)
-  ): (Feature, AtomicReference[Option[RepoProfile]], AtomicInteger, ForgePaths) =
+  ): (
+      Feature,
+      AtomicReference[Option[RepoProfile]],
+      AtomicInteger,
+      AtomicReference[Option[ConventionLearnerInput]],
+      ForgePaths
+  ) =
     val paths = new ForgePaths(repoRoot = root)
     val saved = new AtomicReference[Option[RepoProfile]](None)
     val learnCalls = new AtomicInteger(0)
+    val captured = new AtomicReference[Option[ConventionLearnerInput]](None)
     val m = mkManifest(featureId, Vector(piecePending(p1, 1)))
     val start = featureAt(featureId, m, FsmState.DesignReady)
 
     val out = (for
       logImpl <- FileActionLog(paths)
       _ <- if seedFailure then logImpl.append(featureId, seededFailure).void else IO.unit
+      _ <- if seedReviewComment then logImpl.append(featureId, seededReviewComment).void else IO.unit
       watcher <- FakePRWatcher.make
       _ <- watcher.offer(piecePr, snapshotResult(ciReadySnapshot(piecePr)))
       monitor <- FakeSessionMonitor.make(MonitorOutcome.Settled(SessionPhase.Implement, SettleOutcome.Clean))
@@ -148,7 +181,7 @@ class OrchestratorConventionLearnerSuite extends munit.FunSuite:
         sideEffects,
         monitor,
         watcher,
-        learningReviewer(learnCalls),
+        new CapturingLearner(learnCalls, captured),
         new FileSpecStore(paths),
         new FileManifestStore(paths),
         logImpl,
@@ -159,12 +192,12 @@ class OrchestratorConventionLearnerSuite extends munit.FunSuite:
       )
       out <- orch.drive(start)
     yield out).unsafeRunSync()
-    (out, saved, learnCalls, paths)
+    (out, saved, learnCalls, captured, paths)
 
   tempFixture.test(
     "FeatureDone with a classified failure: learner consulted → profile delta saved, CLAUDE.md PR opened"
   ): root =>
-    val (out, saved, learnCalls, paths) = driveToDone(root, testConfig, seedFailure = true)
+    val (out, saved, learnCalls, _, paths) = driveToDone(root, testConfig, seedFailure = true)
 
     assertEquals(out.state, FsmState.FeatureDone: FsmState)
     // The learner was consulted exactly once, on the transition to FeatureDone.
@@ -183,7 +216,7 @@ class OrchestratorConventionLearnerSuite extends munit.FunSuite:
 
   tempFixture.test("conventions PR fails to open → proposal persisted locally as a fallback, no PR number logged"):
     root =>
-      val (out, _, learnCalls, paths) =
+      val (out, _, learnCalls, _, paths) =
         driveToDone(root, testConfig, seedFailure = true, sideEffects = new PrFailingSideEffects)
 
       assertEquals(out.state, FsmState.FeatureDone: FsmState)
@@ -199,7 +232,7 @@ class OrchestratorConventionLearnerSuite extends munit.FunSuite:
 
   tempFixture.test("adapt.conventionLearner = false: learner is never consulted, nothing saved or logged"): root =>
     val cfg = testConfig.copy(adapt = testConfig.adapt.copy(conventionLearner = false))
-    val (out, saved, learnCalls, paths) = driveToDone(root, cfg, seedFailure = true)
+    val (out, saved, learnCalls, _, paths) = driveToDone(root, cfg, seedFailure = true)
 
     assertEquals(out.state, FsmState.FeatureDone: FsmState)
     assertEquals(learnCalls.get(), 0)
@@ -207,11 +240,80 @@ class OrchestratorConventionLearnerSuite extends munit.FunSuite:
     assert(!os.exists(paths.audit(featureId, "learned-conventions.md")))
     assert(!os.read(paths.featureLog(featureId)).contains("\"profile.conventions_learned\""))
 
-  tempFixture.test("no classified failure in the log: cost lever skips the learner entirely"): root =>
-    val (out, saved, learnCalls, paths) = driveToDone(root, testConfig, seedFailure = false)
+  tempFixture.test("no classified failure or reviewer comment in the log: cost lever skips the learner entirely"):
+    root =>
+      val (out, saved, learnCalls, _, paths) = driveToDone(root, testConfig, seedFailure = false)
+
+      assertEquals(out.state, FsmState.FeatureDone: FsmState)
+      // The §7.11 cost lever: a clean run (no profile.failure_classified, no review.request_changes) spends no call.
+      assertEquals(learnCalls.get(), 0)
+      assertEquals(saved.get(), None)
+      assert(!os.read(paths.featureLog(featureId)).contains("\"profile.conventions_learned\""))
+
+  // --- Decision D8: reviewer-comment mining --------------------------------------------------------------------------
+
+  tempFixture.test(
+    "D8 — review.request_changes but no classified failure: widened cost lever consults the learner with the comment"
+  ): root =>
+    val (out, saved, learnCalls, captured, _) =
+      driveToDone(root, testConfig, seedFailure = false, seedReviewComment = true)
 
     assertEquals(out.state, FsmState.FeatureDone: FsmState)
-    // The §7.11 cost lever: a clean run (no profile.failure_classified) spends no learner reviewer-call.
-    assertEquals(learnCalls.get(), 0)
-    assertEquals(saved.get(), None)
-    assert(!os.read(paths.featureLog(featureId)).contains("\"profile.conventions_learned\""))
+    // The widened cost lever (D8): a reviewer RequestChanges alone — no classified failure — now consults the learner.
+    assertEquals(learnCalls.get(), 1)
+    // The mined reviewer comment reached the learner input (no failures, one comment carrying the blocker prose).
+    val input = captured.get().getOrElse(fail("expected the learner to have been consulted"))
+    assertEquals(input.failures, Vector.empty)
+    assertEquals(input.reviewerComments.map(_.blocker), Vector("add ScalaDoc to the new public method"))
+    assertEquals(input.reviewerComments.map(_.gate), Vector("code"))
+    // The learner still proposed its delta, so the profile was saved.
+    assert(saved.get().isDefined)
+
+  tempFixture.test("D8 — logReviewerRequestChanges appends review.request_changes only for a RequestChanges verdict"):
+    root =>
+      val paths = new ForgePaths(repoRoot = root)
+      val feature = featureAt(featureId, mkManifest(featureId, Vector(piecePending(p1, 1))), FsmState.DesignReady)
+      val captured = new AtomicReference[Option[ConventionLearnerInput]](None)
+      val read = (for
+        logImpl <- FileActionLog(paths)
+        orch = new Orchestrator(
+          new FakeSideEffects(designPr, _ => piecePr),
+          null,
+          null,
+          new CapturingLearner(new AtomicInteger(0), captured),
+          new FileSpecStore(paths),
+          new FileManifestStore(paths),
+          logImpl,
+          new FileStateCache(paths),
+          paths,
+          testConfig,
+          profileStore = new RecordingProfileStore(new AtomicReference(None))
+        )
+        // code-review RequestChanges → logged (piece-tagged, null round, the blockers)
+        _ <- orch.logReviewerRequestChanges(
+          feature,
+          FsmEvent.CodeReviewVerdict(p1, PrReviewVerdict.RequestChanges(Vector("name the lock owner")))
+        )
+        // design-review RequestChanges → logged (piece-less, round 2)
+        _ <- orch.logReviewerRequestChanges(
+          feature,
+          FsmEvent.DesignReviewReceived(2, DesignReviewVerdict.RequestChanges(Vector("decompose the slice")))
+        )
+        // Approve → nothing appended
+        _ <- orch.logReviewerRequestChanges(feature, FsmEvent.DesignReviewReceived(1, DesignReviewVerdict.Approve))
+        // empty blocker list → nothing appended
+        _ <- orch.logReviewerRequestChanges(
+          feature,
+          FsmEvent.CodeReviewVerdict(p1, PrReviewVerdict.RequestChanges(Vector.empty))
+        )
+        actions <- logImpl.replay(featureId)
+      yield actions).unsafeRunSync()
+
+      val reviews = read.filter(_.kind == "review.request_changes")
+      assertEquals(reviews.size, 2, reviews.map(_.payload).toString)
+      // The miner reads exactly these two back into the learner signal.
+      val mined = Orchestrator.observedReviewerComments(read)
+      assertEquals(mined.map(_.gate).toSet, Set("code", "design"))
+      assertEquals(mined.map(_.blocker).toSet, Set("name the lock owner", "decompose the slice"))
+      assert(mined.exists(c => c.gate == "design" && c.round.contains(2)))
+      assert(mined.exists(c => c.gate == "code" && c.round.isEmpty))

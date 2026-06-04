@@ -118,8 +118,10 @@ object ReviewerPrompts:
     * and the current CLAUDE.md under stable headers the `learn-conventions.<cli>.md` system prompt refers to. The known
     * commands are rendered so the model proposes an `addCommands` entry the repo doesn't already have (rather than
     * duplicating one); the observed failures carry the route the spine chose so the model can tell which failures a new
-    * convention would have avoided; the CLAUDE.md is included so a `claudeMdProposal` is phrased relative to what the
-    * doc already says. A missing CLAUDE.md / empty failure list is rendered as an explicit "(none)".
+    * convention would have avoided; the observed reviewer comments (decision D8) carry the gate/round so the model can
+    * spot a recurring blocker a CLAUDE.md note could pre-empt; the CLAUDE.md is included so a `claudeMdProposal` is
+    * phrased relative to what the doc already says. A missing CLAUDE.md / empty failure / empty reviewer-comment list
+    * is rendered as an explicit "(none)".
     */
   def learnConventionsBody(input: ConventionLearnerInput): String =
     val commands =
@@ -140,6 +142,15 @@ object ReviewerPrompts:
             s"- ${f.gate}/${f.kind} → ${f.route}$sug: ${f.evidence}"
           }
           .mkString("\n")
+    val reviewerComments =
+      if input.reviewerComments.isEmpty then "(none)"
+      else
+        input.reviewerComments
+          .map { c =>
+            val round = c.round.map(r => s" round $r").getOrElse("")
+            s"- ${c.gate}$round: ${c.blocker}"
+          }
+          .mkString("\n")
     val claude = input.claudeDoc.map(_.stripLineEnd).filter(_.nonEmpty).getOrElse("(none)")
     s"""## Feature
        |${input.featureId.value}
@@ -152,6 +163,9 @@ object ReviewerPrompts:
        |
        |## Observed failures (this feature's run)
        |$failures
+       |
+       |## Observed reviewer comments (this feature's run)
+       |$reviewerComments
        |
        |## Current CLAUDE.md
        |$claude

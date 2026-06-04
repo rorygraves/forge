@@ -114,6 +114,9 @@ class ConventionLearnerSmokeSuite extends munit.FunSuite:
           route = "DriverFixup",
           evidence = "scalafmt: 1 files must be formatted"
         )
+      ),
+      reviewerComments = Vector(
+        ObservedReviewerComment(gate = "code", round = None, blocker = "add ScalaDoc to the new public method")
       )
     )
 

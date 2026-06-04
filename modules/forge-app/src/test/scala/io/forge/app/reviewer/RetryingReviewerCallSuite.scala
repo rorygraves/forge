@@ -154,7 +154,13 @@ class RetryingReviewerCallSuite extends CatsEffectSuite:
   test("learnConventions draws on reviewRetries (shares the reviewer one-shot budget)"):
     val deltas = ConventionDeltas(Vector.empty, None, "nothing to add")
     val learnInput =
-      ConventionLearnerInput(FeatureId("feat-1"), profile = null, claudeDoc = None, failures = Vector.empty)
+      ConventionLearnerInput(
+        FeatureId("feat-1"),
+        profile = null,
+        claudeDoc = None,
+        failures = Vector.empty,
+        reviewerComments = Vector.empty
+      )
     for
       fake <- scripted(learn = List(procFail, procFail, ReviewerOutcome.Settled(deltas)))
       decorated = new RetryingReviewerCall(fake, reviewRetries = 2, refineRetries = 0)

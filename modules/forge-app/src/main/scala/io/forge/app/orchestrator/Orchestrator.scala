@@ -6,6 +6,7 @@ import io.forge.agents.{
   DesignReview,
   FailureClassifierInput,
   ObservedFailure,
+  ObservedReviewerComment,
   PrReview,
   RefineOutcome as AgentRefineOutcome,
   RefineResult,
@@ -45,7 +46,7 @@ import io.forge.core.profile.{
   RepoProfile,
   RuleBasedFailureClassifier
 }
-import io.forge.core.review.{DesignReviewVerdict, PrReviewVerdict, RefineVerdict}
+import io.forge.core.review.{DesignReviewVerdict, PrReviewVerdict, RefineVerdict, ReviewRequestedChangesAction}
 import io.forge.core.state.{RebuildState, StateCache}
 import io.forge.git.branch.protection.{OverlaySource, RequiredChecksOverlay}
 import io.forge.git.watcher.{DecodedSnapshot, PRWatcher, PollBaseline, PollResult}
@@ -301,22 +302,27 @@ final class Orchestrator(
     * `.forge/profile.json` input, preserving replayability).
     *
     * Gated on `adapt.enabled` + `adapt.conventionLearner` + a resolved profile (an unprofiled / disabled run has no
-    * profile to delta against, and emits no `profile.failure_classified` signal anyway). The §7.11 **cost lever**: the
-    * sensor is consulted **only** when the feature actually hit a classified gate failure
-    * ([[Orchestrator.observedFailures]] over the log) — a clean run learns nothing and spends no reviewer call. On a
-    * settled proposal: fresh command deltas merge into the committed profile via `ProfileStore.save` (a
-    * human-reviewable diff), the proposed CLAUDE.md edit is persisted to the feature's audit dir for human review (**no
-    * autonomous doc mutation / no PR** — the auto-PR-open is a deferred follow-up, design-3.0 §4), and a
-    * `profile.conventions_learned` audit action records what was proposed.
+    * profile to delta against, and emits no `profile.failure_classified` signal anyway). The §7.11 **cost lever**
+    * (widened by decision D8): the sensor is consulted **only** when the feature actually hit a classified gate failure
+    * ([[Orchestrator.observedFailures]]) *or* a reviewer `RequestChanges` ([[Orchestrator.observedReviewerComments]])
+    * over the log — a clean run (neither) learns nothing and spends no reviewer call. On a settled proposal: fresh
+    * command deltas merge into the committed profile via `ProfileStore.save` (a human-reviewable diff), the proposed
+    * CLAUDE.md edit is persisted to the feature's audit dir for human review (**no autonomous doc mutation / no PR** —
+    * the auto-PR-open is a deferred follow-up, design-3.0 §4), and a `profile.conventions_learned` audit action records
+    * what was proposed.
     */
   private def maybeLearnConventions(feature: Feature, profile: Option[RepoProfile]): IO[Unit] =
     val body = (feature.state, profile) match
       case (FsmState.FeatureDone, Some(p)) if config.adapt.enabled && config.adapt.conventionLearner =>
-        log.replay(feature.id).map(Orchestrator.observedFailures).flatMap { failures =>
-          if failures.isEmpty then IO.unit
+        log.replay(feature.id).flatMap { actions =>
+          val failures = Orchestrator.observedFailures(actions)
+          val comments = Orchestrator.observedReviewerComments(actions)
+          // §7.11 cost lever (widened by D8): consult the learner when the run hit *either* a classified gate failure
+          // *or* a reviewer RequestChanges — both are mineable signals. A clean run (neither) spends no reviewer call.
+          if failures.isEmpty && comments.isEmpty then IO.unit
           else
             readClaudeDoc.flatMap { claudeDoc =>
-              val input = ConventionLearnerInput(feature.id, p, claudeDoc, failures)
+              val input = ConventionLearnerInput(feature.id, p, claudeDoc, failures, comments)
               reviewer.learnConventions(input, ReviewerLimits(reviewerWallClock)).flatMap {
                 case ReviewerOutcome.Settled(deltas) => applyConventionDeltas(feature, p, deltas)
                 case _ => IO.unit // Timeout / AdapterFailure — advisory, dropped (§14.2)
@@ -1278,7 +1284,10 @@ final class Orchestrator(
         sideEffects.designReviewInput(feature, round).flatMap {
           case Left(reason) => IO.pure(RaceResult.FromReviewer(FsmEvent.HarnessError(reason)))
           case Right(in) =>
-            reviewer.designReview(in, limits).map(o => RaceResult.FromReviewer(designReviewEvent(round, o)))
+            reviewer.designReview(in, limits).flatMap { o =>
+              val ev = designReviewEvent(round, o)
+              logReviewerRequestChanges(feature, ev).as(RaceResult.FromReviewer(ev))
+            }
         }
 
       case ReviewerMethod.PrReview =>
@@ -1287,7 +1296,10 @@ final class Orchestrator(
             sideEffects.prReviewInput(feature, s.p, s.prNumber).flatMap {
               case Left(reason) => IO.pure(RaceResult.FromReviewer(FsmEvent.HarnessError(reason)))
               case Right(in) =>
-                reviewer.prReview(in, limits).map(o => RaceResult.FromReviewer(prReviewEvent(s.p, o)))
+                reviewer.prReview(in, limits).flatMap { o =>
+                  val ev = prReviewEvent(s.p, o)
+                  logReviewerRequestChanges(feature, ev).as(RaceResult.FromReviewer(ev))
+                }
             }
           case other =>
             IO.raiseError(new IllegalStateException(s"PrReview source selected in non-review state $other"))
@@ -1400,6 +1412,25 @@ final class Orchestrator(
   // ---------------------------------------------------------------------------
   // Reviewer outcome → FsmEvent projection (forge-agents rich types → forge-core verdicts)
   // ---------------------------------------------------------------------------
+
+  /** Decision D8 — when Forge's own reviewer asks for changes (design or code), append a `review.request_changes` audit
+    * action carrying the blocker prose, so the post-run `ConventionLearner` (§11.7) can mine recurring reviewer
+    * comments alongside the `profile.failure_classified` failure→remedy signal. Recorded at the seam where the verdict
+    * is produced (mirroring `routeCiFailure`'s `profile.failure_classified`); it is a no-op `Replay` projection
+    * (`ReviewRequestedChangesAction`), so it never perturbs the FSM. Approve / `BlockingQuestions` (human questions,
+    * not a remedy signal) and an empty blocker list emit nothing.
+    */
+  private[orchestrator] def logReviewerRequestChanges(feature: Feature, event: FsmEvent): IO[Unit] =
+    event match
+      case FsmEvent.DesignReviewReceived(round, DesignReviewVerdict.RequestChanges(blockers)) if blockers.nonEmpty =>
+        log
+          .append(feature.id, ReviewRequestedChangesAction.draft(feature.id, "design", Some(round), None, blockers))
+          .void
+      case FsmEvent.CodeReviewVerdict(piece, PrReviewVerdict.RequestChanges(blockers)) if blockers.nonEmpty =>
+        log
+          .append(feature.id, ReviewRequestedChangesAction.draft(feature.id, "code", None, Some(piece), blockers))
+          .void
+      case _ => IO.unit
 
   private def designReviewEvent(round: Int, outcome: ReviewerOutcome[DesignReview]): FsmEvent =
     outcome match
@@ -1527,6 +1558,24 @@ object Orchestrator:
           route = route,
           evidence = evidence
         )
+      }
+    }
+
+  /** Decision D8 — distil the §19 `review.request_changes` actions from a feature's log into the §7.11
+    * `ConventionLearner`'s recurring-reviewer-comment signal: one [[ObservedReviewerComment]] per blocker (a single
+    * action carries a `RequestChanges`'s whole blocker list, so it fans out). Pure + total; a malformed payload is
+    * skipped rather than raised, since the learner is advisory. Together with [[observedFailures]] this is the widened
+    * cost lever: an empty result from *both* means the orchestrator never spends a learner reviewer-call.
+    */
+  private[orchestrator] def observedReviewerComments(
+      actions: Vector[io.forge.core.log.Action]
+  ): Vector[ObservedReviewerComment] =
+    actions.filter(_.kind == ReviewRequestedChangesAction.Kind).flatMap { a =>
+      a.payload.objOpt.toVector.flatMap { o =>
+        val gate = o.get("gate").flatMap(_.strOpt).getOrElse("")
+        val round = o.get("round").flatMap(_.numOpt).map(_.toInt)
+        val blockers = o.get("blockers").flatMap(_.arrOpt).getOrElse(Vector.empty).flatMap(_.strOpt)
+        blockers.map(b => ObservedReviewerComment(gate, round, b))
       }
     }
 

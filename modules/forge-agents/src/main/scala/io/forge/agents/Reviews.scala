@@ -126,18 +126,32 @@ final case class FailureClassifierInput(
   */
 final case class ObservedFailure(gate: String, kind: String, suggested: Option[String], route: String, evidence: String)
 
+/** One reviewer `RequestChanges` blocker the feature hit during its run, distilled from a §19 `review.request_changes`
+  * action — the *recurring-reviewer-comment* signal the `ConventionLearner` mines (decision D8) alongside
+  * [[ObservedFailure]] (the failure→remedy half). A blocker that recurs across pieces/rounds is exactly the kind of
+  * thing a CLAUDE.md note could pre-empt. `gate ∈ {"design","code"}`; `round` is the design-review round for a design
+  * gate, `None` for a code review.
+  */
+final case class ObservedReviewerComment(gate: String, round: Option[Int], blocker: String)
+
 /** §7.11 `ConventionLearner` input — what the post-run sensor reads to propose
-  * [[io.forge.core.profile.ConventionDeltas]] after a feature reaches `FeatureDone` (§11.7). It mines `failures` (the
-  * run's classified gate failures) against the current `profile` and `claudeDoc` to propose (a) gate commands the
-  * profile was missing and (b) a CLAUDE.md addition, **proposing only** — never mutating either autonomously. The
-  * orchestrator gathers `failures` from the feature's action log and only consults the sensor when `failures` is
-  * non-empty (the §7.11 cost lever — no failure signal, no sensor call). The connector renders these into a stable
-  * prompt body ([[ReviewerPrompts.learnConventionsBody]]) and decodes the structured reply via
-  * [[ReviewDecoders.conventionDeltas]].
+  * [[io.forge.core.profile.ConventionDeltas]] after a feature reaches `FeatureDone` (§11.7). It mines two signals
+  * against the current `profile` and `claudeDoc` to propose (a) gate commands the profile was missing and (b) a
+  * CLAUDE.md addition, **proposing only** — never mutating either autonomously:
+  *
+  *   - `failures` — the run's classified gate failures (the failure→remedy half), and
+  *   - `reviewerComments` — the run's reviewer `RequestChanges` blockers (the recurring-reviewer-comment half, decision
+  *     D8).
+  *
+  * The orchestrator gathers both from the feature's action log and only consults the sensor when **either** is
+  * non-empty (the §7.11 cost lever — no failure *and* no reviewer-comment signal, no sensor call). The connector
+  * renders these into a stable prompt body ([[ReviewerPrompts.learnConventionsBody]]) and decodes the structured reply
+  * via [[ReviewDecoders.conventionDeltas]].
   */
 final case class ConventionLearnerInput(
     featureId: FeatureId,
     profile: io.forge.core.profile.RepoProfile,
     claudeDoc: Option[String],
-    failures: Vector[ObservedFailure]
+    failures: Vector[ObservedFailure],
+    reviewerComments: Vector[ObservedReviewerComment]
 )

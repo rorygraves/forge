@@ -622,7 +622,7 @@ class ClaudeConnectorSuite extends munit.FunSuite:
         |"workflow":{"reviewRequired":true,"ciRequiredChecks":[],"branchModel":"trunk_based","mergeStrategy":"squash"}}""".stripMargin
     )
     val d = connector
-      .learnConventions(ConventionLearnerInput(FeatureId("feat-1"), profile, None, Vector.empty))
+      .learnConventions(ConventionLearnerInput(FeatureId("feat-1"), profile, None, Vector.empty, Vector.empty))
       .unsafeRunSync()
     assertEquals(d.addCommands.map(_.kind.asString), Vector("format"))
     assert(d.addCommands.head.autofix)

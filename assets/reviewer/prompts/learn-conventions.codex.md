@@ -2,10 +2,12 @@
 
 Forge just finished driving a coding agent through a feature, all the way to
 merge. Along the way the feature hit some gate failures (formatter, build,
-test, CI) that Forge classified and routed. Your job is to look back at those
-failures and propose **conventions** that would have avoided them next time —
-either a gate command the repo's profile was missing, or a note for the repo's
-own CLAUDE.md. You do **not** apply anything: you propose, a human decides.
+test, CI) that Forge classified and routed, and the reviewer may have asked for
+changes on the design or a piece. Your job is to look back at those failures
+**and recurring reviewer comments** and propose **conventions** that would have
+avoided them next time — either a gate command the repo's profile was missing,
+or a note for the repo's own CLAUDE.md. You do **not** apply anything: you
+propose, a human decides.
 
 ## What you receive
 
@@ -22,6 +24,11 @@ Each section is delimited by a `##` header.
   tells you what the spine did: `DriverFixup` is a fix-up round the run *paid
   for* (a convention might have avoided it); `RunLocalCommand` shows the
   profile already had the remedy.
+- `Observed reviewer comments (this feature's run)` — the reviewer's
+  `RequestChanges` blockers, each as `gate[ round N]: blocker`. A blocker that
+  recurs across pieces or rounds (e.g. "missing ScalaDoc on public methods",
+  "tests not added alongside the change") is a strong signal for a CLAUDE.md
+  note — the driver kept making the same mistake the reviewer kept catching.
 - `Current CLAUDE.md` — the repo's existing agent guide, so a proposed addition
   is phrased relative to what it already says.
 
@@ -53,10 +60,12 @@ only the JSON object. No prose, no Markdown fences.** Codex is invoked with
   conservative: propose a command only if the evidence and build tool make the
   argv obvious. Additive only — never propose changing or removing an existing
   command. If nothing is missing, return `[]`.
-- **`claudeMdProposal`** — when a failure pattern would be better prevented by a
-  habit than by a command: "the implement driver must run `sbt scalafmtAll`
-  before settling", "tests touching the DB need a running fixture". `rationale`
-  is the failure→remedy pattern you saw; `suggestedAddition` is the directive
+- **`claudeMdProposal`** — when a failure pattern *or a recurring reviewer
+  comment* would be better prevented by a habit than by a command: "the
+  implement driver must run `sbt scalafmtAll` before settling", "tests touching
+  the DB need a running fixture", "add ScalaDoc to public methods" (when the
+  reviewer asked for it more than once). `rationale` is the pattern you saw (the
+  failure→remedy, or the repeated blocker); `suggestedAddition` is the directive
   text. Propose `null` if you have nothing genuinely useful — an empty or
   generic note is worse than none.
 - **`summary`** — one or two sentences on what the run revealed and what you

@@ -5,6 +5,7 @@ import io.forge.core.fsm.*
 import io.forge.core.gen.{FsmTrajectory, Generators}
 import io.forge.core.log.{Action, ActionDraft}
 import io.forge.core.profile.*
+import io.forge.core.review.ReviewRequestedChangesAction
 
 import java.time.Instant
 import munit.ScalaCheckSuite
@@ -80,7 +81,22 @@ class ProfileReplayInvarianceSuite extends ScalaCheckSuite:
       )
     )
 
-  property("R1 — profile.snapshot + profile.failure_classified + profile.local_gate are inert at replay") {
+  /** Decision D8 `review.request_changes` — the reviewer-comment signal the `ConventionLearner` mines. A `review.*`
+    * kind, so R1 must prove it is inert at replay too (the FSM consumes the *verdict* via `CodeReviewVerdict`, never
+    * this audit row).
+    */
+  private val reviewRequestChangesDraft: PieceId => ActionDraft = piece =>
+    ReviewRequestedChangesAction.draft(
+      FeatureId("ignored"),
+      gate = "code",
+      round = None,
+      piece = Some(piece),
+      blockers = Vector("missing null check on the lock owner")
+    )
+
+  property(
+    "R1 — profile.snapshot + profile.failure_classified + profile.local_gate + review.request_changes are inert at replay"
+  ) {
     forAll(Generators.genInitialFeature) { (seed: Feature) =>
       val run = FsmTrajectory.happyPath(seed)
       val baseDrafts = run.allDrafts
@@ -92,7 +108,8 @@ class ProfileReplayInvarianceSuite extends ScalaCheckSuite:
       val augmented =
         ProfileSnapshot.draft(seed.id, profile) +:
           (baseDrafts.headOption.toVector ++
-            Vector(localGateDraft(piece), classifiedDraft(piece)) ++ baseDrafts.drop(1))
+            Vector(localGateDraft(piece), classifiedDraft(piece), reviewRequestChangesDraft(piece)) ++
+            baseDrafts.drop(1))
 
       val seed0 = Feature.initial(seed.id, run.finalFeature.manifest)
       (Feature.foldEvents(seed0, stampDrafts(baseDrafts)), Feature.foldEvents(seed0, stampDrafts(augmented))) match

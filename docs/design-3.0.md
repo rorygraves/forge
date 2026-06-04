@@ -260,10 +260,10 @@ real failing log); only the live natural-trigger demonstration is outstanding.
       `OrchestratorConventionLearnerSuite` (e2e: FeatureDone + classified failure → delta saved + PR opened + number
       logged; PR-open failure → persist-locally fallback; `conventionLearner = false` ⇒ never consulted; no-failure ⇒
       cost-lever skip), and the opt-in `forge-it` `ConventionLearnerSmokeSuite` (`FORGE_IT_RUN_LEARNER_SMOKE=1`).
-- [ ] **`recurring reviewer comments` mining still out of scope (decision D8).** The action log captures classified
-      failures (`profile.failure_classified`), not reviewer comment text, so the §7.11 cost lever gates on failures
-      today; widen when a `review.*` comment-text action kind exists. (Not a Task-3.2 blocker — the roadmap §4 bullet
-      ticks at slice close after the §0 live re-run T5 + the whole-section review.)
+- [x] **`recurring reviewer comments` mining (decision D8) — ✅ resolved 2026-06-04.** The action log now captures
+      reviewer comment text via the new §19 `review.request_changes` kind, so the §7.11 cost lever widened to gate on
+      *failures OR reviewer comments* and the learner input gained a `reviewerComments` channel. Contract:
+      [`forge-design-1.13.md`](forge-design-1.13.md) (§7.11/§11.7/§19). See the D8 entry in §4 below.
 
 ---
 
@@ -277,6 +277,24 @@ Tier-1 closes the slice's exit criterion; Tier 2/3 can land incrementally behind
 ---
 
 ## 3. Status log
+
+- **2026-06-04 — D8 resolved: reviewer-comment mining (the `ConventionLearner`'s second signal).** Closed the deferred
+  half of Task 3.2: the learner now mines *recurring reviewer comments* alongside failure→remedy patterns, completing the
+  §7.11/§11.7 "failure patterns + recurring reviewer comments" framing. Added the backing signal first (the
+  "capture real shapes, don't invent" discipline): a new §19 `review.request_changes` audit kind
+  (`io.forge.core.review.ReviewRequestedChangesAction`, a no-op `Replay` projection) appended by
+  `Orchestrator.logReviewerRequestChanges` whenever a design/code reviewer one-shot returns `RequestChanges` with a
+  non-empty blocker list, carrying `{ gate, round, blockers }`. Then widened the consumer:
+  `Orchestrator.observedReviewerComments` mines it into `Vector[ObservedReviewerComment]`; `ConventionLearnerInput` gained
+  a `reviewerComments` channel (rendered into `learnConventionsBody` + both `learn-conventions.*` prompts); the §7.11 cost
+  lever in `maybeLearnConventions` widened to `failures.nonEmpty || reviewerComments.nonEmpty`. Replay/§6.1 invariant
+  preserved (the FSM consumes the verdict via `DesignReviewReceived`/`CodeReviewVerdict`, never the audit row). Contract:
+  the new [`forge-design-1.13.md`](forge-design-1.13.md) (§7.11/§11.7/§19, standalone-by-freeze over 1.12; README
+  live-contract pointer updated). Tests: `ReviewRequestedChangesActionSuite`, `ProfileReplayInvarianceSuite` R1 extended,
+  `OrchestratorConventionLearnerSuite` +2 (the D8 e2e + the per-verdict append/skip seam); the three connector / retrying
+  / smoke construction sites updated for the new field. `forge-core` + `forge-agents` + `forge-app` full unit suites green;
+  `scalafmtCheckAll` clean. The §4 D8 entry is flipped to resolved; the roadmap §4 bullet stays **unticked** (slice closes
+  only after the whole-section review + the remaining live-demo carry-forwards T6).
 
 - **2026-06-04 — D7 resolved: `profile.conventions_learned` enumerated in the §19 contract
   ([`forge-design-1.12.md`](forge-design-1.12.md)).** A pure spec-text reconciliation — no code change. The
@@ -669,17 +687,27 @@ the kind (a pure spec-text reconciliation — no code change; the kind has been 
 fold a conventions-learned row" question is left to the consuming pass, not the contract (1.12 §19 notes it as a
 candidate future fold).
 
-### D8 — the `ConventionLearner` mines classified failures, not reviewer-comment text (deferred) — open (1.7 §7.11/§11.7)
+### D8 — the `ConventionLearner` mines classified failures + reviewer-comment text — ✅ resolved 2026-06-04 ([`forge-design-1.13.md`](forge-design-1.13.md))
 
-§7.11/§11.7 frame the learner as mining "failure→remedy patterns **+ recurring reviewer comments**". Task 3.2 grounds it
+§7.11/§11.7 frame the learner as mining "failure→remedy patterns **+ recurring reviewer comments**". Task 3.2 grounded it
 on the failure→remedy half only: `Orchestrator.observedFailures` distils the §19 `profile.failure_classified` actions
-(`gate`/`kind`/`route`/`evidence`) from the feature's action log — the real, structured signal that genuinely exists. The
-action log does **not** capture reviewer **comment text** today (reviewer `request_changes` drives a fix-up but the blocker
-prose is not logged as a structured action), so feeding "recurring reviewer comments" would be inventing a field with no
-backing data — deliberately avoided per the "capture real shapes, don't invent" discipline. This is also why the §7.11
-cost lever gates on `failures.nonEmpty`: the only mineable signal today is a classified failure. Revisit when reviewer
-comment text is logged (a new `review.*` action kind) — at which point the learner input gains a `reviewerComments`
-channel and the cost-lever gate widens to "failures OR comments present".
+(`gate`/`kind`/`route`/`evidence`) from the feature's action log. The action log did **not** capture reviewer **comment
+text** then (reviewer `request_changes` drives a fix-up but the blocker prose was not logged as a structured action), so
+feeding "recurring reviewer comments" would have meant inventing a field with no backing data — deliberately avoided per
+the "capture real shapes, don't invent" discipline; the §7.11 cost lever therefore gated on `failures.nonEmpty` alone.
+
+**Resolved 2026-06-04** by adding the backing signal first, then widening the learner. A new §19
+`review.request_changes` audit kind (`io.forge.core.review.ReviewRequestedChangesAction`, a no-op `Replay` projection like
+the `profile.*` kinds) is appended by `Orchestrator.logReviewerRequestChanges` whenever Forge's own reviewer one-shot
+returns `RequestChanges` (design or code) with a non-empty blocker list — capturing the blocker prose with `{ gate, round,
+blockers }`. `Orchestrator.observedReviewerComments` mines it back into `Vector[ObservedReviewerComment]`; the
+`ConventionLearnerInput` gained a `reviewerComments` channel (rendered into `ReviewerPrompts.learnConventionsBody` + the
+`learn-conventions.{claude,codex}.md` prompts); and the §7.11 cost lever in `maybeLearnConventions` widened to
+`failures.nonEmpty || reviewerComments.nonEmpty`. Contract: [`forge-design-1.13.md`](forge-design-1.13.md)
+(§7.11/§11.7/§19). Tests: `ReviewRequestedChangesActionSuite` (payload shape), `ProfileReplayInvarianceSuite` R1
+(replay inertness), `OrchestratorConventionLearnerSuite` (the D8 e2e — a reviewer comment alone now consults the learner
+with the blocker threaded into the input — plus the `logReviewerRequestChanges` append/skip-per-verdict seam). `forge-core`
++ `forge-agents` + `forge-app` green; `scalafmtCheckAll` clean.
 
 ### D9 — the `ConventionLearner`'s proposed CLAUDE.md edit is opened as a PR — ✅ resolved 2026-06-03
 
