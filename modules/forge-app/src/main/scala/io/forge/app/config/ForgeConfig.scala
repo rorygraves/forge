@@ -106,9 +106,11 @@ final case class SettleConfig(
   *
   * `workflowGate` (design-3.3) lets the profile's `WorkflowProfile` parameterize the §11 FSM: with it on, a profile
   * declaring `workflow.reviewRequired = false` makes Forge skip the PR code-review step (the orchestrator emits
-  * `ReviewSkipped` instead of spawning a reviewer). It is `true` by default but inert for an unprofiled / `enabled =
-  * false` run (no profile ⇒ review required ⇒ 1.6/1.8 behaviour); set `false` to keep the fixed 1.6 workflow even for a
-  * profiled repo.
+  * `ReviewSkipped` instead of spawning a reviewer), and the profile's `workflow.ciRequiredChecks` feed the §8
+  * required-check set (Tier 2) so a profiled repo's required checks are sensed rather than hand-set in
+  * `ci.requiredChecksOverlay`. It is `true` by default but inert for an unprofiled / `enabled = false` run (no profile
+  * ⇒ review required + empty sensed check set ⇒ 1.6/1.8 behaviour); set `false` to keep the fixed 1.6 workflow even for
+  * a profiled repo.
   */
 final case class AdaptConfig(
     enabled: Boolean = true,

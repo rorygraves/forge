@@ -76,15 +76,30 @@ workflow has no PR code-review step should not pay Forge's reviewer one-shot at
 
 Lower ROI than Tier 1 and partly already covered by config; scoped here, not yet built.
 
-- [ ] **CI-required (`workflow.ciRequiredChecks`).** The §8 CI gate already reads the
-      required-check set from the PR snapshot + `config.ci.requiredChecksOverlay`
-      (`CiReadiness`). The profile's `ciRequiredChecks` should feed that overlay so a profiled
-      repo's required set is sensed, not hand-configured. **Open question:** a repo with *no*
-      CI at all — today an empty required set lands at `CiOutcome.Pending` and the gate's
-      discovery rules eventually NHI (`no CI checks discovered`). A "CI not required" profile
-      should instead let the piece advance straight to the review/merge gate. This is a real
-      §8/§11.5 behaviour change (a `CiNotRequired` neutral event, or a gate-level short-circuit
-      in the orchestrator) — design it against a real no-CI repo before building.
+- [x] **CI-required — sensed required set (Half A) — landed 2026-06-04.** The profile's
+      `ciRequiredChecks` now feeds the §8 required-check set: `CiReadiness.evaluate` takes a
+      `profileRequiredChecks: Set[String]` unioned into `requiredNames` (alongside branch
+      protection + `config.ci.requiredChecksOverlay`), and the orchestrator computes it at the
+      `ciPollToEvent` call site as `if adapt.workflowGate then
+      profile.map(_.workflow.ciRequiredChecks.toSet).getOrElse(Set.empty) else Set.empty` — the
+      §8.2 "decision in orchestrator, pure policy" split (the profile reaches `CiReadiness` only
+      as a neutral name set; the FSM is untouched). A profiled repo's required set is now
+      **sensed** (szork's `["backend","frontend"]`) instead of hand-set; an unprofiled /
+      `workflowGate = false` / no-declared-checks run passes `Set.empty` → byte-identical
+      pre-3.3 behaviour. Tests: `CiReadinessSuite` (+4 — profile checks contribute / union /
+      sensed-check-missing → §8 rule 2 Blocked / empty = identical), `OrchestratorCiRoutingSuite`
+      (+1 e2e — a sensed required subset ignores a non-required failing check and advances;
+      `attempts` 0, no routing). A consistency fix rode along: profiled CI-driving suites whose
+      green snapshot's check name didn't match the profile's declared required set
+      (`OrchestratorCiRoutingSuite` / `LocalGate` / `BuildGate`) were made internally consistent
+      (the mismatch is invisible pre-Half-A but deadlocks the gate once the sensed set gates).
+- [ ] **CI-required Half B — no-CI-repo short-circuit (carried forward, decision W5).** A repo
+      with *genuinely no CI* should advance straight to the review/merge gate instead of NHI'ing
+      on `no CI checks discovered`. Empty `ciRequiredChecks` can **not** signal this (the `forge`
+      fixture has `[]` but real CI), so it needs an explicit profile signal — a contract change.
+      The existing `CiPolicy.None` already implements the target "skip → synthetic-success →
+      advance" behaviour; Half B is wiring a profile-driven trigger to it. Deferred to its own
+      slice (no real no-CI repo to design against; both fixtures have CI) — see W5.
 - [ ] **merge-strategy (`workflow.mergeStrategy`).** **Blocked on a prerequisite:** Forge does
       **not auto-merge today** — it only *detects* an upstream merge (`PieceAwaitingMerge`
       polls for `Merged`). `mergeStrategy` (squash/merge/rebase) is moot until an auto-merge
@@ -106,13 +121,33 @@ Lower ROI than Tier 1 and partly already covered by config; scoped here, not yet
 
 ## 2. Order of work
 
-Tier 1 (review-required) ✅ — the runnable slice that proves the pattern → Tier 2
-{CI-required, merge-strategy behind auto-merge} → deferred {branch-model trunk path, own
-slice}. Tier 1 alone satisfies the §0 minimum; Tiers 2/deferred land incrementally behind it.
+Tier 1 (review-required) ✅ — the runnable slice that proves the pattern → Tier 2 {CI-required
+**Half A (sensed required set) ✅ 2026-06-04**; Half B (no-CI short-circuit) → W5, own slice;
+merge-strategy behind auto-merge → W2} → deferred {branch-model trunk path, own slice}. Tier 1
+alone satisfies the §0 minimum; Tiers 2/deferred land incrementally behind it.
 
 ---
 
 ## 3. Status log
+
+- **2026-06-04 — Tier 2 Half A landed: CI-required parameterization (`workflow.ciRequiredChecks`).** The profile's
+  `ciRequiredChecks` now feeds the §8 required-check set. `CiReadiness.evaluate` gains a `profileRequiredChecks:
+  Set[String]` param unioned into `requiredNames` (alongside branch protection + `config.ci.requiredChecksOverlay`);
+  the orchestrator computes it at the `ciPollToEvent` call site, gated on `adapt.workflowGate` (`Set.empty` for
+  unprofiled / gate-off / no-declared-checks → byte-identical pre-3.3). The FSM is untouched — the profile reaches the
+  pure §8 policy only as a neutral name set (the §8.2 "decision in orchestrator, pure policy" split, the same shape
+  Tier 1 used for `ReviewSkipped`). `AdaptConfig.workflowGate`'s doc now notes it gates review **and** CI sensing. New
+  tests: `CiReadinessSuite` (+4 — profile checks contribute / union with overlay / sensed-check-missing → §8 rule 2
+  Blocked / empty = identical), `OrchestratorCiRoutingSuite` (+1 e2e — a sensed required subset ignores a non-required
+  failing check → advances, `attempts` 0, no routing). **Consistency fix (the consistency-sweep discipline):** once the
+  sensed set gates, a profiled CI-driving suite whose green snapshot's check name didn't match the profile's declared
+  required set deadlocks the gate (it keeps polling for a check that never appears). The mismatch is invisible pre-Half-A;
+  Half A surfaced it. Fixed three suites — `OrchestratorCiRoutingSuite` (advance on a `backend`-named green snapshot,
+  matching its `["backend"]` profile + failing check), `OrchestratorLocalGateSuite` / `OrchestratorBuildGateSuite`
+  (`ciRequiredChecks` `["backend"]` → `["ci"]`, matching the shared `ciReadySnapshot`). `forge-app` 38 profiled/CI
+  suite tests green (CiReadiness 16 / CiRouting 5 / ReviewGate 4 / LocalGate 3 / BuildGate 5 / ConventionLearner 4);
+  `scalafmtCheckAll` clean. **Half A box ticked**; **Half B** (no-CI short-circuit) carried forward as **W5**;
+  merge-strategy stays Tier 2 (blocked on auto-merge). The Tier 2 header + roadmap §4 bullet stay **unticked**.
 
 - **2026-06-03 — Tier 1 landed: review-required parameterization.** A repo whose
   `WorkflowProfile.reviewRequired` is `false` now skips the PR code-review step: the
@@ -158,10 +193,26 @@ Deferred to its own slice (the build-gate D2 precedent). `WorkflowProfile.branch
 and committed but unused until then.
 
 ### W4 — `adapt.workflowGate` is a single umbrella flag for the whole sub-slice — open (1.9 §18)
-One `workflowGate` boolean gates the entire `WorkflowProfile` parameterization (review now; CI /
-merge later) rather than a per-knob flag. Rationale: an operator either trusts the sensed
-workflow shape or pins the fixed 1.6 workflow; a per-knob matrix is premature until more than one
-knob is live. Split into per-knob flags only if a repo needs (say) sensed review but pinned CI.
+One `workflowGate` boolean gates the entire `WorkflowProfile` parameterization (review **and** CI
+required-check sensing now; merge later) rather than a per-knob flag. Rationale: an operator either
+trusts the sensed workflow shape or pins the fixed 1.6 workflow; a per-knob matrix is premature until
+more than one knob is live. (Half A made `workflowGate` gate the sensed CI required set too — still one
+flag.) Split into per-knob flags only if a repo needs (say) sensed review but pinned CI.
+
+### W5 — CI-required Half B (no-CI-repo short-circuit) is deferred to its own slice — open (1.9 §8/§11.5)
+A repo with *genuinely no CI* should advance a piece straight to the review/merge gate rather than NHI
+on the §8 discovery rule `no CI checks discovered`. Tier 2 Half A (the sensed required set) shipped;
+Half B is a real §8/§11.5 behaviour change that needs an **explicit** profile signal — empty
+`ciRequiredChecks` cannot mean "no CI" (the `forge` fixture has `[]` but real CI, falling back to
+observed discovery; szork has `["backend","frontend"]`). The existing `CiPolicy.None` already implements
+the target behaviour (stamp a synthetic all-success check → FSM reads Ready → advance), so Half B is
+"add a profile signal that resolves the effective `CiPolicy` to `None`" — most likely a new
+`WorkflowProfile.ciRequired: Boolean` (symmetric with `reviewRequired`), which is a contract +
+`repo-profile.json` schema + `ReviewDecoders.repoProfile` decoder + both-fixtures + `RepoProfiler`
+prompt change. Deferred because (a) it is a contract change beyond Half A's scope and (b) there is **no
+real no-CI repo to design/validate against** — both committed fixtures have CI (the plan's own "design
+against a real no-CI repo before building" caution). Pick it up as its own slice (the build-gate D2 /
+branch-model W3 precedent).
 
 ---
 

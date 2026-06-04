@@ -746,7 +746,21 @@ final class Orchestrator(
           gateRef.get.flatMap { gate =>
             val enteredAt = gate.gateEnteredAt.getOrElse(now)
             val elapsed = now - enteredAt
-            CiReadiness.evaluate(ciPolicy, config.ci, overlay, decoded.snapshot, gate.disc, elapsed) match
+            // §3.3 Tier 2 — the sensed required-check set parameterizes the §8 gate. `Set.empty` (unprofiled /
+            // no declared checks / `workflowGate = false`) keeps the exact pre-3.3 union, the §8.2 "decision in
+            // orchestrator, pure policy" split (the profile reaches `CiReadiness` only as a neutral name set).
+            val profileRequiredChecks: Set[String] =
+              if config.adapt.workflowGate then profile.map(_.workflow.ciRequiredChecks.toSet).getOrElse(Set.empty)
+              else Set.empty
+            CiReadiness.evaluate(
+              ciPolicy,
+              config.ci,
+              overlay,
+              profileRequiredChecks,
+              decoded.snapshot,
+              gate.disc,
+              elapsed
+            ) match
               case CiDecision.KeepPolling(next) =>
                 gateRef.set(gate.copy(gateEnteredAt = Some(enteredAt), disc = next)).as(None)
               case CiDecision.Forward(rollup) =>

@@ -47,10 +47,17 @@ object CiReadiness:
 
   private def isSuccess(c: CheckResult): Boolean = c.conclusion.contains(CheckConclusion.Success)
 
+  /** @param profileRequiredChecks
+    *   the §3.3-Tier-2 sensed required-check set from `WorkflowProfile.ciRequiredChecks`, unioned into the required
+    *   names alongside branch protection and the config overlay. The orchestrator passes `Set.empty` for an unprofiled
+    *   run, a profile with no declared checks, or `adapt.workflowGate = false` — so an absent/empty value is
+    *   byte-identical to the pre-3.3 behaviour.
+    */
   def evaluate(
       policy: CiPolicy,
       ci: CiConfig,
       overlay: RequiredChecksOverlay,
+      profileRequiredChecks: Set[String],
       snapshot: PrSnapshot,
       state: CiDiscoveryState,
       elapsed: FiniteDuration
@@ -65,10 +72,11 @@ object CiReadiness:
       case CiPolicy.BranchProtectionThenObserved =>
         val timeout = ci.checkDiscoveryTimeoutSec.seconds
         val discoveryElapsed = elapsed > timeout
-        val requiredNames = overlay.required ++ ci.requiredChecksOverlay.toSet
+        val requiredNames = overlay.required ++ ci.requiredChecksOverlay.toSet ++ profileRequiredChecks
 
         if requiredNames.nonEmpty then
-          // Branch-protection / config-overlay union names the required set. Promote the matching observed checks.
+          // Branch-protection / config-overlay / sensed-profile union names the required set. Promote the matching
+          // observed checks.
           val observedNames = observed.map(_.name).toSet
           val missing = (requiredNames -- observedNames).toVector.sorted
           if missing.nonEmpty then

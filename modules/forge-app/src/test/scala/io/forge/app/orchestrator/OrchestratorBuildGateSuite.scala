@@ -53,7 +53,8 @@ class OrchestratorBuildGateSuite extends munit.FunSuite:
     commitIdentity = CommitIdentity("Forge", "forge@example.com"),
     workflow = WorkflowProfile(
       reviewRequired = true,
-      ciRequiredChecks = Vector("backend"),
+      // matches the shared `ciReadySnapshot` green check so the Half A sensed required set is satisfied on advance.
+      ciRequiredChecks = Vector("ci"),
       branchModel = BranchModel.TrunkBased,
       mergeStrategy = MergeStrategy.Squash
     )

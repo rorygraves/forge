@@ -63,9 +63,10 @@ class CiReadinessSuite extends munit.FunSuite:
       state: CiDiscoveryState = CiDiscoveryState.initial,
       elapsed: FiniteDuration = zero,
       policy: CiPolicy = CiPolicy.BranchProtectionThenObserved,
-      ci: CiConfig = cfg()
+      ci: CiConfig = cfg(),
+      profileRequiredChecks: Set[String] = Set.empty
   ): CiDecision =
-    CiReadiness.evaluate(policy, ci, overlay, s, state, elapsed)
+    CiReadiness.evaluate(policy, ci, overlay, profileRequiredChecks, s, state, elapsed)
 
   // --- CiPolicy.None ---
 
@@ -94,6 +95,54 @@ class CiReadinessSuite extends munit.FunSuite:
     d match
       case CiDecision.Forward(rollup) => assert(rollup.required.exists(_.name == "build"))
       case other => fail(s"expected Forward(failed), got $other")
+
+  // --- §3.3 Tier 2: sensed profile required checks ---
+
+  test("profile checks: ciRequiredChecks contribute to the required set (no overlay, no config)"):
+    val d = eval(
+      overlayUnprotected,
+      snap(green("backend"), green("frontend"), pending("docs")),
+      ci = cfg(stableGreenPolls = 1),
+      profileRequiredChecks = Set("backend", "frontend")
+    )
+    d match
+      case CiDecision.Forward(rollup) =>
+        assertEquals(rollup.required.map(_.name).toSet, Set("backend", "frontend"))
+      case other => fail(s"expected Forward, got $other")
+
+  test("profile checks: unioned with branch-protection ∪ config overlay"):
+    val d = eval(
+      overlayProtected("build"),
+      snap(green("build"), green("lint"), green("backend")),
+      ci = cfg(requiredChecksOverlay = Vector("lint"), stableGreenPolls = 1),
+      profileRequiredChecks = Set("backend")
+    )
+    d match
+      case CiDecision.Forward(rollup) =>
+        assertEquals(rollup.required.map(_.name).toSet, Set("build", "lint", "backend"))
+      case other => fail(s"expected Forward, got $other")
+
+  test("profile checks: a sensed required check that never appears after timeout → Blocked (§8 rule 2)"):
+    val d = eval(
+      overlayUnprotected,
+      snap(green("frontend")),
+      elapsed = pastTimeout,
+      profileRequiredChecks = Set("backend")
+    )
+    assertEquals(d, CiDecision.Blocked("required check 'backend' never appeared (source: Unprotected)"))
+
+  test("profile checks: empty set is byte-identical to the pre-3.3 observed fallback"):
+    val withEmpty = eval(overlayUnprotected, snap(green("a"), green("b")), ci = cfg(stableGreenPolls = 1))
+    val withoutArg = CiReadiness.evaluate(
+      CiPolicy.BranchProtectionThenObserved,
+      cfg(stableGreenPolls = 1),
+      overlayUnprotected,
+      Set.empty,
+      snap(green("a"), green("b")),
+      CiDiscoveryState.initial,
+      zero
+    )
+    assertEquals(withEmpty, withoutArg)
 
   // --- §8 discovery rules ---
 
