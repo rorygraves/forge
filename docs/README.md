@@ -21,6 +21,7 @@ deleted; git holds the full lineage either way.)
 | [`forge-design-1.6.md`](forge-design-1.6.md) | The pre-Phase-3 base (Phases 1–2). 1.7/1.8/1.9 freeze its unchanged sections. |
 | [`design-rationale.md`](design-rationale.md) | Why the spec looks the way it does. Decision/rejected/where-to-read per item. **A5** is the Phase-3 architecture direction. |
 | [`design-3.0.md`](design-3.0.md) / [`design-3.1-build-gate.md`](design-3.1-build-gate.md) | Phase-3 implementation plans — Slice 3.0/3.1 (RepoProfile + senses) and the 3.1-D2 pre-PR Build gate. Task breakdowns, status logs, carry-forwards. (Slice 3.3 closed — see the historical table below.) |
+| [`design-3.5-role-trait.md`](design-3.5-role-trait.md) | **Open** — Slice 3.5 (the last Phase-3 sub-slice): the role-trait refactor (roadmap §4.2). Generalises `Mode` into an `Agent` base + `Driver`/`Reviewer`/sensor role configurations. Not to be confused with the closed [`design-3.5.md`](design-3.5.md) (Phase-2 D3 driver-respawn). |
 
 ## Reference / support
 

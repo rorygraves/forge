@@ -47,6 +47,21 @@ class RoleSuite extends munit.FunSuite:
     assertEquals(d.connector.name, "claude")
     assertEquals(r.connector.name, "codex")
 
+  test("every Role is an Agent exposing connector + a stable role tag"):
+    // roadmap §4.2 — Driver/Reviewer are now configurations of the `Agent` base.
+    val d: Agent = Role.Driver(claude)
+    val r: Agent = Role.Reviewer(codex)
+    assertEquals(d.role, "driver")
+    assertEquals(r.role, "reviewer")
+    assertEquals(d.connector.name, "claude")
+
+  test("the role family is open to a third role without a Mode edit (design-3.5 openness)"):
+    // The §7.11 sensors are the first concrete third role; constructing one needs no
+    // change to `Mode` or `pairFor`, proving the §4.2 "base Agent for future roles" claim.
+    val s: Agent = Role.Sensor(claude)
+    assertEquals(s.role, "sensor")
+    assertEquals(s.connector.name, "claude")
+
   test("pairFor(ClaudeDriver) routes claude→driver, codex→reviewer"):
     val (driver, reviewer) = Role.pairFor(Mode.ClaudeDriver, claude, codex)
     assertEquals(driver.connector.name, "claude")
