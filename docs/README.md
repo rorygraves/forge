@@ -20,7 +20,7 @@ deleted; git holds the full lineage either way.)
 | [`forge-design-1.7.md`](forge-design-1.7.md) | Phase-3 architectural revision (Repo Adaptation): `RepoProfile` / `WorkflowProfile`, sensor surface (§3/§6/§7/§8/§11/§18/§19). 1.8/1.9 freeze its unchanged sections. |
 | [`forge-design-1.6.md`](forge-design-1.6.md) | The pre-Phase-3 base (Phases 1–2). 1.7/1.8/1.9 freeze its unchanged sections. |
 | [`design-rationale.md`](design-rationale.md) | Why the spec looks the way it does. Decision/rejected/where-to-read per item. **A5** is the Phase-3 architecture direction. |
-| [`design-3.0.md`](design-3.0.md) / [`design-3.1-build-gate.md`](design-3.1-build-gate.md) / [`design-3.3.md`](design-3.3.md) | Phase-3 implementation plans — Slice 3.0/3.1 (RepoProfile + senses), the 3.1-D2 pre-PR Build gate, and 3.3 (WorkflowProfile FSM parameterization). Task breakdowns, status logs, carry-forwards. |
+| [`design-3.0.md`](design-3.0.md) / [`design-3.1-build-gate.md`](design-3.1-build-gate.md) | Phase-3 implementation plans — Slice 3.0/3.1 (RepoProfile + senses) and the 3.1-D2 pre-PR Build gate. Task breakdowns, status logs, carry-forwards. (Slice 3.3 closed — see the historical table below.) |
 
 ## Reference / support
 
@@ -47,6 +47,7 @@ logs, review rounds, carry-forwards). They are not the live contract — that is
 | [`design-2.0.md`](design-2.0.md) | Slice 2.0 — run observability | 2026-05-31 |
 | [`design-3.5.md`](design-3.5.md) | D3 — driver-respawn-avoidance on resume | 2026-06-01 |
 | [`design-2.1-tui.md`](design-2.1-tui.md) | Slice 2.1 — read-only TUI | 2026-06-01 |
+| [`design-3.3.md`](design-3.3.md) | Slice 3.3 — `WorkflowProfile` FSM parameterization (review-required + CI required-check sensing) | 2026-06-04 |
 
 > Naming note: the `design-N.md` numbers are *slice* ids and do **not** track the
 > `forge-design-1.N.md` spec revisions — e.g. `design-2.1.md` is Slice 1.1, while

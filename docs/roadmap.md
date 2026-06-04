@@ -792,7 +792,22 @@ honest hard edge").
   commit-identity sourced from the profile (sense the environment, don't inherit
   ambient defaults — the tiniest instance of the whole thesis).
 - **3.3 — `WorkflowProfile` FSM parameterization** (review / CI / merge-strategy
-  / branch model).
+  / branch model). ✅ **closed 2026-06-04** — the two knobs whose §11 wiring exists
+  today landed: **review-required** (Tier 1 — a `reviewRequired=false` repo skips the
+  reviewer one-shot via the neutral `FsmEvent.ReviewSkipped`) and **CI required-check
+  sensing** (Tier 2 Half A — `workflow.ciRequiredChecks` feeds the §8 required set).
+  The FSM stayed deterministic and profile-agnostic throughout (the §6.1 replay
+  invariant; `ProfileReplayInvarianceSuite` R1/R2). Plan + carry-forward:
+  [`design-3.3.md`](design-3.3.md). **Deferred to their own future slices** (each is a
+  contract/lifecycle change beyond a parameterization, not 3.3 scope):
+  - **no-CI-repo short-circuit** (a genuinely no-CI repo advances straight to merge) —
+    needs an explicit `WorkflowProfile.ciRequired` signal + a real no-CI repo to design
+    against (design-3.3 **W5**).
+  - **merge-strategy** (`squash`/`merge`/`rebase`) — moot until an auto-merge side effect
+    exists; Forge detects merges, it does not perform them (design-3.3 **W2**; field
+    sensed-but-unused).
+  - **branch-model trunk path** (`TrunkBased`: commit-to-trunk, no PR tail) — a new §11
+    lifecycle branch, not a parameterization (design-3.3 **W3**; field sensed-but-unused).
 - **3.4 — `ConventionLearner`** → proposed CLAUDE.md PRs (human-approved).
 - **3.5 — Role-trait refactor** (§4.2 below) — the sensors are the first
   concrete third+ roles, so the refactor lands *inside* the phase that needs it.

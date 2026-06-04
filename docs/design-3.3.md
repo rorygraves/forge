@@ -14,9 +14,13 @@
 > Tick items as they land — but not during a review round; tick the roadmap §4 bullet only
 > at the Phase-3 slice close after a whole-section review.
 >
-> **Status:** 🟡 open — 2026-06-03. **Tier 1 (review-required) landed** the same day; the
-> remaining tiers (CI-required, merge-strategy/auto-merge) and the deferred branch-model
-> trunk path are scoped below.
+> **Status:** ✅ closed — 2026-06-04. **Tier 1 (review-required) landed 2026-06-03**;
+> **Tier 2 Half A (CI required-check sensing) landed 2026-06-04**. Those two knobs are the
+> ones whose §11 wiring exists today; the rest (merge-strategy, no-CI short-circuit,
+> branch-model trunk path) are each a contract/lifecycle change beyond a parameterization
+> and are **deferred to their own future slices** with durable homes in
+> [`roadmap.md`](roadmap.md) §4 (W2/W3/W5 below). The §0 exit criterion is met. The roadmap
+> §4 3.3 bullet is flipped to closed.
 
 ---
 
@@ -72,9 +76,11 @@ workflow has no PR code-review step should not pay Forge's reviewer one-shot at
 - [x] **Contract.** [`forge-design-1.9.md`](forge-design-1.9.md) (standalone-by-freeze;
       §6/§11.5/§18).
 
-### Tier 2 — CI-required + merge-strategy parameterization  [ ]
+### Tier 2 — CI-required + merge-strategy parameterization  [~] (Half A landed; rest → own slices)
 
-Lower ROI than Tier 1 and partly already covered by config; scoped here, not yet built.
+Lower ROI than Tier 1 and partly already covered by config. **Half A (sensed required set)
+landed 2026-06-04**; merge-strategy is blocked on auto-merge (W2) and the no-CI short-circuit
+is its own slice (W5) — both carried to [`roadmap.md`](roadmap.md) §4 at the 3.3 close.
 
 - [x] **CI-required — sensed required set (Half A) — landed 2026-06-04.** The profile's
       `ciRequiredChecks` now feeds the §8 required-check set: `CiReadiness.evaluate` takes a
@@ -129,6 +135,25 @@ alone satisfies the §0 minimum; Tiers 2/deferred land incrementally behind it.
 ---
 
 ## 3. Status log
+
+- **2026-06-04 — Slice 3.3 closed (whole-section review).** The `WorkflowProfile`-parameterizes-the-§11-FSM
+  slice is closed. The two knobs whose §11 wiring exists today landed and were reviewed end-to-end: **Tier 1
+  review-required** (`reviewRequired=false` → reviewer one-shot skipped via the neutral `FsmEvent.ReviewSkipped`)
+  and **Tier 2 Half A CI required-check sensing** (`workflow.ciRequiredChecks` → §8 required set). Whole-section
+  review confirmed: the FSM arm is PR-number-guarded and leaves `attempts`/session id untouched (same target as an
+  `Approve`); both orchestrator decision sites (`skipReview`, the `ciPollToEvent` `profileRequiredChecks` compute)
+  gate on `config.adapt.workflowGate` and pass the profile to pure policy only as a neutral name set; the FSM never
+  reads a profile. The §0 exit criterion holds and the architectural crux is intact —
+  `ProfileReplayInvarianceSuite` R1/R2 + `Fsm_11_5_CiReviewPollingSuite` green (forge-core 15), and
+  `OrchestratorReviewGateSuite` + `CiReadinessSuite` + `OrchestratorCiRoutingSuite` green (forge-app 25). One
+  cosmetic review note (not blocking, left as-is): when a *profile-sensed* required check never appears,
+  `CiReadiness`'s §8-rule-2 Blocked message attributes it to `overlay.source` (branch-protection), not the profile
+  — a diagnostic-string inaccuracy, no behavioural effect. **Carry-forward placed durably in
+  [`roadmap.md`](roadmap.md) §4** (each is a contract/lifecycle change beyond a parameterization, hence its own
+  slice): **W5** no-CI short-circuit (needs an explicit `WorkflowProfile.ciRequired` signal + a real no-CI repo to
+  design against), **W2** merge-strategy (blocked on an auto-merge side effect — Forge detects merges, doesn't
+  perform them), **W3** branch-model trunk-commit path (a new §11 lifecycle branch). W1/W4 are resolved-in-place
+  design decisions (recorded above), not deferred work. The roadmap §4 3.3 bullet is flipped to **closed**.
 
 - **2026-06-04 — Tier 2 Half A landed: CI-required parameterization (`workflow.ciRequiredChecks`).** The profile's
   `ciRequiredChecks` now feeds the §8 required-check set. `CiReadiness.evaluate` gains a `profileRequiredChecks:
