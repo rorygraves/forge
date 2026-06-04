@@ -133,24 +133,32 @@ behaviour-free, so the contract is concrete before any call site moves.
 
 ### Tier 2 — `Mode` becomes a configuration, resolved once
 
-### Task 3.5.2 — single role-pairing resolution (kill the scattered `match mode`)  [ ]
+### Task 3.5.2 — single role-pairing resolution (kill the scattered `match mode`)  ✅ 2026-06-04
 
-- [ ] Introduce the one resolution seam — a `RolePairing` (or `AgentPairing`) value that a
-      `Mode` resolves to **once**, carrying the recipe the four sites need (which CLI
-      drives, which reviews, the retry-budget block selector). `Mode` stays the
-      **serialised wire token** (back-compat, criterion 3); it no longer carries behaviour
-      dispatch. Resolve `Mode → RolePairing` at a single function.
-- [ ] Re-point `ConnectorFactory.build`, `OrchestratorBuilder.retryBudgets`, and
-      `ProfileCommand` at the resolved pairing instead of each matching `Mode`. The smell
-      test ("`match m: Mode` only in `Mode` + connector construction") tightens to "only in
-      the one resolver."
-- [ ] **Reconcile D1** here: decide cross-CLI vs same-CLI as the single role→connector
-      story and make `pairFor`'s caller (`ProfileCommand`) and the `forge run` path agree
-      (or document why they legitimately differ — e.g. `forge profile` deliberately uses
-      the *reviewer-side* connector, which is the same CLI under the same-CLI story).
-- [ ] Tests: a resolver unit (both modes → expected pairing), and the existing
-      `ProfileCommand` / orchestrator-builder coverage stays green. Persistence round-trip
-      unchanged (`ModeSuite` / `ManifestSuite` / `FsmEventSuite`).
+- [x] Introduced the one resolution seam — `RolePairing(driver: Cli, reviewer: Cli)` +
+      `enum Cli { Claude, Codex }` in `forge-core` next to `Mode`
+      ([`RolePairing.scala`](../modules/forge-core/src/main/scala/io/forge/core/RolePairing.scala)),
+      with `RolePairing.of(mode)` the **single** `Mode → pairing` resolver. `Mode` stays the
+      serialised wire token (R1 — untouched enum + `ReadWriter`); it no longer carries
+      behaviour dispatch.
+- [x] Re-pointed every former `match mode` site at the resolved pairing / its `Cli`:
+      `ConnectorFactory.build` now takes a `Cli` (the sanctioned connector-construction seam);
+      `OrchestratorBuilder` resolves `RolePairing.of(mode)` once and passes `pairing.driver`
+      to the factory + `pairing.driver` to `retryBudgets` (which matches `Cli`, not `Mode`);
+      `SpecRepl` resolves `RolePairing.of(manifest.mode).driver`. The smell test tightens to
+      "`match m: Mode` only in `Mode` itself + `RolePairing.of`."
+- [x] **Reconciled D1 — same-CLI** (operator-confirmed 2026-06-04, matches the shipping
+      `ConnectorFactory` + C15 config): each `Mode` resolves to one `Cli` that both drives
+      and reviews. `Role.pairFor` (the stale cross-CLI shape, only `ProfileCommand` used it)
+      is **removed** — `Role.scala` no longer imports `Mode`; `ProfileCommand.buildReviewerCall`
+      now builds the single connector named by `RolePairing.of(config.mode).reviewer` instead
+      of constructing both CLIs to pick the non-driver. The stale "cross-model review is a
+      core property" `RoleSuite` assertion retired with it.
+- [x] Tests: `RolePairingSuite` (+4, both modes → same-CLI pairing, resolver total over
+      `Mode`); `ConnectorFactorySuite` re-pointed to `Cli`; `RoleSuite` −3 (`pairFor` cases
+      dropped, openness test kept). Persistence round-trip unchanged
+      (`ModeSuite` / `ManifestSuite` / `FsmEventSuite` green). `forge-core` + `forge-agents` +
+      `forge-app` all green (forge-app 423/423); `sbt compile` clean; `scalafmtCheckAll` clean.
 
 ### Tier 3 — close-out
 
@@ -176,6 +184,20 @@ claim; Tier 2 delivers the "configurations not enum cases" half; Tier 3 closes i
 
 ## 4. Status log
 
+- **2026-06-04 — Task 3.5.2 landed (`Mode` becomes a configuration, resolved once).** Introduced
+  `RolePairing(driver, reviewer)` + `enum Cli` in `forge-core` with `RolePairing.of(mode)` as the
+  single `Mode → pairing` resolver, and re-pointed all former `match mode` sites
+  (`ConnectorFactory.build` → `Cli`; `OrchestratorBuilder` resolves once then reads `pairing.driver`
+  for both the connector and the retry block; `SpecRepl` → `pairing.driver`;
+  `ProfileCommand` → `pairing.reviewer`). **Reconciled D1 to same-CLI** (operator-confirmed; it is
+  what `ConnectorFactory` already ships and what C15 validated): `Role.pairFor`'s cross-CLI shape and
+  its only caller's double-build are removed, and `Role.scala` no longer references `Mode`. `Mode`'s
+  wire form is byte-unchanged (R1): `ModeSuite` / `ManifestSuite` / `FsmEventSuite` green. Added
+  `RolePairingSuite` (+4); `RoleSuite` drops the 3 `pairFor`/cross-model tests; `ConnectorFactorySuite`
+  re-pointed to `Cli`. `forge-core` + `forge-agents` + `forge-app` green (forge-app 423/423); `sbt
+  compile` + `scalafmtCheckAll` clean. The Task 3.5.2 box is ticked; the roadmap §4 3.5 bullet stays
+  **unticked** until Task 3.5.3 (contract revision + whole-section review). D1 is now **resolved**;
+  D2's reading (keep `enum Mode` as wire token) held — confirm at the Task 3.5.3 review.
 - **2026-06-04 — Slice opened + Task 3.5.1 landed (the thin runnable).** Opened this plan as the
   last Phase-3 sub-slice (3.0/3.1/3.2/3.3 closed; 3.4 ConventionLearner landed via design-3.0
   Task 3.2). Grounded the plan in a fresh current-state map (§1): the seam is small — one `Mode`
@@ -193,14 +215,16 @@ claim; Tier 2 delivers the "configurations not enum cases" half; Tier 3 closes i
 
 ## 5. Decisions / carry-forward
 
-### D1 — cross-CLI (`pairFor`) vs same-CLI (`ConnectorFactory`) reconciliation — open
-`Role.pairFor` models the *other* CLI as reviewer; the production `forge run` wiring uses
-the *same* CLI on a cheaper model. The role-trait abstraction needs one coherent story.
-Leaning: the **same-CLI** story is what actually ships and what C15 validated (claude
-driver + claude/`haiku` reviewer; codex driver + codex reviewer), so `pairFor`'s cross-CLI
-shape is the stale one — `forge profile`'s "reviewer-side connector" is, under the same-CLI
-story, just "the connector built for this mode, used for a reviewer one-shot." Resolve in
-Task 3.5.2; confirm against the C15 reviewer config before changing `pairFor`'s semantics.
+### D1 — cross-CLI (`pairFor`) vs same-CLI (`ConnectorFactory`) reconciliation — ✅ resolved 2026-06-04 (same-CLI)
+`Role.pairFor` modelled the *other* CLI as reviewer; the production `forge run` wiring uses
+the *same* CLI on a cheaper model. **Resolved to same-CLI** in Task 3.5.2 (operator-confirmed
+2026-06-04): it is what actually ships and what C15 validated (claude driver + claude/`haiku`
+reviewer; codex driver + codex reviewer), so `pairFor`'s cross-CLI shape was the stale one.
+`RolePairing.of` now resolves each `Mode` to a same-`Cli` driver/reviewer pair; `pairFor` is
+removed; `forge profile` builds the single connector named by `RolePairing.reviewer` (the
+mode's own connector, used for a reviewer one-shot). Observable change: `forge profile` under
+`ClaudeDriver` now profiles with Claude (was Codex). The §7.1 contract wording lands in the
+Task 3.5.3 `forge-design-1.10.md` revision.
 
 ### D2 — `Mode` stays the wire token, does not become pure trait config — proposed
 §4.2 says the modes "become configurations of those traits, **not enum cases**." Read

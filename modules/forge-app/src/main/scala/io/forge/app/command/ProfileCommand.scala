@@ -2,20 +2,21 @@ package io.forge.app.command
 
 import cats.effect.{ExitCode, IO}
 import cats.effect.std.Console
-import io.forge.agents.{RepoFile, RepoProfilerInput, Role}
+import io.forge.agents.{RepoFile, RepoProfilerInput}
 import io.forge.app.config.ForgeConfig
 import io.forge.app.orchestrator.ConnectorFactory
 import io.forge.app.reviewer.{RealReviewerCall, ReviewerCall, ReviewerLimits, ReviewerOutcome}
-import io.forge.core.Mode
+import io.forge.core.RolePairing
 import io.forge.core.paths.ForgePaths
 import io.forge.core.profile.{Determinism, FileProfileStore, ProfileStore, RepoProfile}
 
 import scala.concurrent.duration.*
 
 /** Task 3.0.3 — `forge profile`: the §7.11 `RepoProfiler` sensor as an out-of-band command. Reads the repo's own
-  * documents + build/CI config, asks the **reviewer-side** connector (the non-driver of `config.mode`'s pair, selected
-  * by [[Role.pairFor]]) to perceive them into a [[RepoProfile]], and writes the result to the committed
-  * `.forge/profile.json` (via [[FileProfileStore]]) for human review before first use (it lands in a normal diff).
+  * documents + build/CI config, asks the **reviewer-side** connector for `config.mode` (under the same-CLI story this
+  * is the mode's own connector, used for a reviewer one-shot — design-3.5 D1; the resolved [[RolePairing.reviewer]]
+  * `Cli`) to perceive them into a [[RepoProfile]], and writes the result to the committed `.forge/profile.json` (via
+  * [[FileProfileStore]]) for human review before first use (it lands in a normal diff).
   *
   * The body is split into an injectable [[run]] taking a [[ReviewerCall]] + [[ProfileStore]] so the perception →
   * persist → render pipeline is unit-testable without a real CLI; [[execute]] wires the real connector + store. A live
@@ -73,16 +74,14 @@ object ProfileCommand:
       }
     }
 
-  /** Build the reviewer-side connector for `config.mode` via the Role indirection (§7.11) and wrap it in the wall-clock
-    * boundary. Both connectors are constructed so [[Role.pairFor]] can pick the non-driver; only the reviewer is used.
+  /** Build the reviewer-side connector for `config.mode` and wrap it in the wall-clock boundary. Under the same-CLI
+    * story (design-3.5 D1) the reviewer is the mode's own connector, so we resolve the pairing once and build the
+    * single connector its [[RolePairing.reviewer]] names — no longer constructing both CLIs to pick the non-driver.
     */
   private def buildReviewerCall(paths: ForgePaths, config: ForgeConfig): IO[ReviewerCall] =
-    for
-      claude <- ConnectorFactory.build(Mode.ClaudeDriver, paths, config)
-      codex <- ConnectorFactory.build(Mode.CodexDriver, paths, config)
-    yield
-      val (_, reviewer) = Role.pairFor(config.mode, claude, codex)
-      new RealReviewerCall(reviewer.connector)
+    ConnectorFactory
+      .build(RolePairing.of(config.mode).reviewer, paths, config)
+      .map(connector => new RealReviewerCall(connector))
 
   /** Read the repo facts the §7.11 `RepoProfiler` perceives: the agent docs, top-level build files, and CI workflow
     * files. All reads are best-effort — a missing file is simply absent from the input.

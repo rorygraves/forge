@@ -2,7 +2,7 @@ package io.forge.agents
 
 import cats.effect.IO
 import fs2.Stream
-import io.forge.core.{Mode, QuestionMechanism, SchemaMechanism}
+import io.forge.core.{QuestionMechanism, SchemaMechanism}
 import io.forge.core.cost.Cost
 import io.forge.core.profile.RepoProfile
 
@@ -57,25 +57,7 @@ class RoleSuite extends munit.FunSuite:
 
   test("the role family is open to a third role without a Mode edit (design-3.5 openness)"):
     // The §7.11 sensors are the first concrete third role; constructing one needs no
-    // change to `Mode` or `pairFor`, proving the §4.2 "base Agent for future roles" claim.
+    // change to `Mode`, proving the §4.2 "base Agent for future roles" claim.
     val s: Agent = Role.Sensor(claude)
     assertEquals(s.role, "sensor")
     assertEquals(s.connector.name, "claude")
-
-  test("pairFor(ClaudeDriver) routes claude→driver, codex→reviewer"):
-    val (driver, reviewer) = Role.pairFor(Mode.ClaudeDriver, claude, codex)
-    assertEquals(driver.connector.name, "claude")
-    assertEquals(reviewer.connector.name, "codex")
-
-  test("pairFor(CodexDriver) routes codex→driver, claude→reviewer"):
-    val (driver, reviewer) = Role.pairFor(Mode.CodexDriver, claude, codex)
-    assertEquals(driver.connector.name, "codex")
-    assertEquals(reviewer.connector.name, "claude")
-
-  test("pairFor preserves cross-model review: driver and reviewer connectors differ"):
-    // §1 / §22 — cross-model review is a core property; the pair must never
-    // collapse to the same connector regardless of mode.
-    val (d1, r1) = Role.pairFor(Mode.ClaudeDriver, claude, codex)
-    val (d2, r2) = Role.pairFor(Mode.CodexDriver, claude, codex)
-    assertNotEquals(d1.connector.name, r1.connector.name)
-    assertNotEquals(d2.connector.name, r2.connector.name)

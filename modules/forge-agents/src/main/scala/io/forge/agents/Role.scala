@@ -1,14 +1,13 @@
 package io.forge.agents
 
-import io.forge.core.Mode
-
 /** §7.1 / §17 Slice 1 / roadmap §4.2 — the participant abstraction over `Connector`.
   *
   * `Agent` is the open base: a named participant in a feature run, backed by one `Connector`. The orchestrator and
   * connector callers speak to an `Agent` (via the concrete [[Role]] cases) rather than pattern-matching on `Mode`, so
   * adding a participant type does not sweep call sites. The smell test is in `AGENTS.md`: pattern-matching on `Mode`
-  * outside `Mode` itself and the connector-construction seam ([[Role.pairFor]]) is a code smell — call
-  * `agent.connector.<method>` instead.
+  * outside `Mode` itself and the connector-construction seam (`ConnectorFactory`) is a code smell — resolve a `Mode` to
+  * a `RolePairing` once (`io.forge.core.RolePairing.of`, design-3.5 Task 3.5.2) and call `agent.connector.<method>`
+  * instead.
   *
   * v1 shipped two concrete cases (`Driver`, `Reviewer`); Slice 3.5 (roadmap §4.2) generalises them under this `Agent`
   * base so the Phase-3 sensors — and Phase-4/5 roles (PR-watcher, knowledge-base consultant) — are expressible as
@@ -42,11 +41,3 @@ object Role:
     */
   final case class Sensor(connector: Connector) extends Role:
     val role: String = "sensor"
-
-  /** Build the (driver, reviewer) pair for a feature's `Mode`. This is the one sanctioned `match m: Mode` site outside
-    * `Mode` itself — every other caller routes through the returned `Role` values.
-    */
-  def pairFor(mode: Mode, claude: Connector, codex: Connector): (Driver, Reviewer) =
-    mode match
-      case Mode.ClaudeDriver => (Driver(claude), Reviewer(codex))
-      case Mode.CodexDriver => (Driver(codex), Reviewer(claude))

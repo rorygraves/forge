@@ -6,7 +6,7 @@ import fs2.{Pull, Stream}
 import io.forge.agents.{AgentEvent, Connector, StreamingSession}
 import io.forge.app.config.ForgeConfig
 import io.forge.app.orchestrator.ConnectorFactory
-import io.forge.core.{FeatureId, PrNumber, Question}
+import io.forge.core.{FeatureId, PrNumber, Question, RolePairing}
 import io.forge.core.fsm.{Feature, Fsm, FsmConfig, FsmEvent, FsmState, ResumeHint, UserCommand}
 import io.forge.core.log.{ActionLog, FileActionLog}
 import io.forge.core.manifest.FileManifestStore
@@ -65,7 +65,7 @@ object SpecRepl:
             case Left(err) => fail(featureId, rebuildMessage(err))
             case Right(rebuilt) =>
               def launch(mode: SpecMode): IO[ExitCode] =
-                ConnectorFactory.build(manifest.mode, paths, config).flatMap { connector =>
+                ConnectorFactory.build(RolePairing.of(manifest.mode).driver, paths, config).flatMap { connector =>
                   startSession(
                     paths,
                     config,

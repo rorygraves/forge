@@ -3,15 +3,16 @@ package io.forge.app.orchestrator
 import cats.effect.IO
 import io.forge.agents.{ClaudeConnector, CodexConnector, CodexSessionSettings, Connector, PriceTable, ReviewerAssets}
 import io.forge.app.config.ForgeConfig
-import io.forge.core.Mode
+import io.forge.core.Cli
 import io.forge.core.paths.ForgePaths
 
 import scala.concurrent.duration.*
 
-/** Task 1.4.10 **J3** — constructs the single `Connector` an orchestrator run drives. One connector per `Mode` is built
+/** Task 1.4.10 **J3** — constructs the single `Connector` an orchestrator run drives. One connector per `Cli` is built
   * once at run start and shared across every driver call (`runStreamingSpec` / `resumeStreamingSpec` /
   * `runHeadlessImplementation` / `runFixup`) and every reviewer one-shot (`reviewDesign` / `reviewPr` / `refine`) — the
-  * §7.1 "driver + reviewer over a single CLI" surface.
+  * §7.1 "driver + reviewer over a single CLI" surface. The caller resolves a feature's `Mode` to a `RolePairing` once
+  * (design-3.5 Task 3.5.2) and passes the relevant `Cli`; this factory is the sanctioned per-`Cli` construction seam.
   *
   * **Reviewer assets** are resolved from the user's installed `~/.forge/{schemas,prompts}/` (Task 1.4.1
   * `AssetInstaller` populates them on first run). The schema files are shared across reviewers (`design-review.json`,
@@ -35,10 +36,10 @@ object ConnectorFactory:
   /** v1 Codex driver + reviewer model (C15). S4-5 makes this a `ForgeConfig` knob. */
   private val CodexModel: String = "gpt-5.3-codex"
 
-  /** Build the connector for `mode`. Constructed once per run; the resulting `Connector` is shared (J3). */
-  def build(mode: Mode, paths: ForgePaths, config: ForgeConfig): IO[Connector] =
-    mode match
-      case Mode.ClaudeDriver =>
+  /** Build the connector for `cli`. Constructed once per run; the resulting `Connector` is shared (J3). */
+  def build(cli: Cli, paths: ForgePaths, config: ForgeConfig): IO[Connector] =
+    cli match
+      case Cli.Claude =>
         IO.pure(
           new ClaudeConnector(
             cwd = Some(paths.repoRoot),
@@ -50,7 +51,7 @@ object ConnectorFactory:
             driverDisallowedTools = config.claude.disallowedTools
           )
         )
-      case Mode.CodexDriver =>
+      case Cli.Codex =>
         loadPriceTable(paths).map { priceTable =>
           new CodexConnector(
             model = CodexModel,

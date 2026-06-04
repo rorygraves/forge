@@ -4,7 +4,7 @@ import cats.effect.{Clock, IO}
 import io.forge.app.config.ForgeConfig
 import io.forge.app.monitor.RealSessionMonitor
 import io.forge.app.reviewer.{RealReviewerCall, RetryingReviewerCall}
-import io.forge.core.Mode
+import io.forge.core.{Cli, Mode, RolePairing}
 import io.forge.core.log.{ActionLog, FileActionLog}
 import io.forge.core.manifest.FileManifestStore
 import io.forge.core.paths.ForgePaths
@@ -46,8 +46,9 @@ object OrchestratorBuilder:
     * instance for pre-loop bookkeeping (e.g. a `forge new` scaffold entry) without constructing a second handle.
     */
   def build(mode: Mode, paths: ForgePaths, config: ForgeConfig): IO[(Orchestrator, ActionLog)] =
+    val pairing = RolePairing.of(mode)
     for
-      connector <- ConnectorFactory.build(mode, paths, config)
+      connector <- ConnectorFactory.build(pairing.driver, paths, config)
       protectionCache <- InMemoryBranchProtectionCache(ttl = config.github.branchProtectionTtlSec.seconds)
       log <- FileActionLog(paths)
     yield
@@ -61,7 +62,7 @@ object OrchestratorBuilder:
       val manifestStore = new FileManifestStore(paths)
       val stateCache = new FileStateCache(paths)
       val profileStore = new io.forge.core.profile.FileProfileStore(paths)
-      val (reviewRetries, refineRetries) = retryBudgets(mode, config)
+      val (reviewRetries, refineRetries) = retryBudgets(pairing, config)
       val reviewer = new RetryingReviewerCall(new RealReviewerCall(connector), reviewRetries, refineRetries)
       val monitor = new RealSessionMonitor
       val sideEffects =
@@ -93,9 +94,10 @@ object OrchestratorBuilder:
       transientBackoff = config.github.rateLimitBackoffMs.millis
     )
 
-  /** §7.6 retry budgets, selected by `mode` — the Claude block governs a Claude-driver run, the Codex block a
-    * Codex-driver run (the reviewer shares the driver's CLI per §7.1, so one block covers both).
+  /** §7.6 retry budgets, selected by the resolved pairing's driver `Cli` — the Claude block governs a Claude-driver
+    * run, the Codex block a Codex-driver run (the reviewer shares the driver's CLI per §7.1 / design-3.5 D1, so one
+    * block covers both). Reads the pairing rather than re-matching `Mode` (Task 3.5.2).
     */
-  private def retryBudgets(mode: Mode, config: ForgeConfig): (Int, Int) = mode match
-    case Mode.ClaudeDriver => (config.claude.reviewProcessRetries, config.claude.refineProcessRetries)
-    case Mode.CodexDriver => (config.codex.reviewProcessRetries, config.codex.refineProcessRetries)
+  private def retryBudgets(pairing: RolePairing, config: ForgeConfig): (Int, Int) = pairing.driver match
+    case Cli.Claude => (config.claude.reviewProcessRetries, config.claude.refineProcessRetries)
+    case Cli.Codex => (config.codex.reviewProcessRetries, config.codex.refineProcessRetries)
