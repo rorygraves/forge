@@ -72,17 +72,19 @@ class Fsm_11_5_CiReviewPollingSuite extends munit.FunSuite:
     assertEquals(out.state, FsmState.PieceAwaitingMerge(P1, P1Pr))
 
   // §11.5 (1.9 / design-3.3) — workflow parameterization: ReviewSkipped advances to the merge gate (same target as
-  // Approve), retaining currentPieceSessionId and never touching attempts (review never ran).
+  // Approve), retaining currentPieceSessionId and never touching attempts (review never ran). The piece is seeded with
+  // attempts=2 (a piece can re-enter PieceAwaitingReview after a prior request-changes → fix-up round) so the assertion
+  // proves the count is *preserved*, not merely never incremented (a reset-to-0 bug would pass attempts==0).
   test("PieceAwaitingReview + ReviewSkipped → PieceAwaitingMerge (reviewRequired=false)"):
     val f = featureIn(
       FsmState.PieceAwaitingReview(P1, P1Pr),
-      pieces = Vector(pieceInProgress(P1, 1, prNumber = Some(P1Pr)), piecePending(P2, 2)),
+      pieces = Vector(pieceInProgress(P1, 1, prNumber = Some(P1Pr), attempts = 2), piecePending(P2, 2)),
       currentPieceSessionId = Some("impl-1")
     )
     val (out, _) = Fsm.transition(f, FsmEvent.ReviewSkipped(P1, P1Pr))
     assertEquals(out.state, FsmState.PieceAwaitingMerge(P1, P1Pr))
     assertEquals(out.currentPieceSessionId, Some("impl-1"))
-    assertEquals(out.manifest.pieces.find(_.id == P1).get.attempts, 0)
+    assertEquals(out.manifest.pieces.find(_.id == P1).get.attempts, 2)
 
   // PR-number guard: a ReviewSkipped for a stale PR number is a no-op (mirrors the snapshot arms).
   test("PieceAwaitingReview + ReviewSkipped(stale prNumber) → no-op"):
