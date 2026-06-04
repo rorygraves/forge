@@ -20,9 +20,11 @@
 > carry-forward list. Tick items as they land — but not during a review round; tick
 > the roadmap §4 bullet only at the Phase-3 slice close after a whole-section review.
 >
-> **Status:** 🟡 open — 2026-06-04. Last remaining Phase-3 sub-slice (3.0/3.1/3.2/3.3
-> closed; 3.4 ConventionLearner landed via design-3.0 Task 3.2). Tier-1 thin runnable
-> (Task 3.5.1) is the de-risking first slice.
+> **Status:** ✅ closed — 2026-06-04. All three tasks landed: 3.5.1 (`Agent` base + open role
+> hierarchy), 3.5.2 (`Mode`→`RolePairing` resolved once; D1 reconciled to same-CLI), 3.5.3
+> (contract → [`forge-design-1.10.md`](forge-design-1.10.md) §7; C1 carried to Phase 4/5; roadmap
+> §4 3.5 bullet flipped). This was the last remaining Phase-3 sub-slice (3.0/3.1/3.2/3.3 closed;
+> 3.4 ConventionLearner landed via design-3.0 Task 3.2).
 
 ---
 
@@ -162,15 +164,22 @@ behaviour-free, so the contract is concrete before any call site moves.
 
 ### Tier 3 — close-out
 
-### Task 3.5.3 — contract revision + roadmap tick  [ ]
+### Task 3.5.3 — contract revision + roadmap tick  ✅ 2026-06-04
 
-- [ ] Open `forge-design-1.10.md` (standalone-by-freeze over 1.9) restating only the §7.1
-      framing ("driver + reviewer + sensor *roles* over connector configurations") and any
-      §7.11 wording the reconciliation touches. Do **not** edit 1.9 in place.
-- [ ] Walk the carry-forward list; place C1 (Connector-trait split) durably (roadmap §4 or
-      a Phase-4 bucket — the role-capability split is most valuable when the daemon adds the
-      4th/5th role).
-- [ ] Whole-section review, then flip the roadmap §4 sub-slice 3.5 bullet to closed.
+- [x] Opened [`forge-design-1.10.md`](forge-design-1.10.md) (standalone-by-freeze over 1.9,
+      continuing the 1.7/1.8/1.9 exception) restating **§7** only — the intro framing ("`Mode`
+      is a *configuration* of `Driver` / `Reviewer` / `Sensor` roles, resolved once via
+      `RolePairing.of`, not enum-case dispatch"; cross-model review reconciled to **same-CLI**),
+      the §7.1 orchestrator wiring (resolve once → build one connector per `Cli`), and the §7.11
+      sensor routing (reviewer-side connector named by `RolePairing.reviewer`, no `Role.pairFor`).
+      Trait *signatures* (1.6 §7.1), §7.2–§7.10, and the wire form are explicitly frozen. 1.9 left
+      intact (the focused-revision chain is not stubbed; only pre-1.6 full docs were).
+- [x] Placed C1 (Connector-trait split) durably in [`roadmap.md`](roadmap.md) §4.2 as an explicit
+      Phase-4/5 carry-forward (worthwhile when the daemon / reactive review add the 4th/5th role).
+- [x] Whole-section coherence pass: fixed the two stale cross-CLI `Mode` enum docstrings ("Codex
+      reviews" / "Claude reviews" → same-CLI, both drive + review). Verified no other stale
+      cross-CLI prose in main src (`RolePairing` / `ProfileCommand` references correctly *describe*
+      the retired shape). Flipped the roadmap §4 sub-slice 3.5 bullet to ✅ closed.
 
 ---
 
@@ -184,6 +193,17 @@ claim; Tier 2 delivers the "configurations not enum cases" half; Tier 3 closes i
 
 ## 4. Status log
 
+- **2026-06-04 — Task 3.5.3 landed; Slice 3.5 ✅ closed.** Opened
+  [`forge-design-1.10.md`](forge-design-1.10.md) (standalone-by-freeze over 1.9) restating §7 only:
+  the intro framing (modes are *configurations* of `Driver`/`Reviewer`/`Sensor` roles resolved once
+  via `RolePairing.of`, **same-CLI** review per D1), the §7.1 orchestrator wiring (resolve once →
+  `ConnectorFactory.build` one connector per `Cli`), and the §7.11 sensor routing (reviewer-side
+  connector named by `RolePairing.reviewer`, `Role.pairFor` gone). Trait signatures + wire form
+  frozen. Placed **C1** (Connector-trait split) into roadmap §4.2 as a Phase-4/5 carry-forward.
+  Coherence pass fixed the two stale cross-CLI `Mode` docstrings (→ same-CLI) and confirmed no other
+  stale cross-CLI prose in main src. Flipped the roadmap §4 sub-slice 3.5 bullet to ✅ closed. **D1
+  resolved (same-CLI); D2's reading held** (enum `Mode` kept purely as the serialised wire token —
+  no migration, the wire form is byte-identical, `ProfileReplayInvarianceSuite` R1/R2 green).
 - **2026-06-04 — Task 3.5.2 landed (`Mode` becomes a configuration, resolved once).** Introduced
   `RolePairing(driver, reviewer)` + `enum Cli` in `forge-core` with `RolePairing.of(mode)` as the
   single `Mode → pairing` resolver, and re-pointed all former `match mode` sites
@@ -223,18 +243,19 @@ reviewer; codex driver + codex reviewer), so `pairFor`'s cross-CLI shape was the
 `RolePairing.of` now resolves each `Mode` to a same-`Cli` driver/reviewer pair; `pairFor` is
 removed; `forge profile` builds the single connector named by `RolePairing.reviewer` (the
 mode's own connector, used for a reviewer one-shot). Observable change: `forge profile` under
-`ClaudeDriver` now profiles with Claude (was Codex). The §7.1 contract wording lands in the
-Task 3.5.3 `forge-design-1.10.md` revision.
+`ClaudeDriver` now profiles with Claude (was Codex). The §7.1/§7.11 contract wording landed in
+[`forge-design-1.10.md`](forge-design-1.10.md) §7 (Task 3.5.3).
 
-### D2 — `Mode` stays the wire token, does not become pure trait config — proposed
+### D2 — `Mode` stays the wire token, does not become pure trait config — ✅ confirmed 2026-06-04 (Task 3.5.3 review)
 §4.2 says the modes "become configurations of those traits, **not enum cases**." Read
 literally that kills the enum; but `Mode` is the persisted wire form
 (`"claude-driver"` in every `manifest.json` on disk) and the natural config token. This
 plan keeps `enum Mode` purely as the **serialised selector** and moves the *behaviour*
 (connector recipe, retry block, role pairing) into a resolved `RolePairing` configuration
 — satisfying "configurations, not enum-case dispatch" at the abstraction level while
-preserving the wire form (criterion 3). Flag for the review round: confirm this reading
-vs a full enum removal + migration.
+preserving the wire form (criterion 3). **Confirmed at the Task 3.5.3 review**: the byte-identical
+wire form (criterion 3) and an intact `ProfileReplayInvarianceSuite` R1/R2 make a full enum
+removal + migration all cost and no benefit; the enum-as-wire-token reading stands.
 
 ### C1 — `Connector` god-trait split is out of scope — carry-forward
 Splitting `Connector` into `DriverConnector` / `ReviewerConnector` / `SensorConnector`
@@ -257,7 +278,7 @@ untouched. A cold `RebuildState` over an existing feature reads identically.
   Phase-1 `Role` indirection stub this builds on).
 - [`design-rationale.md`](design-rationale.md) **A5** — the sensors are the first
   concrete third+ roles, making this demand-driven.
-- [`forge-design-1.9.md`](forge-design-1.9.md) §7.1 / §7.11 — the contract surface a
-  Task 3.5.3 `forge-design-1.10.md` revision restates.
+- [`forge-design-1.10.md`](forge-design-1.10.md) §7 — the live contract restatement (role-trait
+  framing + same-CLI reconciliation), standalone-by-freeze over 1.9 §7.1 / §7.11.
 - [`design-3.3.md`](design-3.3.md) — the immediately-prior closed Phase-3 sub-slice
   (the "orchestrator decides / FSM stays pure" discipline this preserves).

@@ -6,10 +6,12 @@ import upickle.default.{readwriter, ReadWriter}
   * non-goals).
   */
 enum Mode:
-  /** Claude drives spec/implementation/fix-up; Codex reviews. */
+  /** Claude both drives (spec/implementation/fix-up) and reviews (design/code/refinery on a cheaper model). Same-CLI
+    * per design-3.5 D1; resolved via [[RolePairing.of]].
+    */
   case ClaudeDriver
 
-  /** Codex drives spec/implementation/fix-up; Claude reviews. */
+  /** Codex both drives (spec/implementation/fix-up) and reviews (single `-m`). Same-CLI per design-3.5 D1. */
   case CodexDriver
 
 object Mode:

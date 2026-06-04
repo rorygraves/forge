@@ -42,7 +42,7 @@
 | 4 — v2.0 | Workspace (multi-repo) + workstreams + daemon + multi-workstream cockpit TUI | needs `forge-design-2.0.md` first |
 | 5 — v3.0+ | Agentic-dev cockpit (knowledge base, reactive review, custom triggers) | concept |
 
-**Live docs:** this roadmap · spec [`forge-design-1.6.md`](forge-design-1.6.md) · [`design-rationale.md`](design-rationale.md) · index [`README.md`](README.md). The per-slice `design-*.md` files (`design-1.4.md` … `design-3.5.md`) are *closed* audit trails kept for historical reference — the index sorts live-vs-historical.
+**Live docs:** this roadmap · spec [`forge-design-1.10.md`](forge-design-1.10.md) · [`design-rationale.md`](design-rationale.md) · index [`README.md`](README.md). The per-slice `design-*.md` files (`design-1.4.md` … `design-3.5.md`) are *closed* audit trails kept for historical reference — the index sorts live-vs-historical.
 
 ---
 
@@ -811,6 +811,15 @@ honest hard edge").
 - **3.4 — `ConventionLearner`** → proposed CLAUDE.md PRs (human-approved).
 - **3.5 — Role-trait refactor** (§4.2 below) — the sensors are the first
   concrete third+ roles, so the refactor lands *inside* the phase that needs it.
+  ✅ **closed 2026-06-04** — a base `Agent` trait + `Driver` / `Reviewer` /
+  `Sensor` roles replace `Mode`-dispatch; `Mode` resolves **once** to a
+  `RolePairing` configuration (`RolePairing.of`), and cross-model review is
+  reconciled to **same-CLI** (D1 — one CLI drives + reviews on a cheaper model,
+  as C15 validated). The §6.1 replay invariant held throughout
+  (`ProfileReplayInvarianceSuite` R1/R2; the `fsm` package names no role type,
+  the wire form is byte-identical). Contract:
+  [`forge-design-1.10.md`](forge-design-1.10.md) §7; plan + carry-forward (C1 —
+  Connector-trait split → Phase 4/5): [`design-3.5-role-trait.md`](design-3.5-role-trait.md).
 
 **Exit criterion:** Forge drives a feature end-to-end on a **new, unseen repo
 with a different stack** (e.g. a Node or Python repo), having auto-profiled it,
@@ -858,6 +867,20 @@ to `Role`, not `Mode`.
   all depend on this. Doing it in Phase 3 (when there are still only two
   concrete pairings) is much cheaper than doing it during the Phase 4
   pivot.
+- **✅ Landed as sub-slice 3.5 (closed 2026-06-04).** The `Agent` base
+  trait + `Driver` / `Reviewer` / `Sensor` roles shipped; `Mode` is now a
+  wire token resolved **once** to a `RolePairing` configuration
+  (`RolePairing.of`), with cross-model review reconciled to **same-CLI**
+  (decision D1 — the same CLI drives and reviews on a cheaper model, as
+  C15 validated). Contract: [`forge-design-1.10.md`](forge-design-1.10.md)
+  §7; audit trail [`design-3.5-role-trait.md`](design-3.5-role-trait.md).
+- **Carry-forward to Phase 4/5 (C1):** splitting the `Connector` god-trait
+  into per-role capability traits (`DriverConnector` / `ReviewerConnector`
+  / `SensorConnector`) was deliberately *excluded* from sub-slice 3.5 (it
+  sweeps every caller, which this refactor scoped out). It becomes
+  worthwhile when the daemon (Phase 4) / reactive review (Phase 5) add the
+  4th/5th concrete role and a per-role capability surface stops being
+  speculative — pick it up there. See design-3.5-role-trait §5 C1.
 
 ### 4.3 Hardening
 
