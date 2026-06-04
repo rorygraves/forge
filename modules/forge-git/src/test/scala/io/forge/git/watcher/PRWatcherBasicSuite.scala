@@ -19,7 +19,8 @@ import scala.concurrent.duration.DurationInt
 class PRWatcherBasicSuite extends CatsEffectSuite:
 
   private val pr = PrNumber(42)
-  private val cfg = PRWatcherConfig(pollInterval = 1.millisecond, rateLimitBackoff = 1.millisecond)
+  private val cfg =
+    PRWatcherConfig(pollInterval = 1.millisecond, rateLimitBackoff = 1.millisecond, transientBackoff = 1.millisecond)
 
   private def loadFixture(name: String): ujson.Value =
     val url = getClass.getResource(s"/gh-pr-view/$name")
@@ -65,7 +66,7 @@ class PRWatcherBasicSuite extends CatsEffectSuite:
       // assertion is just that we got through all three polls without short-circuiting.
       assertEquals(finalBaseline, PollBaseline.empty)
 
-  test("watch — exhausted fake → Failed events surface and stream continues"):
+  test("watch — exhausted fake → TransientError events surface and stream continues"):
     val gh = FakeGhClient.builder.prViewSequence(Vector(Right(loadFixture("open-no-checks.json")))).build
     val watcher = new RealPRWatcher(gh, cfg)
     for
@@ -73,11 +74,13 @@ class PRWatcherBasicSuite extends CatsEffectSuite:
       events <- watcher.watch(pr, baseline).take(3).compile.toVector
     yield
       assertEquals(events.size, 3)
-      // First poll: Snapshot. Second + third: exhausted-sequence Transient → Failed.
+      // First poll: Snapshot. Second + third: the exhausted-sequence `GhError.Transient` surfaces as the soft
+      // `TransientError` (a retry-worthy blip — finding #5); the stream keeps polling rather than failing. With the
+      // default cliff of 3 consecutive transients, neither the 2nd nor the 3rd has yet been promoted to `Failed`.
       assert(events.head.isInstanceOf[PollResult.Snapshot], s"first should be Snapshot, got ${events.head}")
       events.tail.foreach {
-        case PollResult.Failed(_) => ()
-        case other => fail(s"post-exhaust events should be Failed, got $other")
+        case PollResult.TransientError(_) => ()
+        case other => fail(s"post-exhaust events should be TransientError, got $other")
       }
 
   test("watch — first Snapshot is emitted before the inter-poll sleep elapses"):

@@ -39,6 +39,11 @@ final class RealPRWatcher(
   override def pollOnce(pr: PrNumber, baseline: PollBaseline): IO[PollResult] =
     gh.prView(pr, config.requestedFields).map {
       case Left(err: GhError.RateLimited) => PollResult.RateLimited(err.retryAfter)
+      // A `gh` server / network blip (non-zero exit with no rate-limit / auth / 404 framing — e.g. an HTTP 503) is
+      // retry-worthy: surface it as the soft `TransientError` so the loop backs off and keeps polling rather than
+      // hard-failing. The fatal flavours (NotFound / Unauthorized / ParseFailure) stay `Failed` — polling can't fix
+      // them. Dogfood finding #5.
+      case Left(err: GhError.Transient) => PollResult.TransientError(err)
       case Left(err) => PollResult.Failed(err)
       case Right(json) =>
         PrSnapshotDecoder.decode(json, baseline, config.botLogin) match
@@ -49,40 +54,56 @@ final class RealPRWatcher(
 
   override def watch(pr: PrNumber, baseline: Ref[IO, PollBaseline]): Stream[IO, PollResult] =
     Stream.eval(Ref.of[IO, Int](0)).flatMap { consecutiveRateLimits =>
-      // `repeatEval` evaluates `stepOnce` per element; `flatMap` interleaves emit-then-sleep so each result reaches
-      // the consumer before the next inter-poll back-off runs. `Stream.exec` runs the sleep without producing an
-      // element, so the consumer's `.take(n)` still sees exactly n results.
-      Stream.repeatEval(stepOnce(pr, baseline, consecutiveRateLimits)).flatMap { result =>
-        Stream.emit(result) ++ Stream.exec(IO.sleep(sleepFor(result)))
+      Stream.eval(Ref.of[IO, Int](0)).flatMap { consecutiveTransients =>
+        // `repeatEval` evaluates `stepOnce` per element; `flatMap` interleaves emit-then-sleep so each result reaches
+        // the consumer before the next inter-poll back-off runs. `Stream.exec` runs the sleep without producing an
+        // element, so the consumer's `.take(n)` still sees exactly n results.
+        Stream.repeatEval(stepOnce(pr, baseline, consecutiveRateLimits, consecutiveTransients)).flatMap { result =>
+          Stream.emit(result) ++ Stream.exec(IO.sleep(sleepFor(result)))
+        }
       }
     }
 
-  /** One poll + baseline / counter bookkeeping. The returned [[PollResult]] is what downstream observers see. */
+  /** One poll + baseline / counter bookkeeping. The returned [[PollResult]] is what downstream observers see.
+    *
+    * Two independent soft-cliff counters track *consecutive* runs of the same back-off signal: rate-limits and
+    * transient server errors. Each is reset by any result that isn't its own kind (so an interleaving of the two — or a
+    * single Snapshot — clears both back towards zero), and each promotes its signal to [[PollResult.Failed]] once its
+    * configured threshold is reached, so a sustained outage eventually escalates instead of polling forever.
+    */
   private def stepOnce(
       pr: PrNumber,
       baseline: Ref[IO, PollBaseline],
-      consecutiveRateLimits: Ref[IO, Int]
+      consecutiveRateLimits: Ref[IO, Int],
+      consecutiveTransients: Ref[IO, Int]
   ): IO[PollResult] =
     for
       current <- baseline.get
       raw <- pollOnce(pr, current)
       out <- raw match
         case PollResult.Snapshot(decoded) =>
-          baseline.set(decoded.nextBaseline) *> consecutiveRateLimits.set(0).as(raw)
+          baseline.set(decoded.nextBaseline) *> consecutiveRateLimits.set(0) *> consecutiveTransients.set(0).as(raw)
         case PollResult.RateLimited(retryAfter) =>
-          consecutiveRateLimits.updateAndGet(_ + 1).map { count =>
+          consecutiveTransients.set(0) *> consecutiveRateLimits.updateAndGet(_ + 1).map { count =>
             if count >= config.consecutiveRateLimitsBeforeFailing then
               PollResult.Failed(GhError.RateLimited(retryAfter, s"$count consecutive rate-limited polls"))
             else raw
           }
+        case PollResult.TransientError(err) =>
+          consecutiveRateLimits.set(0) *> consecutiveTransients.updateAndGet(_ + 1).map { count =>
+            if count >= config.consecutiveTransientFailuresBeforeFailing then PollResult.Failed(err)
+            else raw
+          }
         case _: PollResult.Failed =>
-          consecutiveRateLimits.set(0).as(raw)
+          consecutiveRateLimits.set(0) *> consecutiveTransients.set(0).as(raw)
     yield out
 
   /** Choose the inter-poll sleep based on the most recent result:
     *
     *   - [[PollResult.RateLimited]] with `retryAfter = Some(d)` → sleep `d`.
     *   - [[PollResult.RateLimited]] without `retryAfter` → sleep [[PRWatcherConfig.rateLimitBackoff]].
+    *   - [[PollResult.TransientError]] → sleep [[PRWatcherConfig.transientBackoff]] (give GitHub a breather before
+    *     re-polling a server / network blip).
     *   - [[PollResult.Failed]] from a promoted rate-limit threshold breach → also use the rate-limit back-off (so the
     *     orchestrator gets a breather before deciding what to do).
     *   - everything else → [[PRWatcherConfig.pollInterval]].
@@ -91,6 +112,7 @@ final class RealPRWatcher(
     result match
       case PollResult.RateLimited(Some(d)) => d
       case PollResult.RateLimited(None) => config.rateLimitBackoff
+      case PollResult.TransientError(_) => config.transientBackoff
       case PollResult.Failed(_: GhError.RateLimited) => config.rateLimitBackoff
       case _ => config.pollInterval
 

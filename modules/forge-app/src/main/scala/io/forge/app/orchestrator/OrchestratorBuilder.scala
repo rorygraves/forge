@@ -82,12 +82,15 @@ object OrchestratorBuilder:
       (orchestrator, log)
 
   /** §18 → [[PRWatcherConfig]]. `pollIntervalMs` drives the inter-poll cadence; the rate-limit back-off reuses the
-    * `github.rateLimitBackoffMs` knob so the watcher and the gh client agree on how long to pause after a 429.
+    * `github.rateLimitBackoffMs` knob so the watcher and the gh client agree on how long to pause after a 429. A
+    * transient `gh` server / network blip (e.g. an HTTP 503) reuses the same back-off — both are "GitHub is momentarily
+    * unavailable, pause and retry" intervals (dogfood finding #5).
     */
   private def watcherConfig(config: ForgeConfig): PRWatcherConfig =
     PRWatcherConfig(
       pollInterval = config.pollIntervalMs.millis,
-      rateLimitBackoff = config.github.rateLimitBackoffMs.millis
+      rateLimitBackoff = config.github.rateLimitBackoffMs.millis,
+      transientBackoff = config.github.rateLimitBackoffMs.millis
     )
 
   /** §7.6 retry budgets, selected by `mode` — the Claude block governs a Claude-driver run, the Codex block a

@@ -278,6 +278,19 @@ Tier-1 closes the slice's exit criterion; Tier 2/3 can land incrementally behind
 
 ## 3. Status log
 
+- **2026-06-04 — T6 finding #5 resolved: transient §9 poll errors back off instead of hard-NHI'ing.** A transient
+  GitHub 503 on the `PRWatcher` PR-state poll (which recurred live in dogfood #2 and #3, hard-routing
+  `PieceAwaitingReview → NeedsHumanIntervention` after CI was already green) is now a soft, retry-worthy signal.
+  `RealPRWatcher.pollOnce` maps `GhError.Transient` → the new `PollResult.TransientError`; the watcher backs off
+  (`transientBackoff`) and keeps polling, promoting to `Failed` only after `consecutiveTransientFailuresBeforeFailing`
+  consecutive transients (default 3 — the S3-4 rate-limit-cliff twin, with independent counters). Both orchestrator
+  poll consumers (`pollResultToEvent`, `ciPollToEvent`) absorb the new signal (`None`, keep polling); fatal `gh`
+  errors (`NotFound`/`Unauthorized`/`ParseFailure`) still escalate to NHI unchanged. New tests: `PRWatcherTransientSuite`
+  (4), `OrchestratorTransientPollSuite` (2: absorb→`FeatureDone`, fatal→NHI), `GhErrorClassifierSuite` (+1: 503→Transient);
+  `PRWatcherBasicSuite` / `PRWatcherRateLimitSuite` updated for the new contract. `forge-git` + `forge-app` green,
+  `scalafmtCheckAll` clean. Contract: design-rationale **S3-4b**. The other T6 half (live §8.2 trigger) and the
+  pre-commit `HEAD` assertion remain open; the roadmap §4 bullet stays **unticked**.
+
 - **2026-06-03 — Task 3.1.2 live re-run performed (dogfood #3, `music-poll-config`); §8.2 trigger NOT exercised
   (carried forward as T6).** Drove a real format-gated feature end-to-end on `llm4s/szork` in Mode A
   (`adapt.localGate=false`) with a hand-authored `.forge/profile.json`. **Validated live:** `profile.snapshot`
@@ -523,11 +536,22 @@ incl. end-to-end against the real dogfood-#2 failing-check log, so this is a *li
 not a correctness gap. To close: either (a) drive a feature engineered to force a guaranteed reflow
 (e.g. a piece spec mandating a long scaladoc block), or (b) formally accept the unit proof + the
 spine-validation as sufficient. Until then, "Phase 3 has teeth" rests on the unit proof against the
-real log, not on a live capture. Two **runnable findings** from dogfood #3 also belong to the next
-Forge maintenance pass: **finding #5 recurrence** (transient GitHub 503 on the §9 `PRWatcher` poll →
-hard NHI; the §8.2 `RateLimit→BackOff` arm covers only CI-gate failures, not the PR-state poll), and a
-**pre-commit `HEAD` assertion** (Forge could refuse to `git commit` a piece when `HEAD` is not the
-expected piece branch, hardening against a concurrent-git race in the driving worktree).
+real log, not on a live capture. Two **runnable findings** from dogfood #3 also belonged to the next
+Forge maintenance pass:
+
+- **finding #5 recurrence — ✅ resolved 2026-06-04.** The transient GitHub 503 on the §9 `PRWatcher`
+  poll no longer hard-NHIs. `pollOnce` now maps a `GhError.Transient` (the 503/5xx/network-blip bucket)
+  to the new soft **`PollResult.TransientError`**, which the orchestrator absorbs (keep polling) exactly
+  like a `RateLimited` — promoted to `Failed` → NHI only after `consecutiveTransientFailuresBeforeFailing`
+  (default 3, the S3-4 rate-limit twin). The §8.2 `RateLimit→BackOff` arm was the wrong lever (it
+  classifies CI *check-failure logs*, not a `gh` subprocess HTTP error on the poll); the fix lives at the
+  watcher/poll-consumer seam where the rate-limit soft-cliff already lives. Contract + rejected
+  alternatives: design-rationale **S3-4b**. Tests: `PRWatcherTransientSuite`,
+  `OrchestratorTransientPollSuite`, `GhErrorClassifierSuite` (503→Transient).
+- **pre-commit `HEAD` assertion — still open.** Forge could refuse to `git commit` a piece when `HEAD`
+  is not the expected piece branch, hardening against a concurrent-git race in the driving worktree
+  (the dogfood-#3 operator git excursion). Primarily an operator-discipline lesson; carried for the next
+  maintenance pass.
 
 ### D1 — the local Format gate runs format-before-commit, not commit-then-`git commit --amend` — open (1.7 §8.3/§11.4)
 

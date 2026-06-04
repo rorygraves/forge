@@ -66,7 +66,7 @@ Drafting → DesignReviewing(1, approve) → DesignAwaitingMerge → [merge PR #
 
 | # | Finding | Class | Status |
 |---|---------|-------|--------|
-| 1 | **Finding #5 (dogfood #2) recurred live.** A transient `GitHub 503` on the §9 `PRWatcher` poll (after CI was already green) hard-routed `PieceAwaitingReview → NeedsHumanIntervention` with a misleading `RunAnotherFixup` hint. The §8.2 router has a `RateLimit → BackOff` arm, but it only covers **CI-gate** failures; the **PR-state poll loop** still hard-NHIs on a transient HTTP error. | resilience | **Open** — the §9 poll loop needs the same back-off-and-keep-polling treatment the §8.2 CI path got. The documented recovery (append-only log-trim of the spurious NHI) is now (correctly) friction-gated by the harness as an audit-trail mutation, which makes the *absence* of a native forge recovery for finding #5 more pressing. |
+| 1 | **Finding #5 (dogfood #2) recurred live.** A transient `GitHub 503` on the §9 `PRWatcher` poll (after CI was already green) hard-routed `PieceAwaitingReview → NeedsHumanIntervention` with a misleading `RunAnotherFixup` hint. The §8.2 router has a `RateLimit → BackOff` arm, but it only covers **CI-gate** failures; the **PR-state poll loop** still hard-NHIs on a transient HTTP error. | resilience | **✅ Resolved 2026-06-04** — `GhError.Transient` (the 503/5xx bucket) on the §9 poll now surfaces as the soft `PollResult.TransientError`: the watcher backs off and keeps polling, promoting to `Failed`→NHI only after N consecutive transients (the S3-4 rate-limit-cliff twin). Both orchestrator poll consumers absorb it. Contract: design-rationale **S3-4b**; plan: [`../design-3.0.md`](../design-3.0.md) T6. |
 | 2 | **No guard against a piece commit landing on a checked-out base branch.** Forge does `git checkout <piece-branch>` / `add` / `commit` / `push` on the shared worktree with no lock against concurrent external git. When the operator left `HEAD` on `main` (a `scalafmtCheckAll` verification excursion in the live worktree), Forge's piece commit landed on `main` and was pushed directly to the shared remote, bypassing the PR. | safety (operator-triggered, but a real gap) | **Open** — primarily an operator-discipline lesson (never run worktree-mutating git in a repo Forge is driving; use a separate clone or `git show <ref>:<path>`), but Forge could also assert `HEAD == expected piece branch` immediately before `git commit` and refuse otherwise. |
 | 3 | **Driver formats correctly often enough that a natural §8.2 trigger is unreliable for testing.** Two driver turns here both produced conformant Scala. A live §8.2 demonstration needs either a feature engineered to force a reflow, or `adapt.localGate` left on (Mode B) where the §8.3 pre-commit gate makes the point cheaper anyway. | test methodology | **Open** — for the live §8.2 proof, engineer a guaranteed reflow (long scaladoc) or accept the unit proof. |
 
@@ -91,6 +91,7 @@ Drafting → DesignReviewing(1, approve) → DesignAwaitingMerge → [merge PR #
   ticked with an explicit caveat (unit-proven + spine-validated; natural live
   trigger did not fire). A future live §8.2 demonstration (finding #3) is the clean
   way to close it fully; the runbook + prep remain in place.
-- **Findings #1/#2** feed the next Forge maintenance pass (finding #5 native
-  recovery + §9 poll back-off; optional pre-commit `HEAD` assertion).
+- **Finding #1 (§9 poll back-off) ✅ resolved 2026-06-04** (design-rationale S3-4b;
+  the §9 poll now backs off and keeps polling on a transient blip). **Finding #2**
+  (optional pre-commit `HEAD` assertion) still feeds the next Forge maintenance pass.
 </content>

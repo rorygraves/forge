@@ -739,6 +739,7 @@ final class Orchestrator(
   ): IO[Option[FsmEvent]] =
     result match
       case PollResult.RateLimited(_) => IO.pure(None) // the watch stream absorbs back-off (S3-4)
+      case PollResult.TransientError(_) => IO.pure(None) // transient gh blip — keep polling (finding #5, S3-4 twin)
       case PollResult.Failed(err) => IO.pure(Some(FsmEvent.HarnessError(s"PR poll failed: $err")))
       case PollResult.Snapshot(decoded) =>
         IO.monotonic.flatMap { now =>
@@ -1178,6 +1179,7 @@ final class Orchestrator(
     result match
       case PollResult.Snapshot(decoded) => watcherEventFor(feature.state, decoded)
       case PollResult.RateLimited(_) => IO.pure(None) // the watch stream absorbs back-off (S3-4)
+      case PollResult.TransientError(_) => IO.pure(None) // transient gh blip — keep polling (finding #5, S3-4 twin)
       case PollResult.Failed(err) => IO.pure(Some(FsmEvent.HarnessError(s"PR poll failed: $err")))
 
   // PieceAwaitingCi is handled by pieceCiWatcherIO (the §8 gate), never by this generic path. Returns None to keep

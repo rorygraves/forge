@@ -78,6 +78,15 @@ class GhErrorClassifierSuite extends munit.FunSuite:
       case Left(GhError.Transient(7, msg)) => assert(msg.contains("unexpected"))
       case other => fail(s"expected Transient(7, ...), got $other")
 
+  test("HTTP 503 (no rate-limit / auth / 404 framing) → Transient — the dogfood finding-#5 wire shape"):
+    // A transient GitHub server error carries none of the rate-limit / 404 / 401 markers, so it falls through to
+    // Transient — which `RealPRWatcher.pollOnce` then surfaces as the soft `PollResult.TransientError` (back off and
+    // keep polling) rather than a hard `Failed` → NeedsHumanIntervention.
+    val stderr = "gh: HTTP 503: Service Unavailable (https://api.github.com/graphql)"
+    RealGhClient.classify(1, "", stderr) match
+      case Left(GhError.Transient(1, raw)) => assert(raw.contains("503"))
+      case other => fail(s"expected Transient(1, ...), got $other")
+
   test("PrUrlPattern parses a typical PR-create URL"):
     val url = "https://github.com/owner/repo/pull/4291\n"
     val m = RealGhClient.PrUrlPattern.findFirstMatchIn(url.trim)

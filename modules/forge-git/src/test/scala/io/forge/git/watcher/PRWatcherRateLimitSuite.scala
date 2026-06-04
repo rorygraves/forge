@@ -36,11 +36,10 @@ class PRWatcherRateLimitSuite extends CatsEffectSuite:
       case other => fail(s"expected RateLimited(None), got $other")
     }
 
-  test("pollOnce — other GhError flavours → Failed (NotFound, Unauthorized, Transient)"):
+  test("pollOnce — fatal GhError flavours → Failed (NotFound, Unauthorized) — Transient is handled separately"):
     val cases = Vector[GhError](
       GhError.NotFound("/repos/x/pulls/9999"),
-      GhError.Unauthorized("auth"),
-      GhError.Transient(1, "boom")
+      GhError.Unauthorized("auth")
     )
     cases.foldLeft(IO.unit) { (acc, err) =>
       acc *> {
