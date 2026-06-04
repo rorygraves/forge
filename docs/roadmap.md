@@ -807,7 +807,19 @@ honest hard edge").
     exists; Forge detects merges, it does not perform them (design-3.3 **W2**; field
     sensed-but-unused).
   - **branch-model trunk path** (`TrunkBased`: commit-to-trunk, no PR tail) — a new §11
-    lifecycle branch, not a parameterization (design-3.3 **W3**; field sensed-but-unused).
+    lifecycle branch, not a parameterization (design-3.3 **W3**). ✅ **closed 2026-06-04**
+    in its own sub-slice: a `TrunkBased` piece commits straight to mainline and advances to
+    `Refining` with **no** `PieceAwaitingCi` / `PieceAwaitingReview` / `PieceAwaitingMerge`
+    tail — gated only by the pre-integration local **Build** gate (no broken compile to
+    trunk). The FSM stayed profile-agnostic, routing on the neutral
+    `FsmEvent.CommittedToTrunk` (the §6.1 replay invariant; `ProfileReplayInvarianceSuite`
+    R1/R2); the orchestrator alone decides `TrunkBased` from the resolved `WorkflowProfile`.
+    Contract: [`forge-design-1.11.md`](forge-design-1.11.md) (§6 / §8.3 / §11.4 / §11.5 / §19);
+    plan + decisions: [`design-3.3-trunk.md`](design-3.3-trunk.md). **Carried forward (D5):**
+    a **live `TrunkBased`-repo demonstration** — both committed profile fixtures (`szork`,
+    `forge`) are PR/GitFlow repos, so the slice is proven against scripted fakes
+    (`OrchestratorTrunkPathSuite`), with the live win deferred until a real trunk repo exists
+    (the W5 / build-gate precedent).
 - **3.4 — `ConventionLearner`** → proposed CLAUDE.md PRs (human-approved).
 - **3.5 — Role-trait refactor** (§4.2 below) — the sensors are the first
   concrete third+ roles, so the refactor lands *inside* the phase that needs it.

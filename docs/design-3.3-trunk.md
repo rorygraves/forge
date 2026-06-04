@@ -20,11 +20,13 @@
 > during a review round; tick the roadmap §4 W3 bullet only at slice close after a whole-section
 > review.
 >
-> **Status:** 🟡 open — 2026-06-04. **Task 1 ✅ landed** (the FSM trunk lifecycle core — the thin
+> **Status:** ✅ closed — 2026-06-04. **Task 1 ✅ landed** (the FSM trunk lifecycle core — the thin
 > runnable slice that proves the riskiest contract: the new §11 branch + the manifest-invariant
 > relaxation + reconcile, all green in `forge-core`). **Task 2 ✅ landed** (orchestrator branch-model
 > wiring + `SideEffects.commitToTrunk` + e2e `OrchestratorTrunkPathSuite`, `forge-app` 428/428).
-> **Task 3 (the 1.11 spec revision + whole-section review + roadmap tick) remains.**
+> **Task 3 ✅ landed** ([`forge-design-1.11.md`](forge-design-1.11.md) restating §6/§8.3/§11.4/§11.5/§19;
+> whole-section review against the landed code; roadmap §4 W3 bullet flipped to closed; the live
+> `TrunkBased`-repo demonstration carried forward as **D5**).
 
 ---
 
@@ -154,13 +156,20 @@ invariant intact.
       design doc still goes through `DesignReviewing → DesignAwaitingMerge` (the human plan-approval
       gate). Documented; revisit if a fully-trunk repo wants the design committed to trunk too.
 
-### Task 3 — spec revision + close-out  [ ]
+### Task 3 — spec revision + close-out  [x] 2026-06-04
 
-- [ ] **`forge-design-1.11.md`** (standalone-by-freeze over 1.10) restating §6 (`Refining` shape),
-      §8.3/§11.4 (the trunk success branch), §11.5 (no PR tail under `TrunkBased`), and §19
-      (`audit.piece_merged` nullable `prNumber`); freeze the rest at 1.10.
-- [ ] Whole-section review; flip the roadmap §4 W3 bullet to closed; carry-forward the live
-      `TrunkBased`-repo demonstration (no real fixture repo yet — the W5 / build-gate precedent).
+- [x] **`forge-design-1.11.md`** (standalone-by-freeze over 1.10) restating §6 (`Refining` shape +
+      `CommittedToTrunk` + the D2 merged-piece relaxation), §8.3/§11.4 (the trunk success branch),
+      §11.5 (no PR tail under `TrunkBased`), and §19 (`audit.piece_merged` nullable `prNumber`);
+      froze the rest at 1.10.
+- [x] Whole-section review (re-walked every spec claim against the landed code: `Refining.prNumber:
+      Option`, `(on trunk)` render at `StatusFields:50`, the `SettleTimeout(Refine)` hint split at
+      `Fsm:831`, `Replay.applyAuditPieceMerged`'s log-number-gated cross-check at `Replay:376`, the
+      `shouldCommitToTrunk` / `withTrunkBranchModel` / `ClassifyCommitToTrunk` /
+      `runLocalGatesThenIntegrate` / `commitToTrunk` / `assertHeadIs(baseBranch)` wiring — all
+      present and matching); flipped the roadmap §4 W3 bullet to ✅ closed; carried forward the live
+      `TrunkBased`-repo demonstration (**D5** — no real fixture repo yet, the W5 / build-gate
+      precedent).
 
 ---
 
@@ -173,6 +182,26 @@ reconcile the spec.
 ---
 
 ## 3. Status log
+
+- **2026-06-04 — Task 3 landed: `forge-design-1.11.md` + whole-section review + roadmap tick; slice
+  closed.** Wrote [`forge-design-1.11.md`](forge-design-1.11.md) (standalone-by-freeze over 1.10,
+  continuing the 1.7–1.10 exception), restating only the changed sections — §6 (`Refining.prNumber:
+  Option`, the neutral `CommittedToTrunk` event, the D2 `Manifest.validate` merged-piece relaxation),
+  §8.3/§11.4 (the Build gate still runs pre-integration, then commits-to-trunk + emits
+  `CommittedToTrunk` instead of opening a PR on a `TrunkBased` repo), §11.5 (a trunk piece has **no**
+  `PieceAwaitingCi` / `PieceAwaitingReview` / `PieceAwaitingMerge` tail — `CommittedToTrunk` advances
+  straight to `Refining(p, None)`), and §19 (nullable `audit.piece_merged.prNumber` + the
+  log-number-gated Replay cross-check) — and froze the rest at 1.10. The whole-section review
+  re-walked every spec claim against the landed code rather than trusting the plan: `(on trunk)` at
+  `StatusFields:50`, the `SettleTimeout(Refine)` hint split (PR → `RunAnotherFixup`, trunk →
+  `AbortOrAbandon`) at `Fsm:831`, the `Replay.applyAuditPieceMerged` cross-check that fires only when
+  the **log** carries a number at `Replay:376` (the spec's "both carry a number" was tightened to
+  match), and the forge-app wiring names (`shouldCommitToTrunk` / `withTrunkBranchModel` /
+  `ClassifyCommitToTrunk` / `runLocalGatesThenIntegrate` / `commitToTrunk` /
+  `assertHeadIs(baseBranch)`) — all present and matching. Flipped the roadmap §4 W3 bullet to ✅
+  closed (pointing at 1.11 + this plan) and recorded the carried-forward live `TrunkBased`-repo
+  demonstration (**D5**). No code change in this task — docs only; the contract it reconciles already
+  shipped green in Tasks 1–2. **Slice 3.3-W3 closed.**
 
 - **2026-06-04 — Task 2 landed: orchestrator trunk wiring + side effect + e2e (forge-app), green.**
   The branch-model decision lives in the orchestrator (D1): `shouldCommitToTrunk(profile)` (=
