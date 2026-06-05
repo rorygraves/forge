@@ -213,3 +213,33 @@ class CliParserSuite extends munit.FunSuite:
       Left(CliError.MissingFlagValue("--instance"))
     )
   }
+
+  // --- Task 4.0.4: extractInstance on the feature-command path ----------------
+
+  test("extractInstance pulls --instance out and preserves the remaining positional in either order") {
+    // Feature command form: `forge run my-feat --instance demo` (flag trails the feature).
+    assertEquals(
+      CliParser.extractInstance(Vector("my-feat", "--instance", "demo")),
+      Right((Some(InstanceName("demo")), Vector("my-feat")))
+    )
+    // And `forge run --instance demo my-feat` (flag leads): the value must not be mistaken for the feature.
+    assertEquals(
+      CliParser.extractInstance(Vector("--instance", "demo", "my-feat")),
+      Right((Some(InstanceName("demo")), Vector("my-feat")))
+    )
+  }
+
+  test("extractInstance returns the rest unchanged when no --instance is present") {
+    assertEquals(CliParser.extractInstance(Vector("my-feat")), Right((None, Vector("my-feat"))))
+    assertEquals(CliParser.extractInstance(Vector.empty), Right((None, Vector.empty)))
+  }
+
+  test("extractInstance rejects a valueless or invalid --instance") {
+    assertEquals(
+      CliParser.extractInstance(Vector("my-feat", "--instance")),
+      Left(CliError.MissingFlagValue("--instance"))
+    )
+    CliParser.extractInstance(Vector("--instance", "Bad Name", "my-feat")) match
+      case Left(CliError.InvalidInstanceName("Bad Name", _)) => ()
+      case other => fail(s"expected InvalidInstanceName, got $other")
+  }

@@ -242,14 +242,14 @@ object CliParser:
           .map(InstanceCommand.InitInstance(_))
 
       case "add-repo" =>
-        extractInstanceFlag(rest).flatMap { (instance, remaining) =>
+        extractInstance(rest).flatMap { (instance, remaining) =>
           firstPositional(remaining)
             .toRight(CliError.MissingRepoPath("add-repo"))
             .map(repo => InstanceCommand.AddRepo(instance, repo))
         }
 
       case "list-repos" =>
-        extractInstanceFlag(rest).map((instance, _) => InstanceCommand.ListRepos(instance))
+        extractInstance(rest).map((instance, _) => InstanceCommand.ListRepos(instance))
 
       case other => Left(CliError.UnknownCommand(other))
 
@@ -260,10 +260,15 @@ object CliParser:
     InstanceName.fromString(raw).left.map(CliError.InvalidInstanceName(raw, _))
 
   /** Pull an optional `--instance <name>` flag out of `rest`, returning the parsed name (or `None`) and the remaining
-    * tokens with the flag + its value removed — so a later positional scan (`add-repo`'s `<path>`) doesn't mistake the
-    * flag's value for the positional. A `--instance` with no value, or an invalid name, is a usage error.
+    * tokens with the flag + its value removed — so a later positional scan (`add-repo`'s `<path>`, or a feature
+    * command's `<feature>`) doesn't mistake the flag's value for the positional. A `--instance` with no value, or an
+    * invalid name, is a usage error.
+    *
+    * Public because Task 4.0.4 reuses it on the **feature** command path: `Main` strips `--instance` from a
+    * state-changing / read-only command's `rest` (so phase-2 / handler feature parsing sees a clean positional list)
+    * and feeds the parsed name to [[io.forge.app.command.InstancePaths]] to re-root the local-runtime family (B1).
     */
-  private def extractInstanceFlag(rest: Vector[String]): Either[CliError, (Option[InstanceName], Vector[String])] =
+  def extractInstance(rest: Vector[String]): Either[CliError, (Option[InstanceName], Vector[String])] =
     rest.indexOf("--instance") match
       case -1 => Right((None, rest))
       case i if i + 1 < rest.length && !rest(i + 1).startsWith("--") =>

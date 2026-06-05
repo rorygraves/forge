@@ -45,6 +45,12 @@ class MainSuite extends munit.FunSuite:
     assertEquals(run(repo, "run", "my-feat"), ExitCode(1))
   }
 
+  tempFixture.test("a state-changing command with an unknown --instance exits 1 (NoSuchInstance)") { repo =>
+    // Task 4.0.4: an explicit --instance naming a non-existent instance is a hard error (the operator asked for a
+    // specific instance). A unique bogus name keeps the real ~/.forge/instances registry from accidentally matching.
+    assertEquals(run(repo, "run", "my-feat", "--instance", "forge-main-suite-no-such-instance-4q7z"), ExitCode(1))
+  }
+
   tempFixture.test("config is loaded for non-unlock commands; a malformed config exits 78") { repo =>
     os.write.over(repo / ".forge" / "config.json", "{ not json", createFolders = true)
     assertEquals(run(repo, "status"), ExitCode(78))

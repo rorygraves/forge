@@ -111,13 +111,18 @@ a daemon-spawned process (that is B4 / 4.1+).
   `instances/<name>/` instead (generalising `ProcessLock` minimally — full
   instance-lock ownership is the daemon's in 4.1).
 
-- [ ] **Task 4.0.4 — orchestrator path wiring.** Resolve `localRoot` from the
-  instance for state-changing feature commands: when `--instance <name>` (or a
-  resolved default instance) is supplied, `Main` builds `ForgePaths(repoRoot,
+- [x] **Task 4.0.4 — orchestrator path wiring.** Resolve `localRoot` from the
+  instance for state-changing feature commands: when `--instance <name>` is
+  supplied, `Main` builds `ForgePaths(repoRoot,
   localRoot = instanceDir/workers/<feature>)`. The orchestrator and all
-  `paths.xxx` consumers are unchanged (B1's promise). Ensure
-  `init`/`refresh-cache`/`rebuild-state` etc. resolve the same re-rooted local
-  paths.
+  `paths.xxx` consumers are unchanged (B1's promise). `refresh-cache` (state-
+  changing) and the read-only `tail`/`rebuild-state`/`stats`/`tui` resolve the
+  same re-rooted local paths. **Re-root is driven only by an explicit
+  `--instance`** — the sole-instance auto-default the plan floated ("or a
+  resolved default instance") was dropped (user decision 2026-06-05): a no-flag
+  feature command never reads the instance registry, keeping the "byte-identical
+  to v1 when no instance is in play" exit-criterion guarantee literal and the
+  v1 path free of any `~/.forge` coupling.
 
 - [ ] **Task 4.0.5 — live dogfood re-run + close-out (exit criterion).** Drive a
   prior dogfood feature under an instance to its terminal state; confirm the
@@ -173,6 +178,30 @@ a daemon-spawned process (that is B4 / 4.1+).
   `InstanceCommandsSuite` cases over a tmp `home`; full `sbt test` green
   (forge-app 465, forge-instance 12), `scalafmtCheckAll` clean, smell sweep
   passes. Tasks 4.0.4 (orchestrator path wiring), 4.0.5 (live re-run) open.
+- **2026-06-05** — **Task 4.0.4 (orchestrator path wiring) landed.** The
+  existing per-command `--instance <name>` extraction (`CliParser`'s
+  `extractInstanceFlag`, made public + renamed `extractInstance`) is now reused
+  on the **feature** command path: `Main` strips `--instance` from a
+  state-changing / read-only command's `rest` (so phase-2 / read-only-handler
+  feature parsing sees a clean positional list) and feeds the parsed name to the
+  new `io.forge.app.command.InstancePaths.resolve`. That resolver re-roots
+  `ForgePaths(repoRoot, localRootOpt = Some(<instance>/workers/<feature>))` when
+  (and only when) an explicit `--instance` + a feature are present — the lock is
+  taken on the re-rooted paths (per-worker, not per-checkout) and the same
+  re-rooted `paths` flows into `StateChangingContext`/`ReadOnlyContext`, so every
+  `paths.xxx` consumer moves with it (B1's promise — a constructor swap, no
+  callsite sweep). A re-root prints a one-line stderr note (where log/state/lock
+  landed); an explicit `--instance` naming a missing instance is `NoSuchInstance`
+  → exit 1; a feature-less command (`profile`) or a no-flag command is never
+  re-rooted and **never reads the registry** (v1 byte-identical). Per the user
+  decision (see Task 4.0.4), the sole-instance auto-default was **not** built.
+  `runStateChangingWith` was split (lock bracket extracted to
+  `stateChangingUnderLock`). 5 new `InstancePathsSuite` cases over a tmp `home`
+  (v1 no-touch, re-root split, NoSuchInstance) + 3 `CliParserSuite`
+  `extractInstance` cases + 1 `MainSuite` exit-1 case; full `sbt test` green
+  (forge-app 473, forge-instance 12, forge-core 468), `scalafmtCheckAll` clean,
+  smell sweep passes. Task 4.0.5 (live dogfood re-run + close-out) is the last
+  open 4.0 task.
 
 ---
 

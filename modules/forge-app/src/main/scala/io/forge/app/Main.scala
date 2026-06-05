@@ -8,14 +8,17 @@ import io.forge.app.command.{
   unlock,
   CommandRouter,
   InstanceCommands,
+  InstancePaths,
   ReadOnlyContext,
   StateChangingContext,
   UnlockForceContext
 }
 import io.forge.app.config.{ConfigError, ForgeConfig, ForgeConfigLoader}
 import io.forge.app.lock.{FileProcessLock, LockAcquireResult, LockMetadata}
+import io.forge.core.{FeatureId, InstanceName}
 import io.forge.core.paths.ForgePaths
 import io.forge.git.branch.ForgeCommand
+import io.forge.instance.InstanceError
 
 import java.net.InetAddress
 import java.time.Instant
@@ -102,12 +105,26 @@ object Main extends IOApp:
     loadConfig(paths).flatMap {
       case Left(code) => IO.pure(code)
       case Right(config) =>
-        CliParser.phase2(invocation.name, invocation.rest) match
+        CliParser.extractInstance(invocation.rest) match
           case Left(err) => usageError(err)
-          case Right(command: ForgeCommand.ReadOnly) =>
-            CommandRouter.readOnly(command, ReadOnlyContext(paths, config, invocation.rest))
-          case Right(other) =>
-            IO.raiseError(new IllegalStateException(s"read-only class produced non-read-only command '${other.name}'"))
+          case Right((instance, rest)) =>
+            CliParser.phase2(invocation.name, rest) match
+              case Left(err) => usageError(err)
+              case Right(command: ForgeCommand.ReadOnly) =>
+                // Re-root the local-runtime family (log/state) under the instance worker dir when one is in play (B1,
+                // Task 4.0.4) so `tail` / `rebuild-state` / `stats` read the same files a re-rooted `run` wrote. The
+                // feature comes from the cleaned positional args (read-only commands carry it on `rest`, not the
+                // `ForgeCommand`); a feature-less overview (`status`) leaves the paths repo-local.
+                val feature = CliParser.optionalFeature(rest).toOption.flatten
+                resolveLocalPaths(paths, instance, feature).flatMap {
+                  case Left(code) => IO.pure(code)
+                  case Right(localPaths) =>
+                    CommandRouter.readOnly(command, ReadOnlyContext(localPaths, config, rest))
+                }
+              case Right(other) =>
+                IO.raiseError(
+                  new IllegalStateException(s"read-only class produced non-read-only command '${other.name}'")
+                )
     }
 
   // --- state-changing: config + lock ----------------------------------------
@@ -142,26 +159,72 @@ object Main extends IOApp:
       }
 
   private def runStateChangingWith(invocation: Invocation, paths: ForgePaths, config: ForgeConfig): IO[ExitCode] =
-    CliParser.phase2(invocation.name, invocation.rest) match
+    CliParser.extractInstance(invocation.rest) match
       case Left(err) => usageError(err)
-      case Right(command) =>
-        // Reviewer assets are installed in step 5 (installAssetsIfNeeded); the connector + action log are constructed
-        // on demand inside the orchestrator handlers (OrchestratorBuilder), which run under this lock bracket.
-        lockMetadata(command).flatMap { metadata =>
-          new FileProcessLock(paths).acquire(metadata, acceptStale = false).use {
-            case LockAcquireResult.Acquired =>
-              CommandRouter.stateChanging(command, StateChangingContext(paths, config, invocation.rest))
-            case LockAcquireResult.Held(holder) =>
-              Console[IO].errorln("forge: another process holds the lock." + holderSuffix(holder)).as(ExitCode(2))
-            case LockAcquireResult.Stale(holder) =>
-              Console[IO]
-                .errorln(
-                  "forge: a stale lock from a prior crashed run is present." + holderSuffix(Some(holder)) +
-                    " Run `forge unlock --force` to clear it."
-                )
-                .as(ExitCode(2))
-          }
-        }
+      case Right((instance, rest)) =>
+        CliParser.phase2(invocation.name, rest) match
+          case Left(err) => usageError(err)
+          case Right(command) =>
+            // Re-root the local-runtime family (log/state/lock) under the instance worker dir when one is in play (B1,
+            // Task 4.0.4): the committed family (specs/config) stays at `repoRoot/.forge`, only the gitignored runtime
+            // moves. The lock itself is taken on the *re-rooted* paths, so two instances driving the same checkout
+            // serialize per-worker, not per-checkout. A feature-less command (`profile`) is never re-rooted.
+            resolveLocalPaths(paths, instance, CliParser.featureOf(command)).flatMap {
+              case Left(code) => IO.pure(code)
+              case Right(localPaths) => stateChangingUnderLock(command, localPaths, config, rest)
+            }
+
+  /** Acquire the §13 process lock on `paths` and run the state-changing handler inside the lock bracket. Reviewer
+    * assets are installed earlier (step 5, `installAssetsIfNeeded`); the connector + action log are constructed on
+    * demand inside the orchestrator handlers (`OrchestratorBuilder`), which run under this lock.
+    */
+  private def stateChangingUnderLock(
+      command: ForgeCommand,
+      paths: ForgePaths,
+      config: ForgeConfig,
+      rest: Vector[String]
+  ): IO[ExitCode] =
+    lockMetadata(command).flatMap { metadata =>
+      new FileProcessLock(paths).acquire(metadata, acceptStale = false).use {
+        case LockAcquireResult.Acquired =>
+          CommandRouter.stateChanging(command, StateChangingContext(paths, config, rest))
+        case LockAcquireResult.Held(holder) =>
+          Console[IO].errorln("forge: another process holds the lock." + holderSuffix(holder)).as(ExitCode(2))
+        case LockAcquireResult.Stale(holder) =>
+          Console[IO]
+            .errorln(
+              "forge: a stale lock from a prior crashed run is present." + holderSuffix(Some(holder)) +
+                " Run `forge unlock --force` to clear it."
+            )
+            .as(ExitCode(2))
+      }
+    }
+
+  // --- instance local-runtime re-root (B1, Task 4.0.4) ----------------------
+
+  /** Resolve the B1 local-runtime root for a feature command via [[InstancePaths]] and translate its outcome into the
+    * `Main` boundary: a re-root prints a one-line stderr note (so the operator sees where log/state/lock landed) and
+    * yields the re-rooted paths; the v1 case yields the base paths untouched; an explicit `--instance` that names a
+    * missing instance is an instance-class failure (exit 1), the same code [[InstanceCommands]] uses.
+    */
+  private def resolveLocalPaths(
+      base: ForgePaths,
+      instance: Option[InstanceName],
+      feature: Option[FeatureId]
+  ): IO[Either[ExitCode, ForgePaths]] =
+    InstancePaths.resolve(base, instance, feature).flatMap {
+      case Right(InstancePaths.Resolved(paths, Some(inst))) =>
+        Console[IO]
+          .errorln(s"forge: instance '${inst.name.value}' — local runtime under ${paths.localForgeDir}")
+          .as(Right(paths))
+      case Right(InstancePaths.Resolved(paths, None)) => IO.pure(Right(paths))
+      case Left(InstanceError.NoSuchInstance(name)) =>
+        Console[IO]
+          .errorln(s"forge: no such instance '${name.value}' (create it with `forge init-instance ${name.value}`)")
+          .as(Left(ExitCode(1)))
+      case Left(err) =>
+        Console[IO].errorln(s"forge: instance error: $err").as(Left(ExitCode(1)))
+    }
 
   private def loadConfig(paths: ForgePaths): IO[Either[ExitCode, ForgeConfig]] =
     ForgeConfigLoader.load(paths).flatMap {
