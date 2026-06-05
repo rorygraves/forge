@@ -15,7 +15,7 @@ import io.forge.agents.{
 import io.forge.app.config.ForgeConfig
 import io.forge.app.monitor.{MonitorOutcome, MonitorReport, SessionLimits, SessionMonitor}
 import io.forge.app.reviewer.{ReviewerCall, ReviewerLimits, ReviewerOutcome}
-import io.forge.core.{CiPolicy, PieceId, PrNumber}
+import io.forge.core.{CiPolicy, PieceId, PrNumber, QuestionSeverity}
 import io.forge.core.cost.{Cost, CostTotals}
 import io.forge.core.fsm.{
   Feature,
@@ -1450,12 +1450,23 @@ final class Orchestrator(
       case ReviewerOutcome.Timeout => FsmEvent.SettleTimeout(SessionPhase.Refine, "refine wall-clock cap")
       case ReviewerOutcome.AdapterFailure(err) => FsmEvent.HarnessError(s"refine failed: ${err.message}")
 
-  private def designVerdict(review: DesignReview): DesignReviewVerdict =
+  /** Map a settled design review to an FSM verdict, **honouring `QuestionSeverity`** (Phase-3 exit-run finding F1).
+    *
+    * Headless `forge run` has no `UserQa` source (`RunFeature` leaves `userInput = IO.never`), so a
+    * `DesignNeedsHumanInput` strands the run with no way to answer. Previously *any* question routed there, so a design
+    * reviewer that merely asked **clarifying** questions on a coherent design hung the whole pipeline. The reviewer
+    * already tags each question's severity; we now respect it: only `Blocking` questions are a true human gate.
+    * `Clarifying` / `Optional` questions are advisory and must not strand a headless run — with no blockers they are
+    * treated as `Approve` (proceed to open the design PR); with blockers present they fall through to a revision round.
+    */
+  private[orchestrator] def designVerdict(review: DesignReview): DesignReviewVerdict =
     review.verdict match
       case ReviewVerdict.Approve => DesignReviewVerdict.Approve
       case ReviewVerdict.RequestChanges =>
-        if review.questions.nonEmpty then DesignReviewVerdict.BlockingQuestions(review.questions)
-        else DesignReviewVerdict.RequestChanges(review.blockers.map(_.summary))
+        val blockingQuestions = review.questions.filter(_.severity == QuestionSeverity.Blocking)
+        if blockingQuestions.nonEmpty then DesignReviewVerdict.BlockingQuestions(blockingQuestions)
+        else if review.blockers.nonEmpty then DesignReviewVerdict.RequestChanges(review.blockers.map(_.summary))
+        else DesignReviewVerdict.Approve
 
   private def prVerdict(review: PrReview): PrReviewVerdict =
     review.verdict match

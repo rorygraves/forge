@@ -320,6 +320,33 @@ Gates, Security Scan, Test Suite, Build Applications]`. Verified, not assumed:
   filters `required:true`) won't pre-fix it → the mis-format reaches CI → **§8.2
   fires under default config, no `adapt.localGate` toggle / no config edit needed.**
 
+**P2 (`forge new` + interactive `forge spec`) — done 2026-06-05.** `forge new
+queryclient-config` cut `forge/queryclient-config/design`. Drove the spec REPL (via
+a FIFO harness) for the **queryClient config-extraction** feature. The spec driver
+first over-scoped (a repo-wide `cacheTimes.ts` refactor across ~9 hooks); a firm
+free-text redirect narrowed it to a single piece `p1` touching only
+`frontend/src/config/queryClient.ts` + a new test, with criterion #6 = the verbatim
+double-quote requirement (the §8.2 trigger). The driver itself flagged the
+prettier-singleQuote conflict, confirming the trigger is real. `/done` advanced to
+`DesignReviewing(1)`.
+
+**P4 (`forge run`) — BLOCKED 2026-06-05 on a genuine Forge gap (finding F1).**
+Design review ran and the design reviewer returned **two clarifying questions** (are
+the five values confirmed-current? which test style?) → `DesignNeedsHumanInput(1)`.
+Headless `forge run` then **hung**: `isLoopTerminal` excludes
+`DesignNeedsHumanInput`, its only `EventSource` is `UserQa = userInput`, and
+`RunFeature.execute` leaves `userInput = IO.never` — so there is no way to answer
+design-review questions from a headless run. The `--answer-file` named in
+`EventSources.scala:20` is **unimplemented**; `SpecRepl.classifyStart` *refuses*
+`DesignNeedsHumanInput` (tells the operator to run `forge run`, which then hangs —
+circular). `reviewRequired:false` only skips the **piece** code-review
+(`Orchestrator.scala:947`, `PieceAwaitingReview`), not design review. The
+`design.md` the reviewer read is crisp and unambiguous, so a re-spec is unlikely to
+reliably avoid the questions — the design reviewer (haiku) simply tends to ask.
+**This is a real headless-usability gap, not a quirk of this feature.** Run killed;
+stale `.forge/state/.lock` remains (clear with `forge unlock --force`). Awaiting an
+operator decision on the fix path (see below).
+
 **Minor profiler notes (non-blocking, carry-forward candidates):**
 - `commitIdentity` was *invented* (`forge[bot]` / noreply) rather than sensed — but
   it is not consumed yet (D4 — ambient git identity used), so decorative for now.
