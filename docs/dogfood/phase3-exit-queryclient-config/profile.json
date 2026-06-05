@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "buildTool": "npm",
+  "commands": [
+    {
+      "kind": "format",
+      "argv": ["npm", "run", "format"],
+      "determinism": "deterministic",
+      "required": false,
+      "autofix": true
+    },
+    {
+      "kind": "lint",
+      "argv": ["npm", "run", "lint"],
+      "determinism": "deterministic",
+      "required": true,
+      "autofix": false
+    },
+    {
+      "kind": "typecheck",
+      "argv": ["npm", "run", "typecheck"],
+      "determinism": "deterministic",
+      "required": true,
+      "autofix": false
+    },
+    {
+      "kind": "test",
+      "argv": ["npm", "run", "test"],
+      "determinism": "heuristic",
+      "required": true,
+      "autofix": false
+    },
+    {
+      "kind": "build",
+      "argv": ["npm", "run", "build:frontend"],
+      "determinism": "deterministic",
+      "required": true,
+      "autofix": false
+    }
+  ],
+  "commitIdentity": {
+    "name": "forge[bot]",
+    "email": "forge@users.noreply.github.com"
+  },
+  "workflow": {
+    "reviewRequired": false,
+    "ciRequiredChecks": [
+      "Quality Gates",
+      "Security Scan",
+      "Test Suite",
+      "Build Applications"
+    ],
+    "branchModel": "git_flow",
+    "mergeStrategy": "squash"
+  }
+}

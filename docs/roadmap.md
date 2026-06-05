@@ -38,7 +38,7 @@
 | 0 — Slice 0 | CLI capabilities validated | ✅ closed |
 | 1 — MVP | Single-repo self-host end-to-end | ✅ closed |
 | 2 — MLP | Pleasant single-repo daily-driver | open — Slice 2.0 (observability) ✅, Slice 2.1 (TUI) ✅; §3.4 OSS / §3.5 tuning / a small dogfood-#2 resilience pass still open |
-| 3 — v1.0: **Repo Adaptation** ⭐ | Deterministic spine + agentic senses; works on any repo via its CLAUDE.md + a derived, hashed `RepoProfile` | open — **all six sub-slices 3.0–3.5 ✅ closed** (contract `forge-design-1.13.md`); only the **phase-level exit criterion** remains: a live end-to-end run on a new, unseen, non-Scala repo with zero hardcoded-config edits |
+| 3 — v1.0: **Repo Adaptation** ⭐ | Deterministic spine + agentic senses; works on any repo via its CLAUDE.md + a derived, hashed `RepoProfile` | open — **all six sub-slices 3.0–3.5 ✅ closed** (contract `forge-design-1.13.md`); **exit criterion MET live 2026-06-05** (`queryclient-config` on the Node/TS fork `rorygraves/toast-stats` → `FeatureDone`, §8.2 prettier-collapse; [`design-phase3-exit.md`](design-phase3-exit.md) closed). Bullet un-ticked pending a whole-section review; one follow-up = **F3** (CiReadiness late-check) |
 | 4 — v2.0 | Workspace (multi-repo) + workstreams + daemon + multi-workstream cockpit TUI | needs `forge-design-2.0.md` first |
 | 5 — v3.0+ | Agentic-dev cockpit (knowledge base, reactive review, custom triggers) | concept |
 
@@ -849,6 +849,19 @@ honest hard edge").
 with a different stack** (e.g. a Node or Python repo), having auto-profiled it,
 with **zero hardcoded-config edits**, and the formatter handled as a local
 deterministic step rather than a paid fix-up round.
+
+> **Met live 2026-06-05 (bullet still un-ticked — pending whole-section review).**
+> The `queryclient-config` run drove the Node/TS fork `rorygraves/toast-stats` to
+> `FeatureDone`: auto-profiled, zero config edits, the §8.2 prettier-collapse on a
+> CI failure (rules, conf 0.97, `attempts` 0, no LLM), both PRs merged. Plan +
+> evidence: [`design-phase3-exit.md`](design-phase3-exit.md) (✅ closed) +
+> [`dogfood/phase3-exit-queryclient-config.md`](dogfood/phase3-exit-queryclient-config.md).
+> **One follow-up before the section review:** **F3** — `CiReadiness` declares a
+> required check gated behind a slow upstream job ("Build Applications") as "never
+> appeared" once `checkDiscoveryTimeoutSec` elapses, forcing a green run into NHI
+> (worked around by a fresh resume). Fix: keep polling while any *observed* check
+> is still pending; declare missing only once CI is otherwise settled. See
+> design-phase3-exit §9.
 
 ### 4.1 v2 candidates from design §20, picked by lived experience
 

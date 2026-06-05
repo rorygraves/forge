@@ -11,9 +11,13 @@
 > built; the gate is a *live demonstration on a new stack*. Tick the roadmap §4
 > exit bullet only after the run passes and a whole-section review lands.
 >
-> **Status:** 🟡 open — drafted 2026-06-05. Plan + pre-flight runbook written;
-> target repo recommended (`toast-stats`, pending live go/no-go confirmation);
-> live run not yet driven. See §7 status log.
+> **Status:** ✅ **closed 2026-06-05** — the live run reached **`FeatureDone`** on
+> the Node/TS fork `rorygraves/toast-stats`, both PRs merged, with the §8.2
+> formatter-collapse demonstrated on a prettier failure and `forge stats` folding
+> *"1 fix-up round avoided"*. The exit criterion is met; the **roadmap §4 exit
+> bullet stays un-ticked until a whole-section review** (project discipline). Run
+> write-up: [`dogfood/phase3-exit-queryclient-config.md`](dogfood/phase3-exit-queryclient-config.md).
+> One Forge gap (F3) is carried forward (§9). See §7 status log.
 
 ---
 
@@ -239,14 +243,17 @@ Mirror dogfood #4's artifact set:
 
 ## 5. Success = exit-criterion clauses, each checked off live
 
-- [ ] **New, unseen, non-Scala repo** — a fork of toast-stats (Node/TS), never profiled before.
-- [ ] **Auto-profiled** — `forge profile` produced a correct `RepoProfile` unaided.
-- [ ] **Zero hardcoded-config edits** — no hand-edit of `profile.json` /
-      `config.json` to teach commands (gate-mode toggle excepted + documented).
-- [ ] **Formatter as a local deterministic step** — prettier mis-format remedied
-      by `RunLocalCommand(npm run format)` (Mode A: §8.2 CI-fail collapse, no
-      `attempts`, no LLM; or Mode B: §8.3 pre-commit gate).
-- [ ] **End-to-end** — `forge run` reaches `FeatureDone`, both PRs merged.
+- [x] **New, unseen, non-Scala repo** — fork `rorygraves/toast-stats` (Node/TS), never profiled before.
+- [x] **Auto-profiled** — `forge profile` produced a correct `RepoProfile` unaided (hash `2761aa91a8f17ea0`).
+- [x] **Zero hardcoded-config edits** — no hand-edit of `profile.json` /
+      `config.json`; not even a gate-mode toggle (the profile's `format
+      required:false` selected the §8.2 path under default config).
+- [x] **Formatter as a local deterministic step** — prettier mis-format remedied
+      by `RunLocalCommand(npm run format)` via the **§8.2 CI-fail collapse**: rules
+      classifier `deterministic_fix` conf 0.97, **no `attempts`, no LLM**; `forge
+      stats` = *"1 fix-up round avoided"*.
+- [x] **End-to-end** — `forge run` + one operator resume reached `FeatureDone`;
+      design PR #2 + piece PR #3 (→ `bbe5f9d6`) both squash-merged.
 
 ---
 
@@ -288,6 +295,20 @@ Mirror dogfood #4's artifact set:
   run) need the operator. Candidate feature scouted: extract `frontend/src/config/
   queryClient.ts` inline React-Query literals into a typed config + test, with a
   double-quote mis-format trigger (prettier `singleQuote:true`).
+- **2026-06-05 (rev 4) — ✅ CLOSED: live run reached `FeatureDone`.** P4 driven to
+  completion. The §8.2 prettier-collapse fired on a Node CI failure (rules,
+  conf 0.97, `RunLocalCommand(npm run format)`, **no `attempts`, no LLM**); F1/F2
+  (Forge gaps) fixed and committed; F3 (CiReadiness late-check) worked around via a
+  fresh resume + carried forward (§9); F4 (fork-prep collateral — deleted workflows
+  break self-referential CI meta-tests) resolved by **restoring** the three needed
+  workflows on the piece branch (`pr-preview.yml` trigger neutered to
+  `workflow_dispatch`; `deploy.yml` + `release-please.yml` verbatim — none trigger
+  on PRs), making the required `Test Suite` green. Operator squash-merged design PR
+  #2 + piece PR #3 (→ `bbe5f9d6`); Forge detected the merge → `Refining` →
+  `FeatureDone`, exit 0. Evidence + write-up:
+  [`dogfood/phase3-exit-queryclient-config.md`](dogfood/phase3-exit-queryclient-config.md)
+  (+ `phase3-exit-queryclient-config/{profile,action-log,forge-stats,sec82-autofix,pr3}`).
+  **Roadmap §4 exit bullet left un-ticked pending a whole-section review.**
 
 ---
 
@@ -404,11 +425,25 @@ meta-tests) over deleting workflow files, so the repo's own CI-config tests stil
 pass. To reach `FeatureDone`: restore `pr-preview.yml` (triggers neutered) or skip
 that meta-test, then resume.
 
-**Exit-criterion status:** the **distinctive clauses are met live** — unseen non-Scala
-repo (1), auto-profiled with zero hardcoded-config edits (2), **formatter handled as a
-local deterministic step** via the §8.2 collapse on a Node prettier failure (the core,
-3). Full `FeatureDone` (merge) is gated only by F3 (worked-around) + F4 (fork-prep
-collateral), neither of which is the criterion's substance.
+**F4 — RESOLVED (2026-06-05).** Fork-prep deleted **7** workflows; a systematic grep
+showed exactly **two** meta-tests depend on deleted ones — `webkit-coverage.test.ts`
+(`pr-preview.yml`) and `releaseGatedDeploy.test.ts` (`deploy.yml` + `release-please.yml`)
+— and no test enumerates the workflows directory. Because the meta-tests run in
+*sequential* required-`Test Suite` steps, the first failure masked the second (two CI
+rounds to surface both). Fix on the piece branch `forge/queryclient-config/p1`: restored
+all three — `pr-preview.yml` with its trigger neutered to `workflow_dispatch:` (needs
+fork-absent WIF/Firebase secrets), `deploy.yml` (already `workflow_call`/`workflow_dispatch`
+only) + `release-please.yml` (`push:main`) **verbatim** — so **none fire on a PR**, no
+fork-secret workflow muddies the §8 gate, and all three meta-tests pass. Required `Test
+Suite` went green; `Build Applications` then ran and passed; the fresh `forge resume`
+cleared F3; review skipped (`reviewRequired:false`); operator squash-merged → `FeatureDone`.
+
+**Exit-criterion status — ✅ MET END-TO-END (2026-06-05).** All five clauses checked off
+live (§5): unseen non-Scala repo, auto-profiled with zero hardcoded-config edits,
+**formatter as a local deterministic step** (§8.2 collapse on a Node prettier failure,
+`attempts` 0, no LLM, *"1 fix-up round avoided"*), and `FeatureDone` with both PRs merged.
+The two non-substance blockers are closed: F4 resolved (above); F3 worked-around and
+carried forward (§9).
 
 **Minor profiler notes (non-blocking, carry-forward candidates):**
 - `commitIdentity` was *invented* (`forge[bot]` / noreply) rather than sensed — but
@@ -421,6 +456,19 @@ collateral), neither of which is the criterion's substance.
 
 ## 9. Carry-forward (pre-identified, may grow during the run)
 
+- **F3 — `CiReadiness` declares a late required check "never appeared"** (surfaced
+  live, §8). `CiReadiness.evaluate` (`CiReadiness.scala:82-86`) blocks once
+  `checkDiscoveryTimeoutSec` elapses if any required check is absent from
+  `observed` — but a check gated behind a slow upstream job (here `Build
+  Applications`, `needs:[quality-gates,test]`, ~5 min behind `Test Suite`) is
+  indistinguishable from one that will never run, so a clean green run is forced
+  into `NeedsHumanIntervention`. **Worked around** this run by a fresh `forge
+  resume --after-human-push` (resets the discovery clock; all checks then
+  present+green). **Proposed fix:** keep polling while any *observed* check is
+  still pending/in-progress, and only declare a required check missing once CI is
+  otherwise settled (no pending checks). Should land before the roadmap §4
+  whole-section review, or be filed as a tracking issue. *Worked example for the
+  fix:* the `git_flow` Node profile's 4 required checks where one is two jobs deep.
 - **D4 — commit identity from profile** (sensed but not consumed; uses ambient
   git). Not blocking this gate; revisit if the run shows wrong-author commits.
 - **S4-5 — reviewer model from profile/config** (still pinned in

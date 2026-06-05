@@ -1,0 +1,154 @@
+commit a4284b8006383432a3af91b872eb3b88e4754947
+Author: Rory Graves <rory.graves@thetradedesk.com>
+Date:   Fri Jun 5 11:50:00 2026 +0100
+
+    style(queryclient-config): npm run format
+
+diff --git a/.forge/profile.json b/.forge/profile.json
+index 6dce72ce..b17d7c52 100644
+--- a/.forge/profile.json
++++ b/.forge/profile.json
+@@ -4,55 +4,35 @@
+   "commands": [
+     {
+       "kind": "format",
+-      "argv": [
+-        "npm",
+-        "run",
+-        "format"
+-      ],
++      "argv": ["npm", "run", "format"],
+       "determinism": "deterministic",
+       "required": false,
+       "autofix": true
+     },
+     {
+       "kind": "lint",
+-      "argv": [
+-        "npm",
+-        "run",
+-        "lint"
+-      ],
++      "argv": ["npm", "run", "lint"],
+       "determinism": "deterministic",
+       "required": true,
+       "autofix": false
+     },
+     {
+       "kind": "typecheck",
+-      "argv": [
+-        "npm",
+-        "run",
+-        "typecheck"
+-      ],
++      "argv": ["npm", "run", "typecheck"],
+       "determinism": "deterministic",
+       "required": true,
+       "autofix": false
+     },
+     {
+       "kind": "test",
+-      "argv": [
+-        "npm",
+-        "run",
+-        "test"
+-      ],
++      "argv": ["npm", "run", "test"],
+       "determinism": "heuristic",
+       "required": true,
+       "autofix": false
+     },
+     {
+       "kind": "build",
+-      "argv": [
+-        "npm",
+-        "run",
+-        "build:frontend"
+-      ],
++      "argv": ["npm", "run", "build:frontend"],
+       "determinism": "deterministic",
+       "required": true,
+       "autofix": false
+@@ -73,4 +53,4 @@
+     "branchModel": "git_flow",
+     "mergeStrategy": "squash"
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/.forge/specs/queryclient-config/decomposition.md b/.forge/specs/queryclient-config/decomposition.md
+index 14823602..2be1aaac 100644
+--- a/.forge/specs/queryclient-config/decomposition.md
++++ b/.forge/specs/queryclient-config/decomposition.md
+@@ -6,6 +6,7 @@
+ ## Pieces
+ 
+ <!-- forge:order-start -->
++
+ 1. <!-- forge:piece p1 -->**p1: Extract QUERY_CLIENT_CONFIG and build the client from it**<!-- /forge:piece -->
+    <!-- forge:editable-summary p1 -->
+    In queryClient.ts add an exported typed QUERY_CLIENT_CONFIG const and build the existing queryClient from it with no inline literals; add a vitest test asserting the values and default options.
+@@ -16,7 +17,7 @@
+ 
+ ---
+ 
+-*Rendered by [Forge](https://github.com/anthropics/forge) from
++_Rendered by [Forge](https://github.com/anthropics/forge) from
+ `manifest.json`. Edit a piece summary or reorder the list between the
+ `forge:order-start` / `forge:order-end` markers above, then run
+-`forge reconcile queryclient-config` to import the change.*
++`forge reconcile queryclient-config` to import the change._
+diff --git a/.forge/specs/queryclient-config/manifest.json b/.forge/specs/queryclient-config/manifest.json
+index 9319ae7c..b0a6271e 100644
+--- a/.forge/specs/queryclient-config/manifest.json
++++ b/.forge/specs/queryclient-config/manifest.json
+@@ -22,4 +22,4 @@
+       "attempts": 0
+     }
+   ]
+-}
+\ No newline at end of file
++}
+diff --git a/frontend/src/config/queryClient.test.ts b/frontend/src/config/queryClient.test.ts
+index 915a04fd..d0f481b9 100644
+--- a/frontend/src/config/queryClient.test.ts
++++ b/frontend/src/config/queryClient.test.ts
+@@ -1,8 +1,8 @@
+-import { describe, expect, it } from "vitest"
+-import { QUERY_CLIENT_CONFIG, queryClient } from "./queryClient"
++import { describe, expect, it } from 'vitest'
++import { QUERY_CLIENT_CONFIG, queryClient } from './queryClient'
+ 
+-describe("QUERY_CLIENT_CONFIG", () => {
+-  it("has the expected field values", () => {
++describe('QUERY_CLIENT_CONFIG', () => {
++  it('has the expected field values', () => {
+     expect(QUERY_CLIENT_CONFIG.queryRetry).toBe(1)
+     expect(QUERY_CLIENT_CONFIG.refetchOnWindowFocus).toBe(false)
+     expect(QUERY_CLIENT_CONFIG.staleTimeMs).toBe(5 * 60 * 1000)
+@@ -11,12 +11,12 @@ describe("QUERY_CLIENT_CONFIG", () => {
+   })
+ })
+ 
+-describe("queryClient default options", () => {
+-  it("reflects QUERY_CLIENT_CONFIG", () => {
++describe('queryClient default options', () => {
++  it('reflects QUERY_CLIENT_CONFIG', () => {
+     const defaults = queryClient.getDefaultOptions()
+     expect(defaults.queries?.retry).toBe(QUERY_CLIENT_CONFIG.queryRetry)
+     expect(defaults.queries?.refetchOnWindowFocus).toBe(
+-      QUERY_CLIENT_CONFIG.refetchOnWindowFocus,
++      QUERY_CLIENT_CONFIG.refetchOnWindowFocus
+     )
+     expect(defaults.queries?.staleTime).toBe(QUERY_CLIENT_CONFIG.staleTimeMs)
+     expect(defaults.queries?.gcTime).toBe(QUERY_CLIENT_CONFIG.gcTimeMs)
+diff --git a/frontend/src/config/queryClient.ts b/frontend/src/config/queryClient.ts
+index 0d4070bb..2bbf5147 100644
+--- a/frontend/src/config/queryClient.ts
++++ b/frontend/src/config/queryClient.ts
+@@ -1,4 +1,4 @@
+-import { QueryClient } from "@tanstack/react-query"
++import { QueryClient } from '@tanstack/react-query'
+ 
+ export interface QueryClientConfig {
+   queryRetry: number

@@ -1,0 +1,14 @@
+feature queryclient-config — run stats
+
+  phase             turns    wall-clock        cost
+  ─────────────────────────────────────────────────
+  implement             1         25.8s       $0.21
+  ─────────────────────────────────────────────────
+  total                 1         25.8s       $0.21
+
+  waiting (human)               81m 38s
+    design merge                 2m 46s
+    piece merge                 15m 23s
+    intervention                63m 28s
+  note: 1 operator resume from needs-human-intervention recorded (timeline recovered in place, not truncated).
+  note: 1 fix-up round avoided — a CI failure was remedied by the repo's own deterministic autofix (Phase 3 §8.2), with no driver fix-up turn.
