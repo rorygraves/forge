@@ -17,7 +17,7 @@
 > *"1 fix-up round avoided"*. The exit criterion is met; the **roadmap §4 exit
 > bullet stays un-ticked until a whole-section review** (project discipline). Run
 > write-up: [`dogfood/phase3-exit-queryclient-config.md`](dogfood/phase3-exit-queryclient-config.md).
-> One Forge gap (F3) is carried forward (§9). See §7 status log.
+> The one carried-forward Forge gap (F3) is now ✅ fixed (§9). See §7 status log.
 
 ---
 
@@ -299,7 +299,8 @@ Mirror dogfood #4's artifact set:
   completion. The §8.2 prettier-collapse fired on a Node CI failure (rules,
   conf 0.97, `RunLocalCommand(npm run format)`, **no `attempts`, no LLM**); F1/F2
   (Forge gaps) fixed and committed; F3 (CiReadiness late-check) worked around via a
-  fresh resume + carried forward (§9); F4 (fork-prep collateral — deleted workflows
+  fresh resume at run-time, then ✅ fixed in code (2026-06-05, §9); F4 (fork-prep
+  collateral — deleted workflows
   break self-referential CI meta-tests) resolved by **restoring** the three needed
   workflows on the piece branch (`pr-preview.yml` trigger neutered to
   `workflow_dispatch`; `deploy.yml` + `release-please.yml` verbatim — none trigger
@@ -369,7 +370,8 @@ stale `.forge/state/.lock` remains (clear with `forge unlock --force`). Awaiting
 operator decision on the fix path (see below).
 
 **P4 (`forge run`) — the live run, three findings surfaced (F1 fixed, F2 fixed,
-F3 worked-around). §8.2 collapse DEMONSTRATED on Node/TS.**
+F3 worked-around at run-time then ✅ fixed in code). §8.2 collapse DEMONSTRATED on
+Node/TS.**
 
 The implement driver (haiku, ~26s, \$0.21) wrote `QUERY_CLIENT_CONFIG` with
 **double-quoted** strings (per p1.md #6). Forge committed it (`--no-verify`, so the
@@ -399,19 +401,20 @@ The §8.2 autofix push silently failed → degraded to a paid fix-up round
 pushes (branch + tags) now use `--no-verify` — CI is the gate of record (the hooks
 say so). `RealGitClientCommitSuite` (+1, real pre-push hook + bare remote).
 
-**F3 — CI gate declares a late required check "never appeared" (WORKED AROUND;
-fix proposed).** After the green autofix, `forge run` hit
+**F3 — CI gate declared a late required check "never appeared" (WORKED AROUND at
+run-time; ✅ FIXED 2026-06-05).** After the green autofix, `forge run` hit
 `NeedsHumanIntervention("required check 'Build Applications' never appeared")`.
-Cause: `CiReadiness.evaluate` (CiReadiness.scala:82-86) blocks once
-`checkDiscoveryTimeoutSec` elapses if any required check is absent from `observed`.
-The profile sensed 4 required checks; `Build Applications` only starts after
-`Test Suite` (`needs:[quality-gates,test]`, ~5min), so it hadn't appeared inside the
-discovery window. The gate can't tell "will never run" from "gated behind a slow
-job." **Proposed fix (carry-forward F3):** keep polling while any observed check is
-still pending/in-progress; only declare a required check missing once CI is
-otherwise settled. **Workaround for this run:** wait for the full chain to go green,
-then `forge resume --after-human-push p1` (fresh resume resets the discovery clock;
-`Build Applications` is present+green → gate passes).
+Cause: `CiReadiness.evaluate` blocked once `checkDiscoveryTimeoutSec` elapsed if any
+required check was absent from `observed`. The profile sensed 4 required checks;
+`Build Applications` only starts after `Test Suite` (`needs:[quality-gates,test]`,
+~5min), so it hadn't appeared inside the discovery window. The gate couldn't tell
+"will never run" from "gated behind a slow job." **Fix:** rule 2 now blocks only past
+the discovery window *and* once CI has settled — no observed check is still pending
+(`isPending` = any non-`Completed` state). While a job is still running the gate keeps
+polling, so a slow-gated required check gets the chance to register. See §9 (F3) for
+the full entry. **Workaround used during this run** (pre-fix): wait for the full chain
+to go green, then `forge resume --after-human-push p1` (fresh resume resets the
+discovery clock; `Build Applications` is present+green → gate passes).
 
 **F4 (not a Forge issue) — fork-prep collateral: a self-referential CI meta-test.**
 After the F3 work-around the piece PR's required **Test Suite** failed: `272 passed,
@@ -442,8 +445,8 @@ cleared F3; review skipped (`reviewRequired:false`); operator squash-merged → 
 live (§5): unseen non-Scala repo, auto-profiled with zero hardcoded-config edits,
 **formatter as a local deterministic step** (§8.2 collapse on a Node prettier failure,
 `attempts` 0, no LLM, *"1 fix-up round avoided"*), and `FeatureDone` with both PRs merged.
-The two non-substance blockers are closed: F4 resolved (above); F3 worked-around and
-carried forward (§9).
+The two non-substance blockers are closed: F4 resolved (above); F3 worked-around at
+run-time and now ✅ fixed in code (§9).
 
 **Minor profiler notes (non-blocking, carry-forward candidates):**
 - `commitIdentity` was *invented* (`forge[bot]` / noreply) rather than sensed — but
@@ -456,19 +459,22 @@ carried forward (§9).
 
 ## 9. Carry-forward (pre-identified, may grow during the run)
 
-- **F3 — `CiReadiness` declares a late required check "never appeared"** (surfaced
-  live, §8). `CiReadiness.evaluate` (`CiReadiness.scala:82-86`) blocks once
-  `checkDiscoveryTimeoutSec` elapses if any required check is absent from
+- **F3 — `CiReadiness` declared a late required check "never appeared"** ✅ **FIXED
+  (2026-06-05).** Surfaced live (§8): `CiReadiness.evaluate` blocked once
+  `checkDiscoveryTimeoutSec` elapsed if any required check was absent from
   `observed` — but a check gated behind a slow upstream job (here `Build
   Applications`, `needs:[quality-gates,test]`, ~5 min behind `Test Suite`) is
-  indistinguishable from one that will never run, so a clean green run is forced
-  into `NeedsHumanIntervention`. **Worked around** this run by a fresh `forge
-  resume --after-human-push` (resets the discovery clock; all checks then
-  present+green). **Proposed fix:** keep polling while any *observed* check is
-  still pending/in-progress, and only declare a required check missing once CI is
-  otherwise settled (no pending checks). Should land before the roadmap §4
-  whole-section review, or be filed as a tracking issue. *Worked example for the
-  fix:* the `git_flow` Node profile's 4 required checks where one is two jobs deep.
+  indistinguishable from one that will never run, so a clean green run was forced
+  into `NeedsHumanIntervention`. **Fix:** the §8 rule-2 "never appeared" verdict now
+  fires only past the discovery window **and** once CI has settled — i.e. no
+  observed check is still in a non-`Completed` state (`isPending`). While any
+  observed check is pending, the gate keeps polling, because the missing required
+  check may be gated behind that still-running job. `CiReadiness.scala` (new
+  `isPending` helper + the guarded rule-2 branch); `CiReadinessSuite` (+3:
+  pending-blocks-the-verdict, settled-finally-blocks, profile-sensed variant). The
+  prior live work-around (a fresh `forge resume --after-human-push` to reset the
+  discovery clock) is no longer needed. *Worked example:* the `git_flow` Node
+  profile's 4 required checks where one is two jobs deep.
 - **D4 — commit identity from profile** (sensed but not consumed; uses ambient
   git). Not blocking this gate; revisit if the run shows wrong-author commits.
 - **S4-5 — reviewer model from profile/config** (still pinned in

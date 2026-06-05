@@ -166,6 +166,35 @@ class CiReadinessSuite extends munit.FunSuite:
       CiDecision.KeepPolling(CiDiscoveryState(0))
     )
 
+  // --- §8 rule 2 / F3: a slow-gated required check is not "never appeared" while CI is still running ---
+
+  test("F3: required check missing past window but an observed check still pending → KeepPolling (not blocked)"):
+    // `build` is gated behind `test`; the discovery window has elapsed but `test` is still in-progress, so `build`
+    // may yet register. The gate must wait, not declare it missing.
+    assertEquals(
+      eval(overlayProtected("build"), snap(green("lint"), pending("test")), elapsed = pastTimeout),
+      CiDecision.KeepPolling(CiDiscoveryState(0))
+    )
+
+  test("F3: required check missing past window once CI settles (no pending observed) → Blocked"):
+    // Same shape but `test` has now completed and `build` still never registered → CI is quiescent, so the §8 rule-2
+    // "never appeared" verdict is finally safe.
+    assertEquals(
+      eval(overlayProtected("build"), snap(green("lint"), green("test")), elapsed = pastTimeout),
+      CiDecision.Blocked("required check 'build' never appeared (source: Protected)")
+    )
+
+  test("F3: profile-sensed required check missing past window but observed pending → KeepPolling"):
+    assertEquals(
+      eval(
+        overlayUnprotected,
+        snap(green("frontend"), pending("backend-gate")),
+        elapsed = pastTimeout,
+        profileRequiredChecks = Set("backend")
+      ),
+      CiDecision.KeepPolling(CiDiscoveryState(0))
+    )
+
   // --- stableGreenPolls debounce ---
 
   test("stableGreenPolls=2: first all-green poll → KeepPolling(consecutiveGreen=1)"):

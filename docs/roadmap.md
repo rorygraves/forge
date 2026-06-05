@@ -38,7 +38,7 @@
 | 0 — Slice 0 | CLI capabilities validated | ✅ closed |
 | 1 — MVP | Single-repo self-host end-to-end | ✅ closed |
 | 2 — MLP | Pleasant single-repo daily-driver | open — Slice 2.0 (observability) ✅, Slice 2.1 (TUI) ✅; §3.4 OSS / §3.5 tuning / a small dogfood-#2 resilience pass still open |
-| 3 — v1.0: **Repo Adaptation** ⭐ | Deterministic spine + agentic senses; works on any repo via its CLAUDE.md + a derived, hashed `RepoProfile` | open — **all six sub-slices 3.0–3.5 ✅ closed** (contract `forge-design-1.13.md`); **exit criterion MET live 2026-06-05** (`queryclient-config` on the Node/TS fork `rorygraves/toast-stats` → `FeatureDone`, §8.2 prettier-collapse; [`design-phase3-exit.md`](design-phase3-exit.md) closed). Bullet un-ticked pending a whole-section review; one follow-up = **F3** (CiReadiness late-check) |
+| 3 — v1.0: **Repo Adaptation** ⭐ | Deterministic spine + agentic senses; works on any repo via its CLAUDE.md + a derived, hashed `RepoProfile` | open — **all six sub-slices 3.0–3.5 ✅ closed** (contract `forge-design-1.13.md`); **exit criterion MET live 2026-06-05** (`queryclient-config` on the Node/TS fork `rorygraves/toast-stats` → `FeatureDone`, §8.2 prettier-collapse; [`design-phase3-exit.md`](design-phase3-exit.md) closed). Bullet un-ticked pending a whole-section review; the one follow-up **F3** (CiReadiness late-check) is ✅ fixed (2026-06-05) |
 | 4 — v2.0 | Workspace (multi-repo) + workstreams + daemon + multi-workstream cockpit TUI | needs `forge-design-2.0.md` first |
 | 5 — v3.0+ | Agentic-dev cockpit (knowledge base, reactive review, custom triggers) | concept |
 
@@ -856,12 +856,13 @@ deterministic step rather than a paid fix-up round.
 > CI failure (rules, conf 0.97, `attempts` 0, no LLM), both PRs merged. Plan +
 > evidence: [`design-phase3-exit.md`](design-phase3-exit.md) (✅ closed) +
 > [`dogfood/phase3-exit-queryclient-config.md`](dogfood/phase3-exit-queryclient-config.md).
-> **One follow-up before the section review:** **F3** — `CiReadiness` declares a
+> **Follow-up — ✅ FIXED (2026-06-05):** **F3** — `CiReadiness` declared a
 > required check gated behind a slow upstream job ("Build Applications") as "never
-> appeared" once `checkDiscoveryTimeoutSec` elapses, forcing a green run into NHI
-> (worked around by a fresh resume). Fix: keep polling while any *observed* check
-> is still pending; declare missing only once CI is otherwise settled. See
-> design-phase3-exit §9.
+> appeared" once `checkDiscoveryTimeoutSec` elapsed, forcing a green run into NHI
+> (worked around at run-time by a fresh resume). Fix landed: §8 rule 2 now keeps
+> polling while any *observed* check is still pending (non-`Completed`), declaring
+> a required check missing only once CI is otherwise settled. `CiReadiness.scala`
+> (`isPending` helper) + `CiReadinessSuite` (+3). See design-phase3-exit §9.
 
 ### 4.1 v2 candidates from design §20, picked by lived experience
 

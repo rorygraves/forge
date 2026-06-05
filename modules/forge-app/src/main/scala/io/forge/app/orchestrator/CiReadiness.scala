@@ -47,6 +47,14 @@ object CiReadiness:
 
   private def isSuccess(c: CheckResult): Boolean = c.conclusion.contains(CheckConclusion.Success)
 
+  /** A check that has not finished — any non-`Completed` state (`Queued` / `InProgress` / `Pending` / `Requested` /
+    * `Waiting`). While *any* observed check is still pending, CI has not gone quiescent, so a required check that is
+    * absent from `observed` may yet register (it can be gated behind a slow upstream job, e.g. `needs:[test]`). The §8
+    * rule-2 "never appeared" verdict therefore waits for the run to settle rather than firing at the discovery-window
+    * edge (carry-forward F3).
+    */
+  private def isPending(c: CheckResult): Boolean = c.state != CheckState.Completed
+
   /** @param profileRequiredChecks
     *   the §3.3-Tier-2 sensed required-check set from `WorkflowProfile.ciRequiredChecks`, unioned into the required
     *   names alongside branch protection and the config overlay. The orchestrator passes `Set.empty` for an unprofiled
@@ -80,8 +88,11 @@ object CiReadiness:
           val observedNames = observed.map(_.name).toSet
           val missing = (requiredNames -- observedNames).toVector.sorted
           if missing.nonEmpty then
-            // §8 rule 2: a required check that never appeared after the discovery window → human push needed.
-            if discoveryElapsed then
+            // §8 rule 2: a required check that never appeared → human push needed. But "never" is only knowable once
+            // CI has settled: while any observed check is still pending, the missing required check may be gated behind
+            // it (e.g. `needs:[test]`) and yet to register. Block only past the discovery window *and* with no pending
+            // observed check; otherwise keep polling (carry-forward F3).
+            if discoveryElapsed && !observed.exists(isPending) then
               CiDecision.Blocked(s"required check '${missing.head}' never appeared (source: ${overlay.source})")
             else CiDecision.KeepPolling(state.copy(consecutiveGreen = 0))
           else greenGate(ci, observed.filter(c => requiredNames.contains(c.name)), observed, state)
