@@ -21,9 +21,13 @@
 > "instance" to register repos against. Per the contract's spike line for 4.0:
 > *"re-root `ForgePaths` and re-run a prior dogfood feature green."*
 >
-> **Status:** 🚧 open — 2026-06-05. Task 4.0.1 (the B1 spike) landed first per
-> CLAUDE.md "run code earlier"; the remaining tasks (instance model, CLI,
-> orchestrator wiring, live dogfood re-run) follow.
+> **Status:** ✅ closed — 2026-06-05. All five tasks landed (4.0.1 B1 re-root,
+> 4.0.2 instance model + store, 4.0.3 CLI, 4.0.4 orchestrator wiring, 4.0.5 live
+> dogfood re-run + close-out). Exit criterion **MET live** — the B1
+> committed-vs-local split landed on a real `llm4s/szork` run under the `llm4s`
+> instance (see §3 status log + [`dogfood/4.0-reroot.md`](dogfood/4.0-reroot.md));
+> the whole-section review landed clean (two should-fix coherence gaps fixed in
+> the close).
 
 ---
 
@@ -124,10 +128,11 @@ a daemon-spawned process (that is B4 / 4.1+).
   to v1 when no instance is in play" exit-criterion guarantee literal and the
   v1 path free of any `~/.forge` coupling.
 
-- [ ] **Task 4.0.5 — live dogfood re-run + close-out (exit criterion).** Drive a
-  prior dogfood feature under an instance to its terminal state; confirm the
-  committed/local split on disk; whole-section review; carry-forward walk; flip
-  the roadmap §5 sub-slice 4.0 bullet.
+- [x] **Task 4.0.5 — live dogfood re-run + close-out (exit criterion).** Drive a
+  prior dogfood feature under an instance; confirm the committed/local split on
+  disk; whole-section review; carry-forward walk; flip the roadmap §5 sub-slice
+  4.0 bullet. **Done 2026-06-05** — see the status-log entry below and
+  [`dogfood/4.0-reroot.md`](dogfood/4.0-reroot.md).
 
 ---
 
@@ -202,6 +207,31 @@ a daemon-spawned process (that is B4 / 4.1+).
   (forge-app 473, forge-instance 12, forge-core 468), `scalafmtCheckAll` clean,
   smell sweep passes. Task 4.0.5 (live dogfood re-run + close-out) is the last
   open 4.0 task.
+- **2026-06-05** — **Task 4.0.5 (live dogfood re-run + close-out) landed — Slice
+  4.0 ✅ closed; exit criterion MET live.** Created the first instance
+  (`init-instance llm4s`), registered `szork` (`add-repo` / `list-repos`) — all
+  three Task-4.0.3 commands validated against the real CLI — then drove
+  `extract-media-network-config-reroot` under `--instance llm4s` against
+  `llm4s/szork` through `new` → `spec` (/done) → `abandon`. **The B1 split landed
+  exactly as the contract requires:** the local-runtime family
+  (`log/<feat>.jsonl`, `state/<feat>.json`, `state/.lock`) re-rooted under
+  `~/.forge/instances/llm4s/workers/<feat>/.forge/` while the committed family
+  (`design.md`, `decomposition.md`, `manifest.json`, `pieces/p1.md`) stayed in
+  `szork/.forge/specs/<feat>/`; negative check confirmed **no** log/state leaked
+  into the checkout. Run kept to **minimal-proof-then-abandon** (the split is
+  fully visible at `DesignReviewing`; the FSM/CI/merge behind the B1 seam is
+  frozen and proven by dogfoods #1–#4), so it stopped before
+  `DesignAwaitingMerge` — **zero outward footprint** (no PR/remote branch on
+  `llm4s/szork`). Evidence in [`dogfood/4.0-reroot.md`](dogfood/4.0-reroot.md) +
+  `dogfood/4.0-reroot/`. **Whole-section review** (B1 re-root / `forge-instance`
+  / CLI / orchestrator wiring) found **no blocking issues**; two should-fix
+  coherence gaps were fixed in this close (`InstanceStore.load` now decodes +
+  schema-checks `config.json`, symmetric with `readRegistry`, which also gained a
+  `schemaVersion` check — both surface `Malformed`; +3 `FileInstanceStoreSuite`
+  cases). Full `sbt test` green (forge-instance **15**, forge-core 468, forge-git
+  141, forge-tui 38, forge-specs 225, forge-agents 242, forge-app 473 = 1602),
+  `scalafmtCheckAll` clean, smell sweep passes. Roadmap §5 sub-slice 4.0 bullet
+  flipped to ✅.
 
 ---
 
@@ -219,3 +249,12 @@ a daemon-spawned process (that is B4 / 4.1+).
 - **Instance lock vs per-checkout lock.** 4.0 takes a minimal instance-level
   lock for the registry commands; the full instance-lock ownership (held by the
   long-running daemon, with per-worker locks below it — contract §6.1) is 4.1.
+- **`--instance` is silently ignored on feature-less commands (review nit 4.1).**
+  `forge profile --instance demo` / a no-feature `status` accept the flag and
+  ignore it (no re-root needed without a feature to scope), with no diagnostic —
+  not even if `demo` doesn't exist (the registry is never read, by design, to
+  keep the v1 no-instance path free of `~/.forge` coupling). Defensible but
+  potentially surprising. Candidate future polish: emit a one-line stderr "note:
+  `--instance` ignored (no feature to scope)". Not a defect; deferred. (The
+  whole-section review's should-fix findings — `load`/`readRegistry` schema +
+  config decode — were fixed in the 4.0.5 close, not deferred.)

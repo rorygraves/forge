@@ -64,8 +64,11 @@ final class FileInstanceStore(home: os.Path = os.home) extends InstanceStore:
   override def load(name: InstanceName): IO[Either[InstanceError, Instance]] =
     IO.blocking {
       val instance = Instance.at(name, home)
-      if os.exists(instance.configFile) then Right(instance)
-      else Left(InstanceError.NoSuchInstance(name))
+      if !os.exists(instance.configFile) then Left(InstanceError.NoSuchInstance(name))
+      // Decode (not just stat) `config.json`, symmetric with `readRegistry`: a present-but-undecodable or wrong-schema
+      // config surfaces `Malformed` rather than reading as a valid instance. This is also the load path's only use of
+      // the `InstanceConfig` codec — without it the codec is dead and a corrupt config is silently accepted.
+      else decodeConfig(instance.configFile).map(_ => instance)
     }
 
   override def list: IO[Vector[InstanceName]] =
@@ -84,7 +87,8 @@ final class FileInstanceStore(home: os.Path = os.home) extends InstanceStore:
   override def addRepo(instance: Instance, repoPath: os.Path): IO[Either[InstanceError, RegisteredRepo]] =
     IO.blocking {
       // `os.Path` is always absolute + normalised (the CLI builds it via `os.Path(arg, os.pwd)`), so registry
-      // membership compares canonically regardless of how the path was spelled on the command line.
+      // membership compares as a normalised absolute path regardless of how it was spelled on the command line.
+      // (Symlinks are not resolved — two symlinked spellings of one real dir could both register; acceptable for 4.0.)
       val path = repoPath
       if !os.exists(path) || !os.isDir(path) then Left(InstanceError.RepoNotFound(path))
       else if !os.exists(path / ".git") then Left(InstanceError.NotAGitRepo(path))
@@ -106,11 +110,34 @@ final class FileInstanceStore(home: os.Path = os.home) extends InstanceStore:
 
   /** Read + decode `repos.json`. A missing file decodes to [[RepoRegistry.empty]] (a freshly created instance always
     * has one, but tolerating absence keeps `add-repo` robust against a hand-deleted registry); a present-but-malformed
-    * file surfaces [[InstanceError.Malformed]] rather than silently resetting the registry.
+    * file (undecodable or a schema version this build does not read) surfaces [[InstanceError.Malformed]] rather than
+    * silently resetting the registry.
     */
   private def readRegistry(instance: Instance): Either[InstanceError, RepoRegistry] =
     val file = instance.reposFile
     if !os.exists(file) then Right(RepoRegistry.empty)
     else
-      try Right(RepoRegistry.fromJson(os.read(file)))
+      try
+        val reg = RepoRegistry.fromJson(os.read(file))
+        if reg.schemaVersion != RepoRegistry.CurrentSchemaVersion then
+          Left(InstanceError.Malformed(file, unsupportedSchema(reg.schemaVersion, RepoRegistry.CurrentSchemaVersion)))
+        else Right(reg)
       catch case NonFatal(t) => Left(InstanceError.Malformed(file, t))
+
+  /** Read + decode `config.json`, validating its schema version. Mirrors [[readRegistry]] so the two persisted files
+    * are handled symmetrically: a present-but-undecodable or wrong-schema config surfaces [[InstanceError.Malformed]].
+    */
+  private def decodeConfig(file: os.Path): Either[InstanceError, InstanceConfig] =
+    try
+      val cfg = InstanceConfig.fromJson(os.read(file))
+      if cfg.schemaVersion != InstanceConfig.CurrentSchemaVersion then
+        Left(InstanceError.Malformed(file, unsupportedSchema(cfg.schemaVersion, InstanceConfig.CurrentSchemaVersion)))
+      else Right(cfg)
+    catch case NonFatal(t) => Left(InstanceError.Malformed(file, t))
+
+  /** The `cause` carried on [[InstanceError.Malformed]] when a persisted file decodes but declares a `schemaVersion`
+    * this build does not read (the §4.0 carry-forward to 4.1's durable log will revisit migration; today an unknown
+    * version is a hard, forensically-labelled stop rather than a silent mis-decode).
+    */
+  private def unsupportedSchema(found: Int, expected: Int): Throwable =
+    new IllegalStateException(s"unsupported schemaVersion $found (this Forge build reads version $expected)")

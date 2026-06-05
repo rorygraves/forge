@@ -1,0 +1,40 @@
+{
+  "id": "extract-media-network-config-reroot",
+  "manifest": {
+    "schemaVersion": 1,
+    "featureId": "extract-media-network-config-reroot",
+    "title": "Extract media network config",
+    "baseBranch": "main",
+    "branchPrefix": "forge",
+    "mode": "claude-driver",
+    "designPr": null,
+    "pieces": [
+      {
+        "id": "p1",
+        "order": 1,
+        "title": "Introduce api/MediaNetworkConfig and route media timeout sites through it",
+        "summary": "Add a shared env-overridable MediaNetworkConfig for media HTTP timeouts, route TTS/STT/music sites through it, and add a config unit test.",
+        "specPath": "pieces/p1.md",
+        "acceptanceHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "status": "pending",
+        "baseSha": null,
+        "prNumber": null,
+        "mergeCommit": null,
+        "mergedAt": null,
+        "attempts": 0
+      }
+    ]
+  },
+  "state": {
+    "$type": "Abandoned",
+    "reason": "abandoned by operator (forge abandon)"
+  },
+  "cost": {
+    "feature": 0,
+    "piece": 0,
+    "turn": 0
+  },
+  "designSessionId": "5a46d895-7679-4156-ad2c-a8e0e5129dfd",
+  "currentPieceSessionId": null,
+  "branchProtectionCacheEpoch": 0
+}

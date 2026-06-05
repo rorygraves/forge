@@ -129,6 +129,38 @@ class FileInstanceStoreSuite extends munit.FunSuite:
       case Left(InstanceError.Malformed(file, _)) => assertEquals(file, instance.reposFile)
       case other => fail(s"expected Malformed, got $other")
 
+  tempHome.test("a repos.json with an unreadable schemaVersion surfaces Malformed"): home =>
+    val store = new FileInstanceStore(home)
+    val instance = store.create(Name).unsafeRunSync().toOption.get
+    os.write.over(
+      instance.reposFile,
+      RepoRegistry.toJson(RepoRegistry(RepoRegistry.CurrentSchemaVersion + 1, Vector.empty))
+    )
+    store.listRepos(instance).unsafeRunSync() match
+      case Left(InstanceError.Malformed(file, _)) => assertEquals(file, instance.reposFile)
+      case other => fail(s"expected Malformed on schema drift, got $other")
+
+  // --- malformed config (symmetric with the registry; exercises the load decode path) ---------
+
+  tempHome.test("load surfaces Malformed for a corrupt config.json rather than reading as valid"): home =>
+    val store = new FileInstanceStore(home)
+    val instance = store.create(Name).unsafeRunSync().toOption.get
+    os.write.over(instance.configFile, "{ not json")
+    store.load(Name).unsafeRunSync() match
+      case Left(InstanceError.Malformed(file, _)) => assertEquals(file, instance.configFile)
+      case other => fail(s"expected Malformed, got $other")
+
+  tempHome.test("load surfaces Malformed for a config.json with an unreadable schemaVersion"): home =>
+    val store = new FileInstanceStore(home)
+    val instance = store.create(Name).unsafeRunSync().toOption.get
+    os.write.over(
+      instance.configFile,
+      InstanceConfig.toJson(InstanceConfig(InstanceConfig.CurrentSchemaVersion + 1, Name))
+    )
+    store.load(Name).unsafeRunSync() match
+      case Left(InstanceError.Malformed(file, _)) => assertEquals(file, instance.configFile)
+      case other => fail(s"expected Malformed on schema drift, got $other")
+
   // --- worker re-root target (B1 wiring handoff to 4.0.4) --------------------
 
   tempHome.test("workerDir is instances/<name>/workers/<feature> — the B1 localRoot target"): home =>

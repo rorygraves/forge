@@ -1,0 +1,9 @@
+# committed specs that landed in szork repo (.forge/specs/extract-media-network-config-reroot/)
+/Users/rory.graves/workspace/home/szork/.forge/specs/extract-media-network-config-reroot/:
+[1;36mpieces[0m
+decomposition.md
+design.md
+manifest.json
+
+/Users/rory.graves/workspace/home/szork/.forge/specs/extract-media-network-config-reroot/pieces/:
+p1.md
