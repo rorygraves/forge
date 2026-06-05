@@ -878,6 +878,19 @@ deterministic step rather than a paid fix-up round.
 > `forge[bot]` instead of the operator's ambient git identity. Contract:
 > [`forge-design-1.14.md`](forge-design-1.14.md) (§18 + §6.5/§11.4); see
 > design-phase3-exit §9.
+>
+> **Whole-section-review findings — ✅ FIXED (2026-06-05):** a section review surfaced
+> three more issues, all fixed in [`forge-design-1.15.md`](forge-design-1.15.md). **P0
+> (safety)** — the profiler emitted `branchModel: trunk_based` as the *default* for
+> ordinary PR repos, but the orchestrator reads `TrunkBased` as direct-commit-no-PR, so a
+> normal repo could be direct-pushed past its PR/CI/review gates. Fix: a distinct
+> `BranchModel.pr_based` (the safe default), `trunk_based` reserved for genuinely no-PR
+> repos, `schemaVersion` 1→2, and the §11.4 direct-push gated on a current-schema profile
+> (a stale v1 `trunk_based` degrades to PRs). **P1** — the §8.2 CI autofix staged every
+> dirty path via raw `git status`, bypassing the `ChangeCollector` deny/ask policy; fix:
+> require a clean worktree + route through the shared staging classification. **P2** — the
+> profiler didn't read `README.md` (§3.3 / §4 say it should); fix: README is now a
+> first-class `RepoProfiler` input.
 
 ### 4.1 v2 candidates from design §20, picked by lived experience
 

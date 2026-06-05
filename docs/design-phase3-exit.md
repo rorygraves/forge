@@ -492,5 +492,29 @@ run-time and now ✅ fixed in code (§9).
   `Orchestrator.reviewerWallClock` (+ `ProfileCommand`'s cap) — one source of truth, no
   drift; defaults reproduce the C15 v1 values byte-for-byte. `ForgeConfigLoaderSuite`
   (+2). Contract: [`forge-design-1.14.md`](forge-design-1.14.md) §18.
+- **P0 — `trunk_based` could direct-push a PR repo** ✅ **FIXED (2026-06-05).** The
+  profiler emitted `branchModel: trunk_based` as the *default* for "PRs merge to a single
+  main/trunk" (ordinary repos), but the orchestrator reads `TrunkBased` as
+  direct-commit-no-PR (§11.4 trunk path) — so a normal PR repo (the szork fixture was
+  committed `trunk_based`) could be pushed straight to its base branch past PR/CI/review.
+  Fix: distinct `BranchModel.pr_based` (safe default), `trunk_based` reserved for
+  genuinely no-PR repos, `schemaVersion` 1→2, and `shouldCommitToTrunk` gated on
+  `TrunkBased && schemaVersion == CurrentSchemaVersion` (a stale v1 profile degrades to
+  PRs). Schema/prompts/fixtures updated; `OrchestratorTrunkPathSuite` (+2),
+  `RepoProfileDecoderSuite` (+1). Contract: [`forge-design-1.15.md`](forge-design-1.15.md)
+  §6.5/§11.4.
+- **P1 — CI autofix bypassed staging policy** ✅ **FIXED (2026-06-05).**
+  `runLocalAutofixAndPush` staged every dirty path from a raw `git status`, skipping the
+  §10.1 `ChangeCollector` deny/ask filtering, so unrelated operator edits or denied files
+  dirty during CI polling could be committed. Fix: require a clean worktree before the
+  formatter + route the delta through the shared `classifyChanges`/`stageChanges`.
+  `RealSideEffectsSuite` (+3: clean→commit, dirty→refused, denied→refused). Contract:
+  [`forge-design-1.15.md`](forge-design-1.15.md) §8.2.
+- **P2 — profiler didn't read README** ✅ **FIXED (2026-06-05).** §7.11 input carried
+  AGENTS/CLAUDE/build/workflows but not `README.md`, though §3.3/§4 list it — and repos
+  often document the package manager / test command / merge rules only there. Fix:
+  `RepoProfilerInput.readmeDoc` + `gatherInput` reads `README.md` + the prompt body /
+  both prompts render it. `ProfileCommandSuite` (+README assertions). Contract:
+  [`forge-design-1.15.md`](forge-design-1.15.md) §7.11.
 - **W5 — no-CI-repo short-circuit** (deferred; moot for toast-stats). Stays
   deferred until a real no-CI target exists.

@@ -28,14 +28,16 @@ that first; everything below is Claude-Code-specific.
   scalafmt CI failure on `szork` routed to `RunLocalCommand(sbt scalafmtAll)` →
   CI green, `attempts` unchanged, `forge stats` folding "1 fix-up round avoided"
   — dogfood-#2's \$1.78 / ~12 min / 2 rounds collapsed to a ~few-second \$0 step.
-  The live contract is now [`docs/forge-design-1.14.md`](docs/forge-design-1.14.md)
-  (S4-5 = the §18 `reviewer` model/cap block; D4 = §6.5 `commitIdentity`
-  consumed into the §11.4/§11.6 commit step; 1.7→1.14 are standalone-by-freeze
-  Phase-3 revisions). **Phase-3 exit criterion MET live 2026-06-05** (the Node/TS
-  `queryclient-config` run, design-phase3-exit.md ✅ closed); its one carried-forward
-  Forge gap (F3, CiReadiness late-check) plus the two residual "inherit a default"
-  items (**S4-5** reviewer model/cap, **D4** commit identity) are now all ✅ fixed.
-  **Next Phase-3 work = the whole-section review** that flips the roadmap §4 bullet.
+  The live contract is now [`docs/forge-design-1.15.md`](docs/forge-design-1.15.md)
+  (1.14 = S4-5 §18 `reviewer` block + D4 §6.5 `commitIdentity`; 1.15 = the
+  whole-section-review fixes — P0 `BranchModel.pr_based` + `schemaVersion 2`
+  direct-push safety, P1 §8.2 autofix staging guards, P2 profiler reads README;
+  1.7→1.15 are standalone-by-freeze Phase-3 revisions). **Phase-3 exit criterion
+  MET live 2026-06-05** (the Node/TS `queryclient-config` run, design-phase3-exit.md
+  ✅ closed). All section-review findings to date are fixed: F3 (CiReadiness
+  late-check), S4-5 (reviewer model/cap), D4 (commit identity), and the P0/P1/P2
+  review findings. **Next Phase-3 work = the whole-section review** that flips the
+  roadmap §4 bullet.
   Older closed audit trails include
   [`docs/design-2.1-tui.md`](docs/design-2.1-tui.md)
   (Slice 2.1 — Phase-2 TUI, ✅ closed 2026-06-01): read-only `forge tui
