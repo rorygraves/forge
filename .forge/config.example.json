@@ -1,0 +1,103 @@
+{
+  "_comment": "Example .forge/config.json — every key shown at its built-in default (forge-design-1.15.md §18). Copy to .forge/config.json and edit; config.json is OPTIONAL — a missing or partial file falls back to these defaults, and you only need to list the keys you change. Per-key overrides also load from .forge/overrides/<key>.json (the file replaces that whole top-level key). JSON has no comments, so the _comment keys here are ignored on decode (extra keys are tolerated) and exist only to document this example.",
+
+  "mode": "claude-driver",
+  "baseBranch": "main",
+  "branchPrefix": "forge",
+  "pollIntervalMs": 30000,
+
+  "maxFixupRounds": 3,
+  "maxDesignReviewRounds": 3,
+  "maxHaltRespawns": 5,
+
+  "maxFeatureCostUsd": 25.0,
+  "maxPieceCostUsd": 8.0,
+  "maxTurnCostUsd": 2.0,
+
+  "auditMode": "summary",
+  "logRetention": "keep-local",
+
+  "baseFreshness": {
+    "autoUpdate": true
+  },
+
+  "ci": {
+    "policy": "branch_protection_then_observed",
+    "requiredChecksOverlay": [],
+    "minimumExpectedChecks": 1,
+    "checkDiscoveryTimeoutSec": 180,
+    "stableGreenPolls": 2
+  },
+
+  "staging": {
+    "requireExplicitAllow": false,
+    "denyPatterns": [
+      "**/.env",
+      "**/.env.*",
+      "**/*.pem",
+      "**/*.key",
+      "**/id_rsa*",
+      "**/credentials.json",
+      "**/.aws/**",
+      "**/.ssh/**",
+      "**/target/**",
+      "**/build/**",
+      "**/dist/**",
+      "**/node_modules/**",
+      "**/.bloop/**",
+      "**/.metals/**",
+      "**/.idea/**",
+      "**/.vscode/**"
+    ],
+    "allowPatterns": []
+  },
+
+  "claude": {
+    "model": "default",
+    "permissionMode": "acceptEdits",
+    "allowedTools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebFetch", "AskUserQuestion"],
+    "disallowedTools": ["Task"],
+    "isolationFlag": "auto",
+    "reviewProcessRetries": 2,
+    "refineProcessRetries": 2
+  },
+
+  "codex": {
+    "sandbox": "read-only",
+    "driverSandbox": "workspace-write",
+    "reviewProcessRetries": 2,
+    "refineProcessRetries": 2
+  },
+
+  "settle": {
+    "specTimeoutSec": 300,
+    "designRevisionTimeoutSec": 600,
+    "implementTimeoutSec": 1800,
+    "fixupTimeoutSec": 900
+  },
+
+  "github": {
+    "commentApi": "line-based",
+    "cacheBranchProtection": true,
+    "branchProtectionTtlSec": 3600,
+    "cacheDiff": true,
+    "rateLimitBackoffMs": 60000,
+    "pushSnapshotTags": false,
+    "snapshotTagRetention": 3
+  },
+
+  "adapt": {
+    "enabled": true,
+    "localGate": true,
+    "autofix": true,
+    "llmClassifierOnUnknown": true,
+    "conventionLearner": true,
+    "workflowGate": true
+  },
+
+  "reviewer": {
+    "claudeModel": "haiku",
+    "codexModel": "gpt-5.3-codex",
+    "wallClockCapSec": 180
+  }
+}

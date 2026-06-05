@@ -19,10 +19,18 @@ Forge is in active development.
   (`forge run` / `forge spec` / `forge status`, plus the rest of the
   §15 command set), the headless orchestrator loop, cross-model review,
   and crash/restart durability are all implemented and tested.
+- **Phase 3 (Repo Adaptation) — complete.** Forge auto-profiles an
+  unfamiliar repository — its build tool, format/lint/build/test
+  commands, commit identity, and workflow shape — into a committed,
+  reviewable `.forge/profile.json`, and adapts to it. It drove a feature
+  end to end on a previously unseen Node/TypeScript repo with **zero
+  hardcoded-config edits**, handling a formatting failure as a free
+  local step (`prettier`) rather than a paid agent fix-up round.
 - **Phase 2 (MLP) — in progress.** This is the work that turns the
   working engine into something a developer other than the author can
-  comfortably pick up: run observability, packaging/distribution of a
-  standalone launcher, and onboarding polish.
+  comfortably pick up: run observability and a read-only TUI (both
+  landed), packaging/distribution of a standalone launcher, and
+  onboarding polish.
 
 > **Trying it today:** everything runs from source with `sbt`. There is
 > no packaged `forge` binary yet — a standalone launcher is part of the
@@ -30,7 +38,7 @@ Forge is in active development.
 > sbt. The engine itself is complete; the rough edge is distribution.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the phase plan and
-[`docs/forge-design-1.4.md`](docs/forge-design-1.4.md) for the
+[`docs/forge-design-1.15.md`](docs/forge-design-1.15.md) for the
 authoritative implementation contract.
 
 ## What it does
@@ -59,7 +67,7 @@ them as you — it does not manage their credentials):
 | **Claude Code CLI** | `2.1.150` | Validated flag set is pinned to this floor (see `docs/slice-0/`). |
 | **OpenAI Codex CLI** | `0.130.0` | Integration suite runs against `0.133.0`. |
 | **GitHub CLI (`gh`)** | `2.83.1` | All PR/branch operations go through it; run `gh auth login` first. |
-| **JDK + sbt** | — | Scala `3.5.2` (set by `build.sbt`); a recent JDK. |
+| **JDK + sbt** | — | Scala `3.7.1` (set by `build.sbt`); a recent JDK. |
 
 ### Build and check
 
@@ -97,8 +105,11 @@ sbt "forge-app/run tail my-feature"    # stream the feature's action log
 ```
 
 The full command set (`new`, `spec`, `run`, `resume`, `reconcile`,
-`refresh-cache`, `status`, `tail`, `rebuild-state`, `stats`,
-`unlock --force`) is specified in `docs/forge-design-1.4.md` §15.
+`refresh-cache`, `abandon`, `profile`, `status`, `tail`, `tui`,
+`rebuild-state`, `stats`, `unlock --force`) is specified in
+`docs/forge-design-1.15.md` §15. `forge profile` writes the repo's
+auto-derived `.forge/profile.json` (Phase 3 adaptation); `forge tui`
+opens a read-only terminal view of a feature's progress.
 
 > **Keep the first feature small.** Forge is built around small,
 > self-contained, reviewable pieces — and it spends real money on the
@@ -111,7 +122,14 @@ Per-project state lives under a `.forge/` directory **inside the target
 repository** (everything is routed through the `ForgePaths` helper):
 
 - `.forge/config.json` — your configuration (optional; sensible
-  defaults apply if absent).
+  defaults apply if absent). A fully-populated, copy-able template
+  lives at [`.forge/config.example.json`](.forge/config.example.json)
+  — every key at its built-in default, so you only keep the ones you
+  change.
+- `.forge/profile.json` — the auto-derived **repo profile** (build/
+  format/lint/test commands, commit identity, workflow shape), written
+  by `forge profile` and committed so it's reviewable and shared across
+  machines (Phase 3 adaptation).
 - `.forge/specs/<feature>/` — the committed spec assets (`design.md`,
   `manifest.json`, `decomposition.md`, `pieces/…`).
 - `.forge/state/`, `.forge/log/` — rebuilt state cache and the canonical
@@ -120,19 +138,21 @@ repository** (everything is routed through the `ForgePaths` helper):
 Reviewer assets (schemas, prompts, templates) are installed once per
 user under `~/.forge/{schemas,prompts,templates}/` on first use.
 
-`config.json` is JSON; the keys most worth knowing:
+`config.json` is JSON; the keys most worth knowing (the full §18
+reference is in the example file and the design doc):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `mode` | `ClaudeDriver` | Which CLI drives implementation (the other one reviews). |
-| `baseBranch` | `main` | Branch features are cut from and merged into. |
-| `branchPrefix` | `forge` | Prefix for the branches Forge creates. |
+| `mode` | `"claude-driver"` | Which CLI drives implementation (the other one reviews); the other valid value is `"codex-driver"`. |
+| `baseBranch` | `"main"` | Branch features are cut from and merged into. |
+| `branchPrefix` | `"forge"` | Prefix for the branches Forge creates. |
 | `maxPieceCostUsd` | `8.00` | Spend cap per piece. |
 | `maxFeatureCostUsd` | `25.00` | Spend cap per feature. |
 
-The reviewer models in v1 are the built-in **Claude `haiku`** /
-**Codex `gpt-5.3-codex`** pair with a per-review wall-clock cap. See
-`docs/forge-design-1.4.md` §18 for the complete config reference.
+The reviewer models in v1 default to the built-in **Claude `haiku`** /
+**Codex `gpt-5.3-codex`** pair with a per-review wall-clock cap, tunable
+via the `reviewer` block. See `docs/forge-design-1.15.md` §18 for the
+complete config reference.
 
 > **Heads-up for external users:** running the workflow against your own
 > repo from an sbt checkout is awkward today (the packaged `forge`
@@ -175,10 +195,11 @@ modules/
   here if you want to work *on* Forge).
 - [`docs/roadmap.md`](docs/roadmap.md) — phased delivery plan and
   current status.
-- [`docs/forge-design-1.4.md`](docs/forge-design-1.4.md) — the design
+- [`docs/forge-design-1.15.md`](docs/forge-design-1.15.md) — the design
   and implementation contract, including the full §15 command set. This
-  is the authoritative description of how Forge behaves (the 1.1–1.3
-  revisions are superseded stubs that point here).
+  is the authoritative description of how Forge behaves (earlier
+  revisions are superseded stubs that point at the live one;
+  [`docs/README.md`](docs/README.md) indexes the whole `docs/` tree).
 - [`docs/design-rationale.md`](docs/design-rationale.md) — non-obvious
   tradeoffs preserved through the design's evolution.
 - [`docs/slice-0/`](docs/slice-0/) — the captured CLI flag/transcript

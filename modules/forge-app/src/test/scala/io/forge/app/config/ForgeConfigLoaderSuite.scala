@@ -135,3 +135,17 @@ class ForgeConfigLoaderSuite extends munit.FunSuite:
     val config = ForgeConfigLoader.load(paths).unsafeRunSync()
     assertEquals(config.map(_.baseBranch), Right("trunk"))
   }
+
+  // §3.4 OSS-readiness — the committed `.forge/config.example.json` must stay a valid, copy-able config that decodes to
+  // the §18 defaults. This both proves a stranger can copy it to `config.json` unchanged (the documentation `_comment`
+  // keys are unknown-key-tolerated by upickle) and guards against the example drifting from the schema defaults as new
+  // §18 knobs are added. `os.pwd` is the repo root under sbt (see ForgePathsSuite).
+  test("the committed config.example.json decodes to the §18 defaults") {
+    val example = os.pwd / ".forge" / "config.example.json"
+    assert(os.exists(example), s"expected $example to exist (§3.4 OSS-readiness)")
+    val paths = new ForgePaths(os.temp.dir(prefix = "forge-config-example-"))
+    try
+      os.write.over(paths.configFile, os.read(example), createFolders = true)
+      assertEquals(ForgeConfigLoader.loadSync(paths), Right(ForgeConfig.Default))
+    finally if os.exists(paths.repoRoot) then os.remove.all(paths.repoRoot)
+  }

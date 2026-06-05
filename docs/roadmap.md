@@ -518,11 +518,27 @@ prompt diffs in git; they're load-bearing for behaviour.
 
 ### 3.4 OSS-readiness scaffolding
 
-- README that's actually useful to a stranger.
-- Config templates committed (`.forge/config.example.json`).
-- `prices.example.json` kept current with OpenAI model list.
-- Pointer to design doc + rationale from README.
+- ✅ **README that's actually useful to a stranger** (2026-06-05) — freshened to
+  the live contract (`forge-design-1.4.md` → `forge-design-1.15.md`, ×4), the
+  Scala floor (`3.5.2` → `3.7.1`), the full §15 command set (added `abandon` /
+  `profile` / `tui`), the correct `mode` wire value (`"claude-driver"`, not
+  `ClaudeDriver`), the `.forge/config.example.json` + `.forge/profile.json`
+  pointers, and a new Phase-3 (Repo Adaptation) status bullet.
+- ✅ **Config templates committed (`.forge/config.example.json`)** (2026-06-05) —
+  every §18 key at its built-in default, mirroring `ForgeConfig.scala`
+  field-for-field; a `ForgeConfigLoaderSuite` regression decodes the committed
+  example to `ForgeConfig.Default` so it can't drift from the schema (and proves
+  it's copy-able to `config.json` unchanged — the `_comment` doc keys are
+  unknown-key-tolerated).
+- `prices.example.json` kept current with OpenAI model list — already shipped
+  (Slice 1.1, `modules/forge-agents/src/main/resources/`); perpetual upkeep item.
+- ✅ **Pointer to design doc + rationale from README** (2026-06-05) — the
+  Documentation section points at the live `forge-design-1.15.md`,
+  `design-rationale.md`, and the `docs/README.md` index.
 - LICENSE already in place.
+- **Still open: standalone launcher / packaging.** There is no `forge` binary on
+  `PATH` yet — everything runs through `sbt "forge-app/run …"`. The README's
+  "Trying it today" note flags this as the remaining distribution gap.
 - ✅ **Resolve the termflow dependency for fresh clones** (was carried forward
   from Slice 2.1 / design-rationale **BT1**) — **RESOLVED UPSTREAM 2026-06-01.**
   `forge-tui` is written against termflow `0.4.0`; at Slice 2.1 close that was
