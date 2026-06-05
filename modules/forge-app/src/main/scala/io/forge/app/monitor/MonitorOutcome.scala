@@ -42,10 +42,12 @@ object MonitorOutcome:
   final case class SettleTimeout(phase: SessionPhase, reason: String, killError: Option[String] = None)
       extends MonitorOutcome
 
-  /** Per-turn USD cap breached mid-turn (§12 check 3). The monitor invoked `session.kill()` before returning. Maps to
-    * [[io.forge.core.fsm.FsmEvent.TurnBudgetBreached]]; Slice-4 formats `turnUsd` + `capUsd` into the FsmEvent message
-    * string (e.g. `s"turn cost \$$turnUsd exceeded cap \$$capUsd"`). `killError` mirrors the SettleTimeout semantics
-    * above — populated when `session.kill()` raised.
+  /** Per-turn USD cap breached. **Dormant since Slice 2.2 (S4-3 / A1):** [[RealSessionMonitor]] no longer constructs
+    * this — the per-turn cap is now a post-hoc, non-killing advisory (cost is reported only at turn-end, so the breach
+    * is observed after the turn and its spend are already complete; killing then reclaims nothing). The variant is kept
+    * for the FSM contract and direct test injection; `killError` therefore stays `None` in practice. Still maps to
+    * [[io.forge.core.fsm.FsmEvent.TurnBudgetBreached]]; [[io.forge.app.orchestrator.PostSettleSynthesis]] formats
+    * `turnUsd` + `capUsd` into the FsmEvent message string (e.g. `s"turn cost \$$turnUsd exceeded cap \$$capUsd"`).
     */
   final case class TurnBudgetBreached(
       phase: SessionPhase,

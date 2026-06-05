@@ -37,12 +37,12 @@
 |---|---|---|
 | 0 — Slice 0 | CLI capabilities validated | ✅ closed |
 | 1 — MVP | Single-repo self-host end-to-end | ✅ closed |
-| 2 — MLP | Pleasant single-repo daily-driver | open — Slice 2.0 (observability) ✅, Slice 2.1 (TUI) ✅, §3.4 OSS-readiness ✅ (config example + README + standalone `forge` launcher; published-binary polish still open); **§3.5 tuning + S4-3 reviewer-cost widening — implementation landed (Slice 2.2, contract 1.16), pending whole-section review**; a small dogfood-#2 resilience pass still open |
+| 2 — MLP | Pleasant single-repo daily-driver | open — Slice 2.0 (observability) ✅, Slice 2.1 (TUI) ✅, §3.4 OSS-readiness ✅ (config example + README + standalone `forge` launcher; published-binary polish still open); **§3.5 tuning + S4-3 reviewer-cost widening ✅ (Slice 2.2, contract 1.16 — whole-section review landed clean 2026-06-05)**; a small dogfood-#2 resilience pass still open |
 | 3 — v1.0: **Repo Adaptation** ⭐ | Deterministic spine + agentic senses; works on any repo via its CLAUDE.md + a derived, hashed `RepoProfile` | ✅ **closed 2026-06-05** (contract `forge-design-1.15.md`) — **all six sub-slices 3.0–3.5 ✅ closed**; **exit criterion MET live** (`queryclient-config` on the Node/TS fork `rorygraves/toast-stats` → `FeatureDone`, §8.2 prettier-collapse; [`design-phase3-exit.md`](design-phase3-exit.md) closed); **whole-section review landed** — all findings fixed (F3 CiReadiness late-check, S4-5 reviewer config, D4 commit identity, P0 `pr_based`/schema-2 trunk-push safety, P1 §8.2 autofix staging, P2 profiler reads README) |
 | 4 — v2.0 | Workspace (multi-repo) + workstreams + daemon + multi-workstream cockpit TUI | needs `forge-design-2.0.md` first |
 | 5 — v3.0+ | Agentic-dev cockpit (knowledge base, reactive review, custom triggers) | concept |
 
-**Live docs:** this roadmap · spec [`forge-design-1.16.md`](forge-design-1.16.md) · [`design-rationale.md`](design-rationale.md) · index [`README.md`](README.md). The per-slice `design-*.md` files (`design-1.4.md` … `design-3.5.md`) are *closed* audit trails kept for historical reference; [`design-2.2-tuning.md`](design-2.2-tuning.md) (Slice 2.2 — §3.5 driver/reviewer tuning + S4-3) is the most recent, **implementation landed, pending whole-section review**. The index sorts live-vs-historical.
+**Live docs:** this roadmap · spec [`forge-design-1.16.md`](forge-design-1.16.md) · [`design-rationale.md`](design-rationale.md) · index [`README.md`](README.md). The per-slice `design-*.md` files (`design-1.4.md` … `design-3.5.md`) are *closed* audit trails kept for historical reference; [`design-2.2-tuning.md`](design-2.2-tuning.md) (Slice 2.2 — §3.5 driver/reviewer tuning + S4-3) is the most recent, **✅ closed 2026-06-05 (whole-section review landed clean)**. The index sorts live-vs-historical.
 
 ---
 
@@ -570,7 +570,7 @@ are the forward-looking homes for the design-2.0 §4 carry-forwards that
 out-scoped the observability slice (full dispositions in
 [`design-2.0.md`](design-2.0.md) §4 and [`design-rationale.md`](design-rationale.md)):
 
-- [~] **Reviewer + driver model / wall-clock-cap / retry §18 tuning**
+- [x] **Reviewer + driver model / wall-clock-cap / retry §18 tuning**
   (design-rationale **S4-5**, and **S4-3** reviewer-cost widening). **The S4-5
   model + cap knobs landed** (Phase-3 section-review prep, 2026-06-05): the §18
   `reviewer` block (`reviewer.claudeModel` / `reviewer.codexModel` /
@@ -588,8 +588,11 @@ out-scoped the observability slice (full dispositions in
   re-tuning + the **per-turn-cap-is-post-hoc** finding — `maxTurnCostUsd` is now a
   non-killing advisory (the $2 cap could only kill *after* the $9.56 turn already
   completed), retuned 2 → 15; the wall-clock settle cap is the only mid-turn
-  interrupt. Reviewer process-retry *counts* need no change. **`[~]` stays open
-  until the whole-section code review lands** (then flip to `[x]`).
+  interrupt. Reviewer process-retry *counts* need no change. **✅ Whole-section
+  code review landed clean 2026-06-05** — one documentation-only coherence finding
+  fixed (the `MonitorOutcome.TurnBudgetBreached` / `SessionMonitor` docstrings,
+  stale after the per-turn kill path was removed, now mark the variant dormant); no
+  functional findings. `[~]` → `[x]`.
 - [x] **Driver-respawn-avoidance on resume-from-NHI** (design-2.0 §4 **D3**
   large half). ✅ **CLOSED 2026-06-01** — all five chunks (D3-0…D3-4) landed and
   the spec deltas are reconciled into the live contract (then v1.5, now

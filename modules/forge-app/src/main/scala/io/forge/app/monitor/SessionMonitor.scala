@@ -15,8 +15,12 @@ import scala.concurrent.duration.FiniteDuration
   *   - [[MonitorOutcome.Settled]] — the stream terminated with an `AgentEvent.Result`.
   *   - [[MonitorOutcome.SettleTimeout]] — `limits.settleTimeout` elapsed first; the monitor calls `session.kill()`
   *     before returning.
-  *   - [[MonitorOutcome.TurnBudgetBreached]] — per-turn USD cap exceeded mid-turn (§12 check 3); the monitor calls
-  *     `session.kill()` before returning.
+  *   - [[MonitorOutcome.TurnBudgetBreached]] — per-turn USD cap exceeded. **Dormant since Slice 2.2 (S4-3 / A1):**
+  *     [[RealSessionMonitor]] no longer produces this — the per-turn cap is now a post-hoc, non-killing advisory (cost
+  *     is reported only at turn-end, so a breach is observed after the turn and its spend are already complete; killing
+  *     then reclaims nothing). The variant + its `FsmEvent.TurnBudgetBreached` handling are retained for the FSM
+  *     contract and direct test injection. The cumulative feature/piece caps below are the real budget enforcement; the
+  *     wall-clock settle timeout is the only mid-turn interrupt.
   *   - [[MonitorOutcome.BudgetBreached]] — feature- or piece-scope USD cap exceeded; the monitor does **not** call
   *     `kill()` (§12 check 2 — current turn completes, orchestrator refuses next spawn).
   *
@@ -28,10 +32,11 @@ import scala.concurrent.duration.FiniteDuration
   * can't silently drop a settle event for the wrong phase.
   *
   * **Cost-totals ownership.** The orchestrator (Slice 4) owns `runningTotals`. The monitor reads it via `modify` to
-  * apply each `CostUpdate` delta and check caps, but it does **not** reset `CostTotals.turn` on
-  * `AgentEvent.UserMessage` / `AgentEvent.Result` — that reset is the orchestrator's per-turn-boundary responsibility,
-  * so the FSM state machine sees a coherent `turnTotalUsd` at every transition. The monitor treats `CostTotals.turn` as
-  * authoritative when checking the per-turn cap.
+  * apply each `CostUpdate` delta and check the cumulative feature/piece caps, but it does **not** reset
+  * `CostTotals.turn` on `AgentEvent.UserMessage` / `AgentEvent.Result` — that reset is the orchestrator's
+  * per-turn-boundary responsibility, so the FSM state machine sees a coherent `turnTotalUsd` at every transition. (The
+  * monitor no longer gates on `CostTotals.turn` since Slice 2.2 made the per-turn cap a non-killing advisory — see the
+  * `TurnBudgetBreached` note above; `turn` is still accumulated for the §19 `cost.update` audit.)
   *
   * **Per-turn observability (Slice 2.0).** `monitor` returns a [[MonitorReport]] — the settle outcome plus this turn's
   * aggregated [[io.forge.core.cost.Cost Cost]] and CLI-reported `durationMs`. The orchestrator records those as the §19
@@ -49,12 +54,13 @@ trait SessionMonitor:
   ): IO[MonitorReport]
 
 /** §7.9 + §12 per-session caps. All USD amounts are `BigDecimal` to match the `Cost.usd` / `CostTotals.*` shape in
-  * [[io.forge.core.cost.Cost]] (Slice 2 PR-B). The orchestrator parses the JSON `maxTurnCostUsd: 2.00` form via
+  * [[io.forge.core.cost.Cost]] (Slice 2 PR-B). The orchestrator parses the JSON `maxTurnCostUsd: 15.00` form via
   * `BigDecimal(...)` directly so the budget path has no `Double`-precision round-trip.
   *
   * `maxFeatureCostUsd` and `maxPieceCostUsd` are optional because v1.2 §12 lets either be unset (the monitor only
-  * checks the configured ones). `maxTurnCostUsd` and `settleTimeout` are required — they're the universal "this turn
-  * went runaway" / "this session never finished" backstops.
+  * checks the configured ones); they are the preventive "this turn went runaway" backstops. `maxTurnCostUsd` and
+  * `settleTimeout` are required, but `maxTurnCostUsd` is a post-hoc, non-killing advisory since Slice 2.2 (see the
+  * `TurnBudgetBreached` note above); `settleTimeout` is the universal "this session never finished" mid-turn interrupt.
   */
 final case class SessionLimits(
     settleTimeout: FiniteDuration,
