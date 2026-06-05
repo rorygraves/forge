@@ -9,7 +9,7 @@ import io.forge.core.fsm.{Feature, FsmEvent, SessionPhase, SettleOutcome}
 import io.forge.core.manifest.Piece
 import io.forge.core.paths.ForgePaths
 import io.forge.core.pr.{CheckResult, CheckRollup, PrSnapshot, PrState}
-import io.forge.core.profile.{ClaudeMdProposal, RepoCommand}
+import io.forge.core.profile.{ClaudeMdProposal, CommitIdentity, RepoCommand}
 import io.forge.git.branch.{BranchError, BranchManager}
 import io.forge.git.branch.protection.RequiredChecksOverlay
 import io.forge.git.cli.{CommitResult, GhClient, GhError, GitClient, GitError, StatusEntry}
@@ -55,7 +55,11 @@ final class RealSideEffects(
     specStore: SpecStore,
     docSync: DocSync,
     paths: ForgePaths,
-    config: ForgeConfig
+    config: ForgeConfig,
+    // D4 — the §6.5 `RepoProfile.commitIdentity` resolved **once per run** (build-time, by `OrchestratorBuilder`).
+    // `Some` for a profiled run with `adapt.enabled` (every Forge commit is authored as that identity, default
+    // `forge[bot]`); `None` for an unprofiled / `adapt.enabled = false` run (ambient git identity — pre-D4 behaviour).
+    commitIdentity: Option[CommitIdentity] = None
 ) extends SideEffects:
 
   import RealSideEffects.statusToFileChanges
@@ -213,7 +217,7 @@ final class RealSideEffects(
       _ <- et(docSync.writeDecomposition(feature.id))(docErr)
       _ <- et(git.stage(Vector(relPath(paths.featureSpecDir(feature.id)))))(gitErr)
       _ <- assertHeadIs(feature.manifest.designBranch)
-      _ <- et(git.commit(s"[design] ${feature.manifest.title}"))(gitErr)
+      _ <- et(git.commit(s"[design] ${feature.manifest.title}", commitIdentity))(gitErr)
       _ <- et(branchManager.pushCurrentBranch())(branchErr)
       body <- EitherT.liftF[IO, String, String](designPrBody(feature))
       pr <- et(branchManager.createPr(s"[design] ${feature.manifest.title}", body, feature.manifest.baseBranch))(
@@ -241,7 +245,7 @@ final class RealSideEffects(
           _ <- et(docSync.writeDecomposition(feature.id))(docErr)
           _ <- stageChanges(included)
           _ <- assertHeadIs(feature.manifest.pieceBranch(piece))
-          _ <- et(git.commit(s"feat(${feature.id.value}): ${p.title}"))(gitErr)
+          _ <- et(git.commit(s"feat(${feature.id.value}): ${p.title}", commitIdentity))(gitErr)
           _ <- et(branchManager.pushCurrentBranch())(branchErr)
           // Idempotency (roadmap §3.5 driver-respawn-avoidance, Unit A): if a prior post-settle pass already opened the
           // PR for this branch and crashed before the `PrOpened` transition persisted, re-running here must NOT call
@@ -265,7 +269,7 @@ final class RealSideEffects(
           included <- classifyChanges
           _ <- stageChanges(included)
           _ <- assertHeadIs(feature.manifest.pieceBranch(piece))
-          _ <- et(git.commit(s"fix(${feature.id.value}): ${p.title}"))(gitErr)
+          _ <- et(git.commit(s"fix(${feature.id.value}): ${p.title}", commitIdentity))(gitErr)
           _ <- et(branchManager.pushCurrentBranch())(branchErr)
         yield settled(SessionPhase.Fixup)).value
 
@@ -288,7 +292,7 @@ final class RealSideEffects(
           _ <- et(docSync.writeDecomposition(feature.id))(docErr)
           _ <- stageChanges(included)
           _ <- assertHeadIs(feature.manifest.baseBranch)
-          _ <- et(git.commit(s"feat(${feature.id.value}): ${p.title}"))(gitErr)
+          _ <- et(git.commit(s"feat(${feature.id.value}): ${p.title}", commitIdentity))(gitErr)
           sha <- et(git.currentSha)(gitErr)
           _ <- et(branchManager.pushCurrentBranch())(branchErr)
           now <- EitherT.liftF[IO, String, Instant](IO.realTimeInstant)
@@ -319,7 +323,7 @@ final class RealSideEffects(
       )
       _ <- et(git.stage(changedPaths))(gitErr)
       _ <- assertHeadIs(feature.manifest.pieceBranch(piece))
-      committed <- et(git.commit(s"style(${feature.id.value}): ${command.argv.mkString(" ")}"))(gitErr)
+      committed <- et(git.commit(s"style(${feature.id.value}): ${command.argv.mkString(" ")}", commitIdentity))(gitErr)
       _ <- EitherT.cond[IO](
         committed == CommitResult.Committed,
         (),
@@ -397,7 +401,9 @@ final class RealSideEffects(
             _ <- EitherT.liftF[IO, String, Unit](appendConventionToClaudeMd(proposal))
             _ <- et(git.stage(Vector("CLAUDE.md")))(gitErr)
             _ <- assertHeadIs(branch)
-            committed <- et(git.commit(s"docs(${feature.id.value}): convention learned by forge"))(gitErr)
+            committed <- et(git.commit(s"docs(${feature.id.value}): convention learned by forge", commitIdentity))(
+              gitErr
+            )
             _ <- EitherT.cond[IO](
               committed == CommitResult.Committed,
               (),

@@ -2,6 +2,7 @@ package io.forge.git.cli
 
 import cats.effect.IO
 import io.forge.core.{BranchName, Sha}
+import io.forge.core.profile.CommitIdentity
 
 /** Result of [[GitClient.fastForwardBase]]. The three cases are exhaustive:
   *
@@ -124,10 +125,15 @@ trait GitClient:
   def status(includeIgnored: Boolean = false): IO[Either[GitError, Vector[StatusEntry]]]
 
   /** `git commit -m <message>` (Task 1.4.10-d2a). A clean tree maps to [[CommitResult.NothingToCommit]] (not an error);
-    * a real commit maps to [[CommitResult.Committed]] — read the new SHA via [[currentSha]]. Identity is ambient (the
-    * repo / global `user.name` / `user.email`); committer-as-bot policy is an orchestrator concern, not the seam's.
+    * a real commit maps to [[CommitResult.Committed]] — read the new SHA via [[currentSha]].
+    *
+    * `author` is the §6.5 `RepoProfile.commitIdentity` consumption point (D4): when `Some`, the commit is authored
+    * **and** committed as that identity (via a per-invocation `-c user.name`/`-c user.email`), so a profiled repo's
+    * `forge[bot]` identity is honoured; when `None`, identity is ambient (the repo / global `user.name` /
+    * `user.email`). The seam stays policy-free — the orchestrator decides *which* identity (or none) per the resolved
+    * profile.
     */
-  def commit(message: String): IO[Either[GitError, CommitResult]]
+  def commit(message: String, author: Option[CommitIdentity] = None): IO[Either[GitError, CommitResult]]
 
   /** `git show-ref --verify refs/heads/<name>` — exit 0 ⇒ exists. */
   def branchExistsLocal(name: BranchName): IO[Either[GitError, Boolean]]

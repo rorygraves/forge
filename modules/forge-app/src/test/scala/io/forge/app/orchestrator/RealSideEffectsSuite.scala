@@ -24,6 +24,7 @@ import io.forge.core.fsm.{FsmEvent, FsmState, SessionPhase}
 import io.forge.core.manifest.Manifest
 import io.forge.core.paths.ForgePaths
 import io.forge.core.pr.PrState
+import io.forge.core.profile.CommitIdentity
 import io.forge.git.branch.{BaseFreshness, BaseSnapshot, BranchError, BranchManager, ForgeCommand, PreflightReport}
 import io.forge.git.branch.protection.{OverlaySource, RequiredChecksOverlay}
 import io.forge.git.cli.{CommitResult, FastForwardResult, GhClient, GhError, GitClient, GitError, StatusEntry}
@@ -63,7 +64,8 @@ class RealSideEffectsSuite extends munit.FunSuite:
       prNumber: PrNumber = PrNumber(42),
       prForBranch: Either[GhError, Option[PrNumber]] = Right(None),
       connector: Connector = new FakeConnector,
-      headBranch: BranchName = BranchName("forge/feat/p1")
+      headBranch: BranchName = BranchName("forge/feat/p1"),
+      commitIdentity: Option[CommitIdentity] = None
   ): RealSideEffects =
     val paths = ForgePaths(repoRoot, repoRoot / "home")
     new RealSideEffects(
@@ -75,7 +77,8 @@ class RealSideEffectsSuite extends munit.FunSuite:
       specStore = new FakeSpecStore(design, Map(p1 -> pieceSpec)),
       docSync = new FakeDocSync,
       paths = paths,
-      config = ForgeConfig.Default
+      config = ForgeConfig.Default,
+      commitIdentity = commitIdentity
     )
 
   private def feature(state: FsmState) =
@@ -117,6 +120,26 @@ class RealSideEffectsSuite extends munit.FunSuite:
     val pr = calls.indexWhere(_.startsWith("bm.createPr"))
     assert(staged >= 0 && committed > staged && pushed > committed && pr > pushed, calls.mkString(" | "))
     assert(calls.exists(_ == "git.commit(feat(feat): Piece p1)"), calls.mkString(" | "))
+
+  // --- D4: profile commitIdentity is consumed at the commit seam ---
+  tempFixture.test("D4: a resolved commitIdentity authors the piece commit (forge[bot])"): repo =>
+    val calls = ArrayBuffer.empty[String]
+    val status = Vector(StatusEntry('M', ' ', "src/Main.scala", None, ignored = false))
+    val identity = CommitIdentity("forge[bot]", "forge@users.noreply.github.com")
+    val se = sut(repo, calls = calls, status = status, prNumber = PrNumber(7), commitIdentity = Some(identity))
+    se.classifyCommitOpenPr(feature(FsmState.PieceImplementing(p1)), p1).unsafeRunSync()
+    assert(
+      calls.exists(_ == "git.commit(feat(feat): Piece p1 as forge[bot] <forge@users.noreply.github.com>)"),
+      calls.mkString(" | ")
+    )
+
+  tempFixture.test("D4: an unprofiled run (no commitIdentity) commits with ambient identity (no author override)"):
+    repo =>
+      val calls = ArrayBuffer.empty[String]
+      val status = Vector(StatusEntry('M', ' ', "src/Main.scala", None, ignored = false))
+      val se = sut(repo, calls = calls, status = status, prNumber = PrNumber(7)) // commitIdentity defaults to None
+      se.classifyCommitOpenPr(feature(FsmState.PieceImplementing(p1)), p1).unsafeRunSync()
+      assert(calls.exists(_ == "git.commit(feat(feat): Piece p1)"), calls.mkString(" | "))
 
   tempFixture.test("classifyCommitOpenPr: an already-open PR for the branch is reused, createPr is skipped (§3.5)"):
     repo =>
@@ -424,8 +447,12 @@ class RealSideEffectsSuite extends munit.FunSuite:
     def stage(paths: Vector[String]): IO[Either[GitError, Unit]] =
       IO { calls += s"git.stage(${paths.mkString(",")})"; Right(()) }
     def status(includeIgnored: Boolean): IO[Either[GitError, Vector[StatusEntry]]] = IO.pure(Right(statusEntries))
-    def commit(message: String): IO[Either[GitError, CommitResult]] =
-      IO { calls += s"git.commit($message)"; Right(CommitResult.Committed) }
+    def commit(message: String, author: Option[CommitIdentity]): IO[Either[GitError, CommitResult]] =
+      IO {
+        val who = author.fold("")(id => s" as ${id.name} <${id.email}>")
+        calls += s"git.commit($message$who)"
+        Right(CommitResult.Committed)
+      }
     def branchExistsLocal(name: BranchName): IO[Either[GitError, Boolean]] = IO.pure(Right(true))
     def branchExistsRemote(name: BranchName): IO[Either[GitError, Boolean]] = IO.pure(Right(false))
 

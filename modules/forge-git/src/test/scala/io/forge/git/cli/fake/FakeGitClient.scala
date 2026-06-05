@@ -2,6 +2,7 @@ package io.forge.git.cli.fake
 
 import cats.effect.IO
 import io.forge.core.{BranchName, Sha}
+import io.forge.core.profile.CommitIdentity
 import io.forge.git.cli.{CommitResult, FastForwardResult, GitClient, GitError, StatusEntry}
 
 /** Test-only [[GitClient]] stub. Same shape as [[FakeGhClient]] — builder DSL, "unconfigured" default for every method.
@@ -47,7 +48,8 @@ final class FakeGitClient private (
   override def branchExistsRemote(name: BranchName): IO[Either[GitError, Boolean]] = branchExistsRemoteFn(name)
   override def stage(paths: Vector[String]): IO[Either[GitError, Unit]] = stageFn(paths)
   override def status(includeIgnored: Boolean): IO[Either[GitError, Vector[StatusEntry]]] = statusFn(includeIgnored)
-  override def commit(message: String): IO[Either[GitError, CommitResult]] = commitFn(message)
+  override def commit(message: String, author: Option[CommitIdentity]): IO[Either[GitError, CommitResult]] =
+    commitFn(message)
 
 object FakeGitClient:
 

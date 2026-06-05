@@ -8,6 +8,7 @@ import io.forge.core.{Cli, Mode, RolePairing}
 import io.forge.core.log.{ActionLog, FileActionLog}
 import io.forge.core.manifest.FileManifestStore
 import io.forge.core.paths.ForgePaths
+import io.forge.core.profile.{CommitIdentity, FileProfileStore}
 import io.forge.core.state.FileStateCache
 import io.forge.git.branch.RealBranchManager
 import io.forge.git.branch.protection.InMemoryBranchProtectionCache
@@ -51,6 +52,7 @@ object OrchestratorBuilder:
       connector <- ConnectorFactory.build(pairing.driver, paths, config)
       protectionCache <- InMemoryBranchProtectionCache(ttl = config.github.branchProtectionTtlSec.seconds)
       log <- FileActionLog(paths)
+      commitIdentity <- resolveCommitIdentity(paths, config)
     yield
       val git = new RealGitClient(paths.repoRoot)
       val gh = new RealGhClient(paths.repoRoot)
@@ -66,7 +68,18 @@ object OrchestratorBuilder:
       val reviewer = new RetryingReviewerCall(new RealReviewerCall(connector), reviewRetries, refineRetries)
       val monitor = new RealSessionMonitor
       val sideEffects =
-        new RealSideEffects(connector, branchManager, git, gh, changeCollector, specStore, docSync, paths, config)
+        new RealSideEffects(
+          connector,
+          branchManager,
+          git,
+          gh,
+          changeCollector,
+          specStore,
+          docSync,
+          paths,
+          config,
+          commitIdentity
+        )
       val orchestrator = new Orchestrator(
         sideEffects,
         monitor,
@@ -81,6 +94,17 @@ object OrchestratorBuilder:
         profileStore = profileStore
       )
       (orchestrator, log)
+
+  /** D4 — resolve the §6.5 `RepoProfile.commitIdentity` once at build time so every Forge commit in the run is authored
+    * as that identity (default `forge[bot]`). `None` when `adapt.enabled` is false or the repo is unprofiled (ambient
+    * git identity — pre-D4 behaviour). This is a cheap, idempotent profile *read* (no sensor / LLM); it mirrors
+    * `Orchestrator.resolveProfile`'s `profileStore.load()`, but is **best-effort** (`.attempt` → `None`): the
+    * authoritative §6.5 malformed-`profile.json` error is the orchestrator's to raise, not the builder's, so a bad
+    * profile degrades the commit author to ambient rather than failing construction before the orchestrator can report.
+    */
+  private def resolveCommitIdentity(paths: ForgePaths, config: ForgeConfig): IO[Option[CommitIdentity]] =
+    if !config.adapt.enabled then IO.pure(None)
+    else new FileProfileStore(paths).load().attempt.map(_.toOption.flatten.map(_.commitIdentity))
 
   /** §18 → [[PRWatcherConfig]]. `pollIntervalMs` drives the inter-poll cadence; the rate-limit back-off reuses the
     * `github.rateLimitBackoffMs` knob so the watcher and the gh client agree on how long to pause after a 429. A

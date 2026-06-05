@@ -2,6 +2,7 @@ package io.forge.git.cli
 
 import cats.effect.unsafe.implicits.global
 import io.forge.core.BranchName
+import io.forge.core.profile.CommitIdentity
 
 /** Task 1.4.10-d2a — `RealGitClient.stage` / `commit` / `status` against a real `git` binary in a throwaway repo. The
   * seam these add (working-tree staging + structured porcelain status + clean-tree-aware commit) is what the §11.4 /
@@ -48,6 +49,26 @@ class RealGitClientCommitSuite extends munit.FunSuite:
     assertEquals(client.commit("add c.txt").unsafeRunSync(), Right(CommitResult.Committed))
     val after = client.currentSha.unsafeRunSync().getOrElse(fail("currentSha after"))
     assertNotEquals(before, after, "HEAD must move after a real commit")
+
+  fixture.test("D4: commit(author = Some(identity)) authors AND commits as that identity, overriding ambient config"):
+    work =>
+      // The repo's ambient identity is `t <t@example.com>` (seeded in the fixture). A profiled run passes the §6.5
+      // commitIdentity, which must win for BOTH the author and the committer of the new commit.
+      val client = RealGitClient(work)
+      os.write(work / "d.txt", "id\n")
+      assertEquals(client.stage(Vector("d.txt")).unsafeRunSync(), Right(()))
+      val identity = CommitIdentity("forge[bot]", "forge@users.noreply.github.com")
+      assertEquals(client.commit("authored by forge", Some(identity)).unsafeRunSync(), Right(CommitResult.Committed))
+      val who = os.proc("git", "log", "-1", "--format=%an|%ae|%cn|%ce").call(cwd = work).out.text().trim
+      assertEquals(who, "forge[bot]|forge@users.noreply.github.com|forge[bot]|forge@users.noreply.github.com")
+
+  fixture.test("D4: commit with no author keeps the ambient identity (pre-D4 behaviour)"): work =>
+    val client = RealGitClient(work)
+    os.write(work / "a.txt", "ambient\n")
+    assertEquals(client.stage(Vector("a.txt")).unsafeRunSync(), Right(()))
+    assertEquals(client.commit("ambient author").unsafeRunSync(), Right(CommitResult.Committed))
+    val who = os.proc("git", "log", "-1", "--format=%an|%ae").call(cwd = work).out.text().trim
+    assertEquals(who, "t|t@example.com")
 
   fixture.test("stage force-adds a gitignored-but-allowed path (Forge's .forge/specs source of truth)"): work =>
     // The target repo gitignores `.forge/` so it doesn't dirty the worktree, but Forge force-includes its own

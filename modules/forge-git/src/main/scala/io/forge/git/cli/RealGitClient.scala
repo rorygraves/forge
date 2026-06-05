@@ -3,6 +3,7 @@ package io.forge.git.cli
 import cats.data.EitherT
 import cats.effect.IO
 import io.forge.core.{BranchName, Sha}
+import io.forge.core.profile.CommitIdentity
 
 import scala.util.matching.Regex
 
@@ -148,15 +149,20 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
       Vector("git", "status", "--porcelain", "-z") ++ (if includeIgnored then Vector("--ignored") else Vector.empty)
     run(argv).map(_.map(RealGitClient.parseStatusZ))
 
-  override def commit(message: String): IO[Either[GitError, CommitResult]] =
+  override def commit(message: String, author: Option[CommitIdentity]): IO[Either[GitError, CommitResult]] =
     // `--no-verify`: Forge's commit is a mechanical orchestration step — verification is the remote CI gate (§8) plus
     // the reviewer, NOT the target repo's local dev hooks. Some repos install a pre-commit hook that runs the full
     // formatter/build (e.g. szork runs `sbt scalafmtCheck`), which is slow and would block (or fail) the orchestrator's
     // commit on unformatted-but-about-to-be-CI-checked code. Bypass local hooks; let CI catch formatting → fix-up.
     // Deliberately no `-q`: git prints "nothing to commit" to stdout, which the classifier keys off.
+    // D4: a `Some(identity)` sets `user.name`/`user.email` for *this* invocation only (`-c`), which git uses for both
+    // the author and the committer — so a profiled repo's `commitIdentity` (default `forge[bot]`) authors the commit
+    // instead of the ambient git config. `None` leaves identity ambient (pre-D4 behaviour).
+    val identityArgs: Vector[String] =
+      author.toVector.flatMap(id => Vector("-c", s"user.name=${id.name}", "-c", s"user.email=${id.email}"))
+    val argv = Vector("git") ++ identityArgs ++ Vector("commit", "--no-verify", "-m", message)
     IO.blocking {
-      val res =
-        os.proc("git", "commit", "--no-verify", "-m", message).call(cwd = repoRoot, check = false, stderr = os.Pipe)
+      val res = os.proc(argv).call(cwd = repoRoot, check = false, stderr = os.Pipe)
       RealGitClient.classifyCommit(res.exitCode, res.out.text(), res.err.text())
     }
 
