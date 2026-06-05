@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+#
+# forge — standalone launcher for the Forge meta-orchestrator (roadmap §3.4).
+#
+# Runs the self-contained `forge.jar` (built by `sbt forge-app/assembly` and
+# installed by `scripts/install-forge.sh`). Put this script on your PATH and run
+# `forge <command>` from inside the repo you want Forge to drive — it does NOT
+# change directory, so `io.forge.app.Main` resolves the target repo from the
+# current working directory (or an explicit `--repo-root`).
+#
+# Resolution:
+#   - FORGE_JAR, if set, is used verbatim.
+#   - otherwise ${FORGE_HOME:-$HOME/.forge}/lib/forge.jar.
+#
+# Knobs:
+#   - FORGE_HOME       state/asset root (default ~/.forge); also where the jar lives.
+#   - FORGE_JAR        explicit path to the fat jar, overriding FORGE_HOME/lib/forge.jar.
+#   - FORGE_JAVA       java binary (default: java on PATH, else $JAVA_HOME/bin/java).
+#   - FORGE_JAVA_OPTS  extra JVM options (e.g. -Xmx).
+#
+set -euo pipefail
+
+forge_home="${FORGE_HOME:-$HOME/.forge}"
+jar="${FORGE_JAR:-$forge_home/lib/forge.jar}"
+
+if [[ ! -f "$jar" ]]; then
+  cat >&2 <<EOF
+forge: launcher jar not found at: $jar
+
+Build and install it from the Forge source checkout:
+    scripts/install-forge.sh
+
+Or point FORGE_JAR at an existing forge.jar:
+    FORGE_JAR=/path/to/forge.jar forge <command>
+EOF
+  exit 70
+fi
+
+java_bin="${FORGE_JAVA:-}"
+if [[ -z "$java_bin" ]]; then
+  if command -v java >/dev/null 2>&1; then
+    java_bin="java"
+  elif [[ -n "${JAVA_HOME:-}" && -x "$JAVA_HOME/bin/java" ]]; then
+    java_bin="$JAVA_HOME/bin/java"
+  else
+    echo "forge: no 'java' on PATH and JAVA_HOME is unset; install a JDK (21+)." >&2
+    exit 70
+  fi
+fi
+
+# shellcheck disable=SC2086
+exec "$java_bin" ${FORGE_JAVA_OPTS:-} -jar "$jar" "$@"

@@ -112,7 +112,23 @@ lazy val `forge-app` = (project in file("modules/forge-app"))
     // `forge spec` line-mode REPL reads cleanly from the console (`sbt "forge-app/run ..."`).
     Compile / run / fork := true,
     Compile / run / connectInput := true,
-    Compile / run / outputStrategy := Some(StdoutOutput)
+    Compile / run / outputStrategy := Some(StdoutOutput),
+    // Roadmap §3.4 OSS-readiness: `sbt forge-app/assembly` builds the self-contained `forge.jar`
+    // that `scripts/install-forge.sh` drops under `~/.forge/lib/` for the `bin/forge` launcher.
+    // The fat jar bundles every module plus the `assets/` and `prices.example.json` classpath
+    // resources, so AssetInstaller's `getResourceAsStream` reads work outside the repo checkout.
+    assembly / mainClass := Some("io.forge.app.Main"),
+    assembly / assemblyJarName := "forge.jar",
+    assembly / assemblyMergeStrategy := {
+      // sbt-assembly's default already discards MANIFEST.MF / module-info; these cover the
+      // duplicate metadata that the cats-effect / fs2 / jackson (json-schema-validator) graph ships.
+      case PathList("META-INF", "versions", _*) => MergeStrategy.discard
+      case PathList("META-INF", "services", _*) => MergeStrategy.concat
+      case path if path.endsWith("module-info.class") => MergeStrategy.discard
+      case other =>
+        val default = (assembly / assemblyMergeStrategy).value
+        default(other)
+    }
   )
 
 // Integration tests against real claude/codex/gh CLIs. Built last (Slice 1+). Intentionally NOT in root's

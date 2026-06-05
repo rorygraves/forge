@@ -29,13 +29,14 @@ Forge is in active development.
 - **Phase 2 (MLP) — in progress.** This is the work that turns the
   working engine into something a developer other than the author can
   comfortably pick up: run observability and a read-only TUI (both
-  landed), packaging/distribution of a standalone launcher, and
+  landed), packaging of a standalone `forge` launcher (landed), and
   onboarding polish.
 
-> **Trying it today:** everything runs from source with `sbt`. There is
-> no packaged `forge` binary yet — a standalone launcher is part of the
-> Phase 2 OSS-readiness work — so the commands below are invoked through
-> sbt. The engine itself is complete; the rough edge is distribution.
+> **Trying it today:** install the standalone launcher with
+> `scripts/install-forge.sh` and run `forge <command>` from inside any
+> repo (see [Install the `forge` launcher](#install-the-forge-launcher)
+> below), or run everything from source with `sbt` while hacking on
+> Forge itself.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the phase plan and
 [`docs/forge-design-1.15.md`](docs/forge-design-1.15.md) for the
@@ -83,26 +84,52 @@ sbt scalafmtCheckAll
 The default test run uses fake CLIs and never touches Claude, Codex, or
 GitHub, so it runs anywhere.
 
+### Install the `forge` launcher
+
+The recommended way to use Forge is the standalone launcher. From the
+Forge source checkout:
+
+```bash
+scripts/install-forge.sh
+```
+
+This builds a self-contained `forge.jar` (`sbt forge-app/assembly`),
+copies it to `~/.forge/lib/forge.jar`, and installs a small `forge`
+launcher into `~/.local/bin` (override with `--bin-dir DIR`). Make sure
+that directory is on your `PATH`, then run `forge` from inside whichever
+repo you want it to drive:
+
+```bash
+forge status        # run from inside the target repo
+```
+
+The launcher is a thin wrapper around `java -jar`; it does not change
+directory, so Forge operates on your current working directory (or an
+explicit `--repo-root`). Re-run `scripts/install-forge.sh` after pulling
+new source to refresh the jar. Knobs: `FORGE_HOME` (state/jar root,
+default `~/.forge`), `FORGE_JAR` (explicit jar path), `FORGE_JAVA_OPTS`
+(extra JVM options). Requires a JDK 21+ on `PATH`.
+
+> **No `PATH` install?** You can skip the launcher and run the jar
+> directly: `java -jar ~/.forge/lib/forge.jar <command>`.
+
 ### Run Forge
 
 The CLI entry point is `io.forge.app.Main` in the `forge-app` module.
-There is no `forge` binary on your `PATH` yet (packaging is Phase 2
-work), so today it is launched through sbt:
-
-```bash
-sbt "forge-app/run <command> <args>"
-```
-
 The typical flow for a single feature is **new → spec → run**, then
 watch it with **status / tail**:
 
 ```bash
-sbt "forge-app/run new my-feature"     # create the feature + its design branch
-sbt "forge-app/run spec my-feature"    # flesh out the spec in the interactive REPL (/done to finish)
-sbt "forge-app/run run my-feature"     # drive it: review → implement pieces → PRs → merge
-sbt "forge-app/run status"             # one line per feature (omit the name for the overview)
-sbt "forge-app/run tail my-feature"    # stream the feature's action log
+forge new my-feature     # create the feature + its design branch
+forge spec my-feature    # flesh out the spec in the interactive REPL (/done to finish)
+forge run my-feature     # drive it: review → implement pieces → PRs → merge
+forge status             # one line per feature (omit the name for the overview)
+forge tail my-feature    # stream the feature's action log
 ```
+
+While hacking on Forge itself, you can run any command from source
+through sbt instead of installing the launcher — `sbt "forge-app/run
+<command> <args>"`, e.g. `sbt "forge-app/run status"`.
 
 The full command set (`new`, `spec`, `run`, `resume`, `reconcile`,
 `refresh-cache`, `abandon`, `profile`, `status`, `tail`, `tui`,
@@ -154,11 +181,12 @@ The reviewer models in v1 default to the built-in **Claude `haiku`** /
 via the `reviewer` block. See `docs/forge-design-1.15.md` §18 for the
 complete config reference.
 
-> **Heads-up for external users:** running the workflow against your own
-> repo from an sbt checkout is awkward today (the packaged `forge`
-> launcher that you'd run from inside any repo is exactly the Phase 2
-> OSS-readiness gap). If you mainly want to *see Forge work* against the
-> real agent CLIs right now, the integration suites below are the
+> **Heads-up for external users:** install the launcher
+> (`scripts/install-forge.sh`, above) and run `forge` from inside your
+> own repo. The remaining rough edge is distribution polish — there is
+> no published binary or package yet; you build the jar from this
+> checkout. If you mainly want to *see Forge work* against the real
+> agent CLIs right now, the integration suites below are the
 > lowest-friction path.
 
 ### See it drive the real CLIs (tests)
