@@ -39,7 +39,7 @@
 | 1 — MVP | Single-repo self-host end-to-end | ✅ closed |
 | 2 — MLP | Pleasant single-repo daily-driver | open — Slice 2.0 (observability) ✅, Slice 2.1 (TUI) ✅, §3.4 OSS-readiness ✅ (config example + README + standalone `forge` launcher; published-binary polish still open); **§3.5 tuning + S4-3 reviewer-cost widening ✅ (Slice 2.2, contract 1.16 — whole-section review landed clean 2026-06-05)**; a small dogfood-#2 resilience pass still open |
 | 3 — v1.0: **Repo Adaptation** ⭐ | Deterministic spine + agentic senses; works on any repo via its CLAUDE.md + a derived, hashed `RepoProfile` | ✅ **closed 2026-06-05** (contract `forge-design-1.15.md`) — **all six sub-slices 3.0–3.5 ✅ closed**; **exit criterion MET live** (`queryclient-config` on the Node/TS fork `rorygraves/toast-stats` → `FeatureDone`, §8.2 prettier-collapse; [`design-phase3-exit.md`](design-phase3-exit.md) closed); **whole-section review landed** — all findings fixed (F3 CiReadiness late-check, S4-5 reviewer config, D4 commit identity, P0 `pr_based`/schema-2 trunk-push safety, P1 §8.2 autofix staging, P2 profiler reads README) |
-| 4 — v2.0 | Workspace (multi-repo) + workstreams + daemon + multi-workstream cockpit TUI | needs `forge-design-2.0.md` first |
+| 4 — v2.0 | Workspace (multi-repo) + workstreams + daemon + multi-workstream cockpit TUI | **design ratified 2026-06-05** ([`forge-design-2.0.md`](forge-design-2.0.md)); implementation not started (sub-slices 4.0–4.6, §5/§11) |
 | 5 — v3.0+ | Agentic-dev cockpit (knowledge base, reactive review, custom triggers) | concept |
 
 **Live docs:** this roadmap · spec [`forge-design-1.16.md`](forge-design-1.16.md) · [`design-rationale.md`](design-rationale.md) · index [`README.md`](README.md). The per-slice `design-*.md` files (`design-1.4.md` … `design-3.5.md`) are *closed* audit trails kept for historical reference; [`design-2.2-tuning.md`](design-2.2-tuning.md) (Slice 2.2 — §3.5 driver/reviewer tuning + S4-3) is the most recent, **✅ closed 2026-06-05 (whole-section review landed clean)**. The index sorts live-vs-historical.
@@ -54,7 +54,7 @@
 | 1 — Testability MVP | Forge ships its own next slice | `forge-design-1.4.md` §17 slices 1–4 |
 | 2 — MLP | Pleasant single-repo daily-driver | §17 slice 5 + polish |
 | 3 — v1.0: Repo Adaptation | Works on a stranger's repo / any stack via its CLAUDE.md + derived profile; deterministic spine + agentic senses | §4 + `forge-design-1.7.md` (to open) + role-trait refactor |
-| 4 — v2.0 | Forge-instance pivot (multi-repo, daemon, parallel, containerised) | Needs its own design doc (`forge-design-2.0.md`) before work starts |
+| 4 — v2.0 | Forge-instance pivot (multi-repo, daemon, parallel, containerised) | [`forge-design-2.0.md`](forge-design-2.0.md) (design ratified 2026-06-05; implementation sub-slices 4.0–4.6) |
 | 5 — v3.0+ | Agentic-dev cockpit (knowledge base, reactive review, triggers) | Concept notes only |
 
 Phases are gates, not calendar quarters. Each gate has an explicit exit
