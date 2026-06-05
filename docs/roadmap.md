@@ -38,11 +38,11 @@
 | 0 — Slice 0 | CLI capabilities validated | ✅ closed |
 | 1 — MVP | Single-repo self-host end-to-end | ✅ closed |
 | 2 — MLP | Pleasant single-repo daily-driver | open — Slice 2.0 (observability) ✅, Slice 2.1 (TUI) ✅; §3.4 OSS / §3.5 tuning / a small dogfood-#2 resilience pass still open |
-| 3 — v1.0: **Repo Adaptation** ⭐ | Deterministic spine + agentic senses; works on any repo via its CLAUDE.md + a derived, hashed `RepoProfile` | open — **all six sub-slices 3.0–3.5 ✅ closed** (contract `forge-design-1.13.md`); **exit criterion MET live 2026-06-05** (`queryclient-config` on the Node/TS fork `rorygraves/toast-stats` → `FeatureDone`, §8.2 prettier-collapse; [`design-phase3-exit.md`](design-phase3-exit.md) closed). Bullet un-ticked pending a whole-section review; the one follow-up **F3** (CiReadiness late-check) is ✅ fixed (2026-06-05) |
+| 3 — v1.0: **Repo Adaptation** ⭐ | Deterministic spine + agentic senses; works on any repo via its CLAUDE.md + a derived, hashed `RepoProfile` | ✅ **closed 2026-06-05** (contract `forge-design-1.15.md`) — **all six sub-slices 3.0–3.5 ✅ closed**; **exit criterion MET live** (`queryclient-config` on the Node/TS fork `rorygraves/toast-stats` → `FeatureDone`, §8.2 prettier-collapse; [`design-phase3-exit.md`](design-phase3-exit.md) closed); **whole-section review landed** — all findings fixed (F3 CiReadiness late-check, S4-5 reviewer config, D4 commit identity, P0 `pr_based`/schema-2 trunk-push safety, P1 §8.2 autofix staging, P2 profiler reads README) |
 | 4 — v2.0 | Workspace (multi-repo) + workstreams + daemon + multi-workstream cockpit TUI | needs `forge-design-2.0.md` first |
 | 5 — v3.0+ | Agentic-dev cockpit (knowledge base, reactive review, custom triggers) | concept |
 
-**Live docs:** this roadmap · spec [`forge-design-1.12.md`](forge-design-1.12.md) · [`design-rationale.md`](design-rationale.md) · index [`README.md`](README.md). The per-slice `design-*.md` files (`design-1.4.md` … `design-3.5.md`) are *closed* audit trails kept for historical reference — the index sorts live-vs-historical.
+**Live docs:** this roadmap · spec [`forge-design-1.15.md`](forge-design-1.15.md) · [`design-rationale.md`](design-rationale.md) · index [`README.md`](README.md). The per-slice `design-*.md` files (`design-1.4.md` … `design-3.5.md`) are *closed* audit trails kept for historical reference — the index sorts live-vs-historical.
 
 ---
 
@@ -853,7 +853,7 @@ with a different stack** (e.g. a Node or Python repo), having auto-profiled it,
 with **zero hardcoded-config edits**, and the formatter handled as a local
 deterministic step rather than a paid fix-up round.
 
-> **Met live 2026-06-05 (bullet still un-ticked — pending whole-section review).**
+> **✅ MET live 2026-06-05; whole-section review landed — Phase 3 CLOSED.**
 > The `queryclient-config` run drove the Node/TS fork `rorygraves/toast-stats` to
 > `FeatureDone`: auto-profiled, zero config edits, the §8.2 prettier-collapse on a
 > CI failure (rules, conf 0.97, `attempts` 0, no LLM), both PRs merged. Plan +

@@ -34,10 +34,12 @@ that first; everything below is Claude-Code-specific.
   direct-push safety, P1 §8.2 autofix staging guards, P2 profiler reads README;
   1.7→1.15 are standalone-by-freeze Phase-3 revisions). **Phase-3 exit criterion
   MET live 2026-06-05** (the Node/TS `queryclient-config` run, design-phase3-exit.md
-  ✅ closed). All section-review findings to date are fixed: F3 (CiReadiness
+  ✅ closed). All section-review findings are fixed: F3 (CiReadiness
   late-check), S4-5 (reviewer model/cap), D4 (commit identity), and the P0/P1/P2
-  review findings. **Next Phase-3 work = the whole-section review** that flips the
-  roadmap §4 bullet.
+  review findings. **Phase 3 (v1.0 Repo Adaptation) ✅ CLOSED 2026-06-05 — the
+  whole-section review landed clean and flipped the roadmap §4 bullet.** Next
+  open work is Phase 2's remaining tail (§3.4 OSS-readiness, §3.5 driver/reviewer
+  tuning) or opening `forge-design-2.0.md` for Phase 4 (multi-repo workspace).
   Older closed audit trails include
   [`docs/design-2.1-tui.md`](docs/design-2.1-tui.md)
   (Slice 2.1 — Phase-2 TUI, ✅ closed 2026-06-01): read-only `forge tui
