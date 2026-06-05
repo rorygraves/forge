@@ -102,7 +102,7 @@ a daemon-spawned process (that is B4 / 4.1+).
   (no-such-instance, repo-not-found, duplicate-repo). Unit tests against a
   tmp-dir `home`.
 
-- [ ] **Task 4.0.3 — CLI: `init-instance` / `add-repo` / `list-repos`.** Three
+- [x] **Task 4.0.3 — CLI: `init-instance` / `add-repo` / `list-repos`.** Three
   new commands in the `forge-app` command layer + `CliParser`. `init-instance`
   creates the instance dir + empty registry; `add-repo` validates the path is a
   git working tree and registers it; `list-repos` prints the registry. These are
@@ -149,6 +149,30 @@ a daemon-spawned process (that is B4 / 4.1+).
   12 `FileInstanceStoreSuite` tests over a tmp `home` + `InstanceName` cases in
   `IdsSuite`; full `sbt test` green (forge-instance 12, forge-core 468), smell
   sweep passes. Tasks 4.0.3 (CLI), 4.0.4 (wiring), 4.0.5 (live re-run) open.
+- **2026-06-05** — **Task 4.0.3 (CLI: `init-instance` / `add-repo` /
+  `list-repos`) landed.** `forge-app` now `dependsOn forge-instance`. New
+  `CommandClass.Instance` + `InstanceCommand` ADT (`InitInstance` /
+  `AddRepo` / `ListRepos`) parsed by `CliParser.parseInstance` (third parse
+  entry point alongside `phase2`; instance commands are CLI-layer-only, so they
+  get their own result type rather than being shoehorned into the
+  branch-preflight `ForgeCommand`). `Main` routes `CommandClass.Instance` to a
+  new `runInstance` that loads **no** config / assets / per-checkout lock — only
+  `paths.home` matters. The `io.forge.app.command.InstanceCommands` handlers:
+  `init-instance` creates the instance, `add-repo` resolves + registers a git
+  working tree, `list-repos` prints the registry; `add-repo` / `list-repos`
+  resolve their target via an optional `--instance <name>` flag, falling back to
+  the **sole** instance when exactly one exists (zero/many with no flag → a
+  guided exit-1). `FileProcessLock`'s primary constructor was generalised to take
+  the lock + metadata paths directly (per-checkout `ForgePaths` form kept as a
+  convenience constructor), so the same primitive backs the new **instance-level**
+  lock at `instances/<name>/.lock` (`Instance.lockFile` / `lockMetadataFile`);
+  the mutating commands serialize on it with `acceptStale = true`. To let the
+  lock lay down the empty instance dir before the registry files,
+  `InstanceStore.create`'s duplicate guard moved from the directory to
+  `config.json` (the same marker `load` uses). 7 new `CliParserSuite` cases + 11
+  `InstanceCommandsSuite` cases over a tmp `home`; full `sbt test` green
+  (forge-app 465, forge-instance 12), `scalafmtCheckAll` clean, smell sweep
+  passes. Tasks 4.0.4 (orchestrator path wiring), 4.0.5 (live re-run) open.
 
 ---
 

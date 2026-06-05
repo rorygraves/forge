@@ -1,6 +1,6 @@
 package io.forge.app.cli
 
-import io.forge.core.{FeatureId, PieceId}
+import io.forge.core.{FeatureId, InstanceName, PieceId}
 import io.forge.git.branch.ForgeCommand
 import io.forge.git.branch.ForgeCommand.ReadOnlyKind
 
@@ -27,6 +27,13 @@ enum CommandClass:
   /** `unlock --force` — the §13 recovery path; loads no config, constructs no connector, acquires no lock. */
   case UnlockForce
 
+  /** `init-instance | add-repo | list-repos` — Phase-4 §4 instance-registry commands (Task 4.0.3). Instance-scoped, not
+    * per-checkout: they load **no** [[io.forge.app.config.ForgeConfig]], construct no connector, and never take the
+    * per-checkout process lock — the mutating ones (`init-instance` / `add-repo`) serialize on an instance-level lock
+    * under `~/.forge/instances/<name>/` instead. Parsed via [[CliParser.parseInstance]] into an [[InstanceCommand]].
+    */
+  case Instance
+
 /** Phase-1 parse result: enough to route resource setup, with per-command args deferred to [[CliParser.phase2]]. */
 final case class Invocation(
     repoRoot: Option[String],
@@ -39,6 +46,20 @@ final case class Invocation(
     rest: Vector[String]
 )
 
+/** Parsed Phase-4 instance-registry command (Task 4.0.3) — the [[CommandClass.Instance]] analogue of [[ForgeCommand]],
+  * kept in the CLI layer rather than `forge-git` because instance commands never touch branch/PR preflight.
+  *
+  * `add-repo` / `list-repos` carry an **optional** target instance: `Some(name)` from an explicit `--instance <name>`
+  * flag, or `None` to let the handler resolve the default (the sole instance when exactly one exists). `init-instance`
+  * always names its instance positionally. `repoPath` stays a raw string here — the handler resolves it against
+  * `os.pwd` into an absolute `os.Path` (a parse-layer `os.Path` would bind to the wrong cwd).
+  */
+sealed trait InstanceCommand extends Product with Serializable
+object InstanceCommand:
+  final case class InitInstance(name: InstanceName) extends InstanceCommand
+  final case class AddRepo(instance: Option[InstanceName], repoPath: String) extends InstanceCommand
+  final case class ListRepos(instance: Option[InstanceName]) extends InstanceCommand
+
 /** Argv parse failures. All map to `EX_USAGE` (exit 64) at the `Main` boundary. */
 sealed trait CliError extends Product with Serializable:
   def message: String
@@ -47,7 +68,8 @@ object CliError:
   case object NoCommand extends CliError:
     def message: String =
       "no command given; expected one of: " +
-        "new, spec, run, status, resume, reconcile, refresh-cache, abandon, profile, rebuild-state, unlock, tail, stats, tui"
+        "new, spec, run, status, resume, reconcile, refresh-cache, abandon, profile, rebuild-state, unlock, tail, " +
+        "stats, tui, init-instance, add-repo, list-repos"
 
   final case class UnknownCommand(name: String) extends CliError:
     def message: String = s"unknown command '$name'"
@@ -69,6 +91,15 @@ object CliError:
 
   case object UnlockRequiresForce extends CliError:
     def message: String = "'unlock' requires --force (the only supported form is `forge unlock --force`)"
+
+  final case class MissingInstanceName(command: String) extends CliError:
+    def message: String = s"'$command' requires an <instance-name> argument"
+
+  final case class InvalidInstanceName(raw: String, reason: String) extends CliError:
+    def message: String = s"invalid instance name '$raw': $reason"
+
+  final case class MissingRepoPath(command: String) extends CliError:
+    def message: String = s"'$command' requires a <path> argument"
 
 object CliParser:
 
@@ -101,6 +132,7 @@ object CliParser:
       case "refresh-cache" | "abandon" => Right((CommandClass.StateChanging, false))
       case "status" | "tail" | "rebuild-state" | "stats" | "tui" => Right((CommandClass.ReadOnly, false))
       case "unlock" => Right((CommandClass.UnlockForce, false))
+      case "init-instance" | "add-repo" | "list-repos" => Right((CommandClass.Instance, false))
       case other => Left(CliError.UnknownCommand(other))
 
   // --- phase 2 ---------------------------------------------------------------
@@ -192,3 +224,48 @@ object CliParser:
     val i = rest.indexOf(flag)
     if i >= 0 && i + 1 < rest.length && !rest(i + 1).startsWith("--") then Right(rest(i + 1))
     else Left(CliError.MissingFlagValue(flag))
+
+  // --- instance commands (Task 4.0.3) ---------------------------------------
+
+  /** Parse a [[CommandClass.Instance]] invocation into an [[InstanceCommand]]. The third parse entry point alongside
+    * [[phase2]] (which only produces [[ForgeCommand]]s): instance commands are CLI-layer-only, so they get their own
+    * result type rather than being shoehorned into the branch-preflight `ForgeCommand` ADT. Usage errors surface as
+    * [[CliError]] → `EX_USAGE` (exit 64) at the `Main` boundary, exactly like [[phase2]].
+    */
+  def parseInstance(name: String, rest: Vector[String]): Either[CliError, InstanceCommand] =
+    name match
+      case "init-instance" =>
+        // The instance name is positional; `--instance` is meaningless here (the command *is* the name).
+        firstPositional(rest)
+          .toRight(CliError.MissingInstanceName("init-instance"))
+          .flatMap(instanceName)
+          .map(InstanceCommand.InitInstance(_))
+
+      case "add-repo" =>
+        extractInstanceFlag(rest).flatMap { (instance, remaining) =>
+          firstPositional(remaining)
+            .toRight(CliError.MissingRepoPath("add-repo"))
+            .map(repo => InstanceCommand.AddRepo(instance, repo))
+        }
+
+      case "list-repos" =>
+        extractInstanceFlag(rest).map((instance, _) => InstanceCommand.ListRepos(instance))
+
+      case other => Left(CliError.UnknownCommand(other))
+
+  /** First positional (non-`--`) token, if any. */
+  private def firstPositional(rest: Vector[String]): Option[String] = rest.find(t => !t.startsWith("--"))
+
+  private def instanceName(raw: String): Either[CliError, InstanceName] =
+    InstanceName.fromString(raw).left.map(CliError.InvalidInstanceName(raw, _))
+
+  /** Pull an optional `--instance <name>` flag out of `rest`, returning the parsed name (or `None`) and the remaining
+    * tokens with the flag + its value removed — so a later positional scan (`add-repo`'s `<path>`) doesn't mistake the
+    * flag's value for the positional. A `--instance` with no value, or an invalid name, is a usage error.
+    */
+  private def extractInstanceFlag(rest: Vector[String]): Either[CliError, (Option[InstanceName], Vector[String])] =
+    rest.indexOf("--instance") match
+      case -1 => Right((None, rest))
+      case i if i + 1 < rest.length && !rest(i + 1).startsWith("--") =>
+        instanceName(rest(i + 1)).map(n => (Some(n), rest.patch(i, Nil, 2)))
+      case _ => Left(CliError.MissingFlagValue("--instance"))

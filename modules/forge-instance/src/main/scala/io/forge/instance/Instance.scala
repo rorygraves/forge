@@ -31,6 +31,16 @@ final case class Instance(name: InstanceName, dir: os.Path):
     */
   def workerDir(feature: FeatureId): os.Path = workersDir / feature.value
 
+  /** `instances/<name>/.lock` — the instance-level OS lock file (Task 4.0.3). The `init-instance` / `add-repo` registry
+    * commands serialize on this instead of the per-checkout `.forge/state/.lock`, since they mutate instance-scoped
+    * state (the registry), not a repo checkout. Same leaf names as the per-checkout lock (`.lock` + `.lock.json`); full
+    * instance-lock ownership (held by the long-running daemon) is 4.1's job.
+    */
+  def lockFile: os.Path = dir / ".lock"
+
+  /** `instances/<name>/.lock.json` — sibling holder-metadata for [[lockFile]] (the §13 "who holds it?" diagnostic). */
+  def lockMetadataFile: os.Path = dir / ".lock.json"
+
 object Instance:
   /** Resolve the on-disk directory for `name` under `home`'s instance root (default `os.home`) — does **not** touch
     * disk. Use [[InstanceStore]] to create/load with existence + decode checks.

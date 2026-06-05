@@ -25,15 +25,25 @@ import upickle.default.{read => upickleRead, write => upickleWrite}
   * instances do not share refcount state and `FileChannel.tryLock`'s `OverlappingFileLockException` is what catches the
   * collision in that case.
   *
-  * @param paths
-  *   [[ForgePaths]] supplying the lock file and metadata file paths. Parent directory is created on first acquire.
+  * Task 4.0.3 generalises the primary constructor to take the lock + metadata paths **directly**, so the same primitive
+  * backs both the per-checkout lock (`ForgePaths` convenience constructor below) and the Phase-4 instance-level lock
+  * (`instances/<name>/.lock`, supplied by `io.forge.instance.Instance`). The parent directory of `lockFile` is created
+  * on first acquire, so an instance lock can lay down its (empty) instance dir before the registry files are written.
+  *
+  * @param lockFile
+  *   the OS lock file. Its parent directory is created on first acquire.
+  * @param metadataFile
+  *   the sibling holder-metadata file written on `Acquired` and removed on clean release.
   */
-final class FileProcessLock(paths: ForgePaths) extends ProcessLock:
+final class FileProcessLock(lockFile: os.Path, metadataFile: os.Path) extends ProcessLock:
+
+  /** Per-checkout convenience: the §13 lock at `.forge/state/.lock` + `.lock.json` derived from [[ForgePaths]]. */
+  def this(paths: ForgePaths) = this(paths.lockFile, paths.lockMetadataFile)
 
   import FileProcessLock.*
 
-  private val lockPath: os.Path = paths.lockFile
-  private val metadataPath: os.Path = paths.lockMetadataFile
+  private val lockPath: os.Path = lockFile
+  private val metadataPath: os.Path = metadataFile
 
   // `holder` is guarded by `monitor`. All acquire / release / forceRelease paths take the monitor before touching
   // OS lock state or metadata so the ref count and the channel/lock pair move atomically.

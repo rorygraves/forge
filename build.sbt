@@ -111,7 +111,9 @@ lazy val `forge-tui` = (project in file("modules/forge-tui"))
   )
 
 lazy val `forge-app` = (project in file("modules/forge-app"))
-  .dependsOn(`forge-core`, `forge-agents`, `forge-git`, `forge-specs`, `forge-tui`)
+  // Phase-4 Slice 4.0 (Task 4.0.3): forge-instance supplies the instance registry store + Instance handle for the
+  // `init-instance` / `add-repo` / `list-repos` CLI commands (and, in 4.0.4, the worker re-root paths).
+  .dependsOn(`forge-core`, `forge-agents`, `forge-git`, `forge-specs`, `forge-tui`, `forge-instance`)
   .settings(commonSettings)
   .settings(
     libraryDependencies ++= Seq(catsEffect, fs2Core, osLib, catsEffectTestkit),

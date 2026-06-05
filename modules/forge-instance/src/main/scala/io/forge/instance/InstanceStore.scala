@@ -46,7 +46,11 @@ final class FileInstanceStore(home: os.Path = os.home) extends InstanceStore:
   override def create(name: InstanceName): IO[Either[InstanceError, Instance]] =
     IO.blocking {
       val instance = Instance.at(name, home)
-      if os.exists(instance.dir) then Left(InstanceError.DuplicateInstance(name))
+      // Guard on `config.json` (the same marker `load` uses), not the directory: the Task 4.0.3 `init-instance` flow
+      // acquires the instance lock *first*, and acquiring `instance.lockFile` creates the (empty) instance dir as a
+      // side effect. A bare dir without a `config.json` is therefore "not yet an instance", so it must not read as a
+      // duplicate; the present-config check is the true "already exists" test and keeps `create` idempotent-safe.
+      if os.exists(instance.configFile) then Left(InstanceError.DuplicateInstance(name))
       else
         try
           os.makeDir.all(instance.dir)

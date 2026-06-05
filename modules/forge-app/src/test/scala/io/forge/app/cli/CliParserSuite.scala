@@ -1,6 +1,6 @@
 package io.forge.app.cli
 
-import io.forge.core.{FeatureId, PieceId}
+import io.forge.core.{FeatureId, InstanceName, PieceId}
 import io.forge.git.branch.ForgeCommand
 import io.forge.git.branch.ForgeCommand.ReadOnlyKind
 
@@ -141,4 +141,75 @@ class CliParserSuite extends munit.FunSuite:
     )
     assertEquals(CliParser.featureOf(ForgeCommand.ReadOnly(ReadOnlyKind.Status)), None)
     assertEquals(CliParser.featureOf(ForgeCommand.UnlockForce), None)
+  }
+
+  // --- Task 4.0.3: instance commands ----------------------------------------
+
+  test("phase1 classifies the instance commands as the connector-free Instance class") {
+    List("init-instance", "add-repo", "list-repos").foreach { name =>
+      val Right(inv) = CliParser.phase1(List(name)): @unchecked
+      assertEquals(inv.commandClass, CommandClass.Instance, name)
+      assert(!inv.needsConnector, name)
+    }
+  }
+
+  test("parseInstance builds init-instance from a positional name") {
+    assertEquals(
+      CliParser.parseInstance("init-instance", Vector("demo")),
+      Right(InstanceCommand.InitInstance(InstanceName("demo")))
+    )
+  }
+
+  test("parseInstance rejects a missing or invalid instance name") {
+    assertEquals(
+      CliParser.parseInstance("init-instance", Vector.empty),
+      Left(CliError.MissingInstanceName("init-instance"))
+    )
+    CliParser.parseInstance("init-instance", Vector("Bad Name")) match
+      case Left(CliError.InvalidInstanceName("Bad Name", _)) => ()
+      case other => fail(s"expected InvalidInstanceName, got $other")
+  }
+
+  test("parseInstance builds add-repo with an optional --instance, in either order") {
+    assertEquals(
+      CliParser.parseInstance("add-repo", Vector("/path/to/repo")),
+      Right(InstanceCommand.AddRepo(None, "/path/to/repo"))
+    )
+    assertEquals(
+      CliParser.parseInstance("add-repo", Vector("/path/to/repo", "--instance", "demo")),
+      Right(InstanceCommand.AddRepo(Some(InstanceName("demo")), "/path/to/repo"))
+    )
+    // The --instance value must not be mistaken for the positional <path> when the flag precedes it.
+    assertEquals(
+      CliParser.parseInstance("add-repo", Vector("--instance", "demo", "/path/to/repo")),
+      Right(InstanceCommand.AddRepo(Some(InstanceName("demo")), "/path/to/repo"))
+    )
+  }
+
+  test("parseInstance requires a <path> for add-repo") {
+    assertEquals(CliParser.parseInstance("add-repo", Vector.empty), Left(CliError.MissingRepoPath("add-repo")))
+    // With only --instance present there is still no positional path.
+    assertEquals(
+      CliParser.parseInstance("add-repo", Vector("--instance", "demo")),
+      Left(CliError.MissingRepoPath("add-repo"))
+    )
+  }
+
+  test("parseInstance builds list-repos with and without --instance") {
+    assertEquals(CliParser.parseInstance("list-repos", Vector.empty), Right(InstanceCommand.ListRepos(None)))
+    assertEquals(
+      CliParser.parseInstance("list-repos", Vector("--instance", "demo")),
+      Right(InstanceCommand.ListRepos(Some(InstanceName("demo"))))
+    )
+  }
+
+  test("parseInstance rejects a valueless --instance flag") {
+    assertEquals(
+      CliParser.parseInstance("list-repos", Vector("--instance")),
+      Left(CliError.MissingFlagValue("--instance"))
+    )
+    assertEquals(
+      CliParser.parseInstance("add-repo", Vector("/repo", "--instance")),
+      Left(CliError.MissingFlagValue("--instance"))
+    )
   }

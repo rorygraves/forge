@@ -4,7 +4,14 @@ import cats.effect.{ExitCode, IO, IOApp}
 import cats.effect.std.Console
 import io.forge.app.bootstrap.AssetInstaller
 import io.forge.app.cli.{CliError, CliParser, CommandClass, Invocation}
-import io.forge.app.command.{unlock, CommandRouter, ReadOnlyContext, StateChangingContext, UnlockForceContext}
+import io.forge.app.command.{
+  unlock,
+  CommandRouter,
+  InstanceCommands,
+  ReadOnlyContext,
+  StateChangingContext,
+  UnlockForceContext
+}
 import io.forge.app.config.{ConfigError, ForgeConfig, ForgeConfigLoader}
 import io.forge.app.lock.{FileProcessLock, LockAcquireResult, LockMetadata}
 import io.forge.core.paths.ForgePaths
@@ -54,6 +61,7 @@ object Main extends IOApp:
       case CommandClass.UnlockForce => runUnlock(invocation, paths)
       case CommandClass.ReadOnly => runReadOnly(invocation, paths)
       case CommandClass.StateChanging => runStateChanging(invocation, paths)
+      case CommandClass.Instance => runInstance(invocation, paths)
 
   // --- step 2: repo-root ----------------------------------------------------
 
@@ -75,6 +83,18 @@ object Main extends IOApp:
     CliParser.phase2(invocation.name, invocation.rest) match
       case Left(err) => usageError(err)
       case Right(_) => unlock.run(UnlockForceContext(paths))
+
+  // --- instance: no config, no per-checkout lock ----------------------------
+
+  /** Phase-4 instance-registry commands (`init-instance` / `add-repo` / `list-repos`, Task 4.0.3). Instance-scoped, so
+    * they load no config, install no assets, and never take the per-checkout lock — only `paths.home` (the `~/.forge`
+    * anchor) matters; `repoRoot` is irrelevant (it defaulted to `os.pwd` in step 2 and is unused here). The mutating
+    * commands take an instance-level lock inside [[InstanceCommands]].
+    */
+  private def runInstance(invocation: Invocation, paths: ForgePaths): IO[ExitCode] =
+    CliParser.parseInstance(invocation.name, invocation.rest) match
+      case Left(err) => usageError(err)
+      case Right(command) => InstanceCommands.run(paths.home, command)
 
   // --- read-only: config, no lock -------------------------------------------
 
