@@ -347,6 +347,69 @@ reliably avoid the questions — the design reviewer (haiku) simply tends to ask
 stale `.forge/state/.lock` remains (clear with `forge unlock --force`). Awaiting an
 operator decision on the fix path (see below).
 
+**P4 (`forge run`) — the live run, three findings surfaced (F1 fixed, F2 fixed,
+F3 worked-around). §8.2 collapse DEMONSTRATED on Node/TS.**
+
+The implement driver (haiku, ~26s, \$0.21) wrote `QUERY_CLIENT_CONFIG` with
+**double-quoted** strings (per p1.md #6). Forge committed it (`--no-verify`, so the
+double quotes survived to CI — see F2) and opened piece PR #3. Then:
+- **§8.2 fired, on a Node repo, no LLM:** CI "Quality Gates" ran `prettier --write`
+  → dirty tree → fail. Forge fetched the failing log, the **rules** classifier scored
+  it `deterministic_fix` (conf 0.97, marker `prettier`), routed `RunLocalCommand`
+  (`npm run format`). After the F2 fix the autofix committed
+  (`style(queryclient-config): npm run format`, double→single quotes) and **pushed**
+  → CI re-ran → **Quality Gates green**, `attempts` unchanged. This is the exit
+  criterion's formatter clause, met live on a non-Scala stack.
+
+**F1 — clarifying design-review questions strand a headless run (FIXED, committed
+`82f6220`).** First `forge run` attempt hung at `DesignNeedsHumanInput`: the design
+reviewer asked two *clarifying* questions, but headless `forge run` has no `UserQa`
+source (`RunFeature` leaves `userInput = IO.never`); `isLoopTerminal` excludes the
+state; `--answer-file` is unimplemented; `forge spec` refuses it. Fix:
+`Orchestrator.designVerdict` now honours `QuestionSeverity` — only `Blocking`
+questions gate; `Clarifying`/`Optional` (no blockers) → `Approve` (the documented
+intent in `Question.scala`). `OrchestratorDesignVerdictSuite` (+5).
+
+**F2 — client `pre-push` hooks abort Forge's push (FIXED, committed `99bb4ff`).**
+The §8.2 autofix push silently failed → degraded to a paid fix-up round
+(`PieceCiFailed`→`PieceFixingUp`, `attempts`++). Root cause: the repo's **husky**
+`pre-push` hook runs `vitest` (activated when `npm ci` ran husky's `prepare`).
+`commit` already used `--no-verify`; `push` did not. Fix: forge-git's automated
+pushes (branch + tags) now use `--no-verify` — CI is the gate of record (the hooks
+say so). `RealGitClientCommitSuite` (+1, real pre-push hook + bare remote).
+
+**F3 — CI gate declares a late required check "never appeared" (WORKED AROUND;
+fix proposed).** After the green autofix, `forge run` hit
+`NeedsHumanIntervention("required check 'Build Applications' never appeared")`.
+Cause: `CiReadiness.evaluate` (CiReadiness.scala:82-86) blocks once
+`checkDiscoveryTimeoutSec` elapses if any required check is absent from `observed`.
+The profile sensed 4 required checks; `Build Applications` only starts after
+`Test Suite` (`needs:[quality-gates,test]`, ~5min), so it hadn't appeared inside the
+discovery window. The gate can't tell "will never run" from "gated behind a slow
+job." **Proposed fix (carry-forward F3):** keep polling while any observed check is
+still pending/in-progress; only declare a required check missing once CI is
+otherwise settled. **Workaround for this run:** wait for the full chain to go green,
+then `forge resume --after-human-push p1` (fresh resume resets the discovery clock;
+`Build Applications` is present+green → gate passes).
+
+**F4 (not a Forge issue) — fork-prep collateral: a self-referential CI meta-test.**
+After the F3 work-around the piece PR's required **Test Suite** failed: `272 passed,
+1 failed`. Our `frontend/src/config/queryClient.test.ts` **passed** (✓ 2 tests). The
+one failure is `src/__tests__/ci/webkit-coverage.test.ts` — a meta-test that asserts
+`.github/workflows/pr-preview.yml` installs webkit — which fails because **P0
+fork-prep deleted `pr-preview.yml`** (it needs fork-absent secrets). So the blocker to
+`FeatureDone` is the sacrificial-repo trimming, not Forge or the feature. **Runbook
+lesson:** prefer neutering workflow *triggers* (or removing their self-referential
+meta-tests) over deleting workflow files, so the repo's own CI-config tests still
+pass. To reach `FeatureDone`: restore `pr-preview.yml` (triggers neutered) or skip
+that meta-test, then resume.
+
+**Exit-criterion status:** the **distinctive clauses are met live** — unseen non-Scala
+repo (1), auto-profiled with zero hardcoded-config edits (2), **formatter handled as a
+local deterministic step** via the §8.2 collapse on a Node prettier failure (the core,
+3). Full `FeatureDone` (merge) is gated only by F3 (worked-around) + F4 (fork-prep
+collateral), neither of which is the criterion's substance.
+
 **Minor profiler notes (non-blocking, carry-forward candidates):**
 - `commitIdentity` was *invented* (`forge[bot]` / noreply) rather than sensed — but
   it is not consumed yet (D4 — ambient git identity used), so decorative for now.
