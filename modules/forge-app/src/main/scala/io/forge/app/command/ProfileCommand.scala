@@ -28,10 +28,11 @@ import scala.concurrent.duration.*
   */
 object ProfileCommand:
 
-  /** Same wall-clock cap as the reviewer one-shots (`ConnectorFactory.ReviewerCap`); profiling is a single
-    * reviewer-side call. S4-5 makes the reviewer cap a config knob; this follows it.
+  /** Default wall-clock cap for the profiling one-shot — the §18 `reviewer.wallClockCapSec` default (180s = 3 min);
+    * profiling is a single reviewer-side call, so it follows the reviewer cap. `execute` overrides it with the resolved
+    * `config.reviewer.wallClockCapSec` (S4-5 closed); `run`'s default keeps test callers cap-agnostic.
     */
-  private val ProfileCap: FiniteDuration = 3.minutes
+  private val ProfileCap: FiniteDuration = 180.seconds
 
   /** Per-file content cap so a large `CLAUDE.md` or generated build file can't blow the prompt. Truncated files carry a
     * trailing marker so the sensor can tell a cut from the real end.
@@ -53,18 +54,25 @@ object ProfileCommand:
   )
 
   def execute(paths: ForgePaths, config: ForgeConfig): IO[ExitCode] =
-    buildReviewerCall(paths, config).flatMap(rc => run(paths, rc, new FileProfileStore(paths)))
+    buildReviewerCall(paths, config).flatMap(rc =>
+      run(paths, rc, new FileProfileStore(paths), config.reviewer.wallClockCapSec.seconds)
+    )
 
   /** Injectable body: gather the repo inputs, run the sensor under the wall-clock cap, persist + render. */
-  def run(paths: ForgePaths, reviewer: ReviewerCall, store: ProfileStore): IO[ExitCode] =
+  def run(
+      paths: ForgePaths,
+      reviewer: ReviewerCall,
+      store: ProfileStore,
+      cap: FiniteDuration = ProfileCap
+  ): IO[ExitCode] =
     gatherInput(paths).flatMap { input =>
-      reviewer.profileRepo(input, ReviewerLimits(ProfileCap)).flatMap {
+      reviewer.profileRepo(input, ReviewerLimits(cap)).flatMap {
         case ReviewerOutcome.Settled(profile) =>
           store.save(profile) >> Console[IO].println(summary(paths, profile)).as(ExitCode.Success)
         case ReviewerOutcome.Timeout =>
           Console[IO]
             .errorln(
-              s"forge profile: the profiler did not settle within ${ProfileCap.toSeconds}s — no profile written."
+              s"forge profile: the profiler did not settle within ${cap.toSeconds}s — no profile written."
             )
             .as(ExitCode(1))
         case ReviewerOutcome.AdapterFailure(err) =>

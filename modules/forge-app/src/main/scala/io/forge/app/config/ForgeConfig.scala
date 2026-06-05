@@ -21,8 +21,10 @@ import upickle.default.ReadWriter
   * modelling them as `String` keeps the loader faithful to the wire shape and defers any enum tightening to the
   * consumer. Reviewer-side tuning knobs (model / wall-clock cap / timeout-retry — carry-forward **S4-5**) are **not**
   * added here: that is a §18 extension and goes through a `forge-design-1.3.md` revision, not a silent field addition.
-  * Until then the reviewer model/cap stay at the Task 1.4.7 v1 values (`haiku` / `gpt-5.3-codex`, 3-min cap) inside the
-  * reviewer-call wiring.
+  * **S4-5 (closed):** the reviewer model + wall-clock cap are now the [[ReviewerConfig]] `reviewer` block below, read
+  * by [[io.forge.app.orchestrator.ConnectorFactory]] and `Orchestrator.reviewerWallClock`. Defaults reproduce the Task
+  * 1.4.7 / C15 v1 values (`haiku` / `gpt-5.3-codex`, 3-min cap), so an unset `config.json` is byte-identical to the
+  * pre-S4-5 hard-wiring.
   */
 final case class ForgeConfig(
     mode: Mode = Mode.ClaudeDriver,
@@ -44,7 +46,8 @@ final case class ForgeConfig(
     codex: CodexConfig = CodexConfig(),
     settle: SettleConfig = SettleConfig(),
     github: GithubConfig = GithubConfig(),
-    adapt: AdaptConfig = AdaptConfig()
+    adapt: AdaptConfig = AdaptConfig(),
+    reviewer: ReviewerConfig = ReviewerConfig()
 ) derives ReadWriter
 
 object ForgeConfig:
@@ -119,6 +122,23 @@ final case class AdaptConfig(
     llmClassifierOnUnknown: Boolean = true,
     conventionLearner: Boolean = true,
     workflowGate: Boolean = true
+) derives ReadWriter
+
+/** §18 `reviewer` block (S4-5) — reviewer-side model + wall-clock tuning, previously hard-wired in `ConnectorFactory`.
+  *
+  *   - `claudeModel` — the model the **Claude reviewer** one-shots run on (C15 default `haiku`). The Claude *driver*
+  *     model is unaffected (the CLI exposes no driver-model flag; it uses its own default).
+  *   - `codexModel` — the **Codex** model. Because the `codex` CLI takes a single `-m`, this covers both the Codex
+  *     driver *and* its reviewer one-shots (C15 default `gpt-5.3-codex`).
+  *   - `wallClockCapSec` — the per-call reviewer wall-clock cap (C15 default 180s = 3 min), enforced by
+  *     `RealReviewerCall` (via `Orchestrator.reviewerWallClock`) and passed to the connectors as `reviewerTimeout`.
+  *
+  * Defaults reproduce the pre-S4-5 hard-wiring exactly, so an unset block is a no-op.
+  */
+final case class ReviewerConfig(
+    claudeModel: String = "haiku",
+    codexModel: String = "gpt-5.3-codex",
+    wallClockCapSec: Int = 180
 ) derives ReadWriter
 
 /** §18 `github` block. */

@@ -18,34 +18,26 @@ import scala.concurrent.duration.*
   * `AssetInstaller` populates them on first run). The schema files are shared across reviewers (`design-review.json`,
   * `code-review.json`, `refine.json`); the system prompts are per-CLI (`<method>.<cli>.md`).
   *
-  * **v1 model / cap hard-wiring (S4-5).** `ForgeConfig` deliberately ships no reviewer-tuning knobs (Task 1.4.9 I1 — a
-  * §18 extension belongs in `forge-design-1.3.md`). Until **S4-5** closes, the factory pins the Task 1.4.7 / C15 v1
-  * configuration here: the Claude reviewer runs on `haiku`, the Codex driver+reviewer on `gpt-5.3-codex`, both with a
-  * 3-minute per-call cap (matching the wall-clock cap the orchestrator enforces in [[Orchestrator]]). The Claude driver
-  * model is the CLI default (`ClaudeConnector` exposes no driver-model flag); the Codex `model` covers both driver and
-  * reviewer because the CLI takes a single `-m`.
+  * **Reviewer model / cap (S4-5, closed).** The reviewer model + per-call wall-clock cap come from the §18 `reviewer`
+  * block ([[io.forge.app.config.ReviewerConfig]]); the defaults reproduce the Task 1.4.7 / C15 v1 values (Claude
+  * reviewer `haiku`, Codex driver+reviewer `gpt-5.3-codex`, 3-minute cap), so an unset block is byte-identical to the
+  * prior hard-wiring. The Claude driver model is the CLI default (`ClaudeConnector` exposes no driver-model flag); the
+  * Codex `model` covers both driver and reviewer because the CLI takes a single `-m`. The cap here mirrors the one
+  * `Orchestrator.reviewerWallClock` enforces — both read `config.reviewer.wallClockCapSec`.
   */
 object ConnectorFactory:
 
-  /** v1 reviewer wall-clock cap; mirrors `Orchestrator.reviewerWallClock`. S4-5 makes this a `ForgeConfig` knob. */
-  private val ReviewerCap: FiniteDuration = 3.minutes
-
-  /** v1 Claude reviewer model (C15). S4-5 makes this a `ForgeConfig` knob. */
-  private val ClaudeReviewerModel: String = "haiku"
-
-  /** v1 Codex driver + reviewer model (C15). S4-5 makes this a `ForgeConfig` knob. */
-  private val CodexModel: String = "gpt-5.3-codex"
-
   /** Build the connector for `cli`. Constructed once per run; the resulting `Connector` is shared (J3). */
   def build(cli: Cli, paths: ForgePaths, config: ForgeConfig): IO[Connector] =
+    val reviewerCap = config.reviewer.wallClockCapSec.seconds
     cli match
       case Cli.Claude =>
         IO.pure(
           new ClaudeConnector(
             cwd = Some(paths.repoRoot),
             reviewerAssets = Some(reviewerAssets(paths, "claude")),
-            reviewerModel = Some(ClaudeReviewerModel),
-            reviewerTimeout = ReviewerCap,
+            reviewerModel = Some(config.reviewer.claudeModel),
+            reviewerTimeout = reviewerCap,
             driverPermissionMode = config.claude.permissionMode,
             driverAllowedTools = config.claude.allowedTools,
             driverDisallowedTools = config.claude.disallowedTools
@@ -54,12 +46,12 @@ object ConnectorFactory:
       case Cli.Codex =>
         loadPriceTable(paths).map { priceTable =>
           new CodexConnector(
-            model = CodexModel,
+            model = config.reviewer.codexModel,
             priceTable = priceTable,
             sessionSettings = CodexSessionSettings.driver(sandbox = config.codex.driverSandbox, approvalMode = "never"),
             cwd = Some(paths.repoRoot),
             reviewerAssets = Some(reviewerAssets(paths, "codex")),
-            reviewerTimeout = ReviewerCap
+            reviewerTimeout = reviewerCap
           )
         }
 

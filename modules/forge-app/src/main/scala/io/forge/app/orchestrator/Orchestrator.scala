@@ -113,10 +113,10 @@ final class Orchestrator(
     */
   private val failureRouter = new FailureRouter(new RuleBasedFailureClassifier)
 
-  /** v1 reviewer wall-clock cap (Task 1.4.7). The per-method config knob is carry-forward **S4-5** (Task 1.4.9
-    * ForgeConfig deferral); until then the 3-minute cap is hard-wired here as it is in the reviewer-call wiring.
+  /** Reviewer wall-clock cap (Task 1.4.7; §18 `reviewer.wallClockCapSec`, S4-5 closed). Reads the same knob
+    * `ConnectorFactory` passes as `reviewerTimeout`, so the two can't drift; default 180s = the original 3-minute cap.
     */
-  private val reviewerWallClock: FiniteDuration = 3.minutes
+  private val reviewerWallClock: FiniteDuration = config.reviewer.wallClockCapSec.seconds
 
   /** §8 CI-readiness policy (§18 `ci.policy`). An unparseable value defaults to the §18 default rather than failing the
     * run — the config layer (Task 1.4.9) owns validation.

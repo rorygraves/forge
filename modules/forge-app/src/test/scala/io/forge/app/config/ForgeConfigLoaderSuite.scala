@@ -61,6 +61,22 @@ class ForgeConfigLoaderSuite extends munit.FunSuite:
     assert(config.github.pushSnapshotTags)
   }
 
+  tempFixture.test("S4-5: the reviewer block defaults to the C15 v1 values when unset") { paths =>
+    val Right(config) = ForgeConfigLoader.loadSync(paths): @unchecked
+    assertEquals(config.reviewer.claudeModel, "haiku")
+    assertEquals(config.reviewer.codexModel, "gpt-5.3-codex")
+    assertEquals(config.reviewer.wallClockCapSec, 180)
+  }
+
+  tempFixture.test("S4-5: a partial reviewer block overrides only the named knob, defaulting the rest") { paths =>
+    writeConfig(paths, """{ "reviewer": { "claudeModel": "sonnet" } }""")
+    val Right(config) = ForgeConfigLoader.loadSync(paths): @unchecked
+    assertEquals(config.reviewer.claudeModel, "sonnet")
+    // the unset reviewer knobs stay at their §18 defaults
+    assertEquals(config.reviewer.codexModel, "gpt-5.3-codex")
+    assertEquals(config.reviewer.wallClockCapSec, 180)
+  }
+
   tempFixture.test("malformed config.json surfaces Malformed at the config path") { paths =>
     writeConfig(paths, """{ "baseBranch": """)
     ForgeConfigLoader.loadSync(paths) match
