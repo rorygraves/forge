@@ -21,7 +21,8 @@ import munit.CatsEffectSuite
   *   - **P2 — feature/piece budget breach defers to end of turn.** §12 check 2 says "per-feature/per-piece breach → let
   *     current turn complete, no new spawns". The monitor records a pending breach on the CostUpdate that trips the
   *     cap, keeps consuming events, and only publishes `BudgetBreached` on the next `AgentEvent.Result` (or stream
-  *     end). Settle-timeout and turn-budget breach must still win earlier.
+  *     end). A settle timeout must still win earlier (it kills); the per-turn cost cap is post-hoc advisory and no
+  *     longer kills or wins (Slice 2.2 A1).
   */
 class SessionMonitorReviewRound1Suite extends CatsEffectSuite:
 
@@ -83,28 +84,8 @@ class SessionMonitorReviewRound1Suite extends CatsEffectSuite:
       )
     }
 
-  test("P1: turn-budget breach — result.get unblocks only AFTER session.kill() completes"):
-    val killDuration: FiniteDuration = 5.seconds
-    val program =
-      for
-        killStart <- Ref.of[IO, Option[FiniteDuration]](None)
-        killEnd <- Ref.of[IO, Option[FiniteDuration]](None)
-        session = new SlowKillSession(killDuration, killStart, killEnd)
-        totals <- Ref.of[IO, CostTotals](CostTotals.zero)
-        monitor = new RealSessionMonitor
-        events = Stream.emit[IO, AgentEvent](AgentEvent.CostUpdate(cost("11.00")))
-        _ <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals).map(_.outcome)
-        unblockedAt <- IO.monotonic
-        end <- killEnd.get
-      yield (unblockedAt, end)
-    TestControl.executeEmbed(program).map { case (unblockedAt, end) =>
-      val killCompletedAt =
-        end.getOrElse(fail("kill() never ran to completion"))
-      assert(
-        unblockedAt >= killCompletedAt,
-        s"result.get unblocked at $unblockedAt before kill completed at $killCompletedAt"
-      )
-    }
+  // (The turn-budget variant of P1 was removed in Slice 2.2 A1: the per-turn cost cap no longer kills, so there is no
+  // turn-path kill whose completion to assert. The settle-timeout P1 above still covers the kill-completion property.)
 
   // --- P2 regression: feature/piece breach defers to end of turn -----------------------------------------------
 
@@ -140,13 +121,14 @@ class SessionMonitorReviewRound1Suite extends CatsEffectSuite:
       assertEquals(nConsumed, 5, "all 5 events must be consumed before BudgetBreached publishes")
     }
 
-  test("P2: turn-budget breach AFTER a pending feature breach still wins (with kill)"):
-    // First CostUpdate trips feature cap but not turn cap; second CostUpdate trips turn cap. Turn breach must
-    // win (with kill) even though a feature breach was already pending.
+  test("P2 (Slice 2.2 A1): a turn over the per-turn cap does NOT kill or override the pending feature breach"):
+    // First CostUpdate trips the feature cap; second trips the (now post-hoc, non-killing) turn cap. The turn breach no
+    // longer kills or wins — on Result the pending feature breach is published, with no kill.
     val events = Stream.emits[IO, AgentEvent](
       Vector(
         AgentEvent.CostUpdate(cost("6.00")), // feature: 6 > 5; turn: 6 < 10
-        AgentEvent.CostUpdate(cost("5.00")) // turn: 11 > 10
+        AgentEvent.CostUpdate(cost("5.00")), // turn: 11 > 10 (advisory only now)
+        AgentEvent.Result(success = true, durationMs = 0)
       )
     )
     val program =
@@ -158,12 +140,10 @@ class SessionMonitorReviewRound1Suite extends CatsEffectSuite:
         kills <- session.killCount.get
       yield (outcome, kills)
     TestControl.executeEmbed(program).map { case (outcome, kills) =>
-      assertEquals(
-        outcome,
-        MonitorOutcome
-          .TurnBudgetBreached(SessionPhase.Implement, BigDecimal("11.00"), BigDecimal("10.00")): MonitorOutcome
-      )
-      assertEquals(kills, 1, "turn-budget breach must kill even after a pending feature breach")
+      outcome match
+        case MonitorOutcome.BudgetBreached(BudgetScope.Feature, _, _) => ()
+        case other => fail(s"expected the pending feature breach to win (turn cap no longer kills), got $other")
+      assertEquals(kills, 0, "the per-turn cap is post-hoc advisory — it must not kill")
     }
 
   test("P2: settle timeout AFTER a pending feature breach still wins (with kill)"):

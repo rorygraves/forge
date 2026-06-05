@@ -208,11 +208,11 @@ object OrchestratorTestKit:
 
   object FakeReviewerCall:
     val approveDesign: ReviewerOutcome[DesignReview] =
-      ReviewerOutcome.Settled(DesignReview(ReviewVerdict.Approve, Vector.empty, Vector.empty, "ok"))
+      ReviewerOutcome.Settled(DesignReview(ReviewVerdict.Approve, Vector.empty, Vector.empty, "ok"), None)
     val approvePr: ReviewerOutcome[PrReview] =
-      ReviewerOutcome.Settled(PrReview(ReviewVerdict.Approve, Vector.empty, "ok"))
+      ReviewerOutcome.Settled(PrReview(ReviewVerdict.Approve, Vector.empty, "ok"), None)
     val refineNoChange: ReviewerOutcome[RefineResult] =
-      ReviewerOutcome.Settled(RefineResult(AgentRefineOutcome.NoChange, "", None))
+      ReviewerOutcome.Settled(RefineResult(AgentRefineOutcome.NoChange, "", None), None)
 
     def happyPath: FakeReviewerCall = new FakeReviewerCall(approveDesign, approvePr, refineNoChange)
 

@@ -117,12 +117,13 @@ object ClaudeEventParser:
           case _ => None
         hint.fold(name)(h => s"$name($h)".take(200))
 
-  private def parseResult(v: Value): Either[String, Vector[AgentEvent]] =
-    val obj = v.obj
-    val isError = obj.get("is_error").flatMap(_.boolOpt).getOrElse(false)
-    val durationMs = obj.get("duration_ms").flatMap(_.numOpt).map(_.toLong).getOrElse(0L)
-    val result = AgentEvent.Result(success = !isError, durationMs = durationMs)
-    val costEvent =
+  /** §12 / S4-3 — extract the [[Cost]] from a Claude `result` envelope, shared by the streaming driver path
+    * ([[parseResult]]) and the one-shot reviewer path ([[ClaudeConnector.extractReviewerCost]]). The two consume the
+    * identical envelope shape (`collectReviewerEnvelope` returns the same `result` object), so this is the single cost
+    * parser for both. `None` when the envelope carries no `total_cost_usd` (e.g. an `is_error` envelope).
+    */
+  def costFromResult(v: Value): Option[Cost] =
+    v.objOpt.flatMap: obj =>
       for
         usd <- obj.get("total_cost_usd").flatMap(_.numOpt).map(d => BigDecimal(d))
         usage = obj.get("usage").flatMap(_.objOpt)
@@ -141,5 +142,12 @@ object ClaudeEventParser:
           .flatMap(_.objOpt)
           .flatMap(_.headOption.map(_._1))
           .getOrElse("unknown")
-      yield AgentEvent.CostUpdate(Cost("anthropic", model, inputTokens, outputTokens, usd))
+      yield Cost("anthropic", model, inputTokens, outputTokens, usd)
+
+  private def parseResult(v: Value): Either[String, Vector[AgentEvent]] =
+    val obj = v.obj
+    val isError = obj.get("is_error").flatMap(_.boolOpt).getOrElse(false)
+    val durationMs = obj.get("duration_ms").flatMap(_.numOpt).map(_.toLong).getOrElse(0L)
+    val result = AgentEvent.Result(success = !isError, durationMs = durationMs)
+    val costEvent = ClaudeEventParser.costFromResult(v).map(AgentEvent.CostUpdate(_))
     Right(costEvent.toVector :+ result)

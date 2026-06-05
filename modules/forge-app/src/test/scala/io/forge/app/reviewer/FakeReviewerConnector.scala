@@ -23,7 +23,8 @@ final class FakeReviewerConnector(
     profileRepoIO: IO[RepoProfile],
     classifyFailureIO: IO[Classification],
     learnConventionsIO: IO[ConventionDeltas],
-    val cancelled: Ref[IO, Boolean]
+    val cancelled: Ref[IO, Boolean],
+    reviewerCost: Option[Cost] = None
 ) extends Connector:
 
   override val name: String = "fake"
@@ -51,18 +52,20 @@ final class FakeReviewerConnector(
   override def resumeHeadlessDriver(sessionId: String, systemPromptPath: os.Path, message: String): IO[AgentSession] =
     IO.pure(NoopSession)
 
-  override def reviewDesign(input: DesignReviewInput): IO[DesignReview] =
-    designReviewIO.onCancel(cancelled.set(true))
-  override def reviewPr(input: PrReviewInput): IO[PrReview] =
-    prReviewIO.onCancel(cancelled.set(true))
-  override def refine(input: RefineInput): IO[RefineResult] =
-    refineIO.onCancel(cancelled.set(true))
-  override def profileRepo(input: RepoProfilerInput): IO[RepoProfile] =
-    profileRepoIO.onCancel(cancelled.set(true))
-  override def classifyFailure(input: FailureClassifierInput): IO[Classification] =
-    classifyFailureIO.onCancel(cancelled.set(true))
-  override def learnConventions(input: ConventionLearnerInput): IO[ConventionDeltas] =
-    learnConventionsIO.onCancel(cancelled.set(true))
+  // S4-3: the trait now returns `Reviewed[A]`; wrap the programmed value with `reviewerCost` (default `None`). The
+  // `onCancel` stays on the underlying programmed IO so the wall-clock cancellation probe still fires.
+  override def reviewDesign(input: DesignReviewInput): IO[Reviewed[DesignReview]] =
+    designReviewIO.onCancel(cancelled.set(true)).map(Reviewed(_, reviewerCost))
+  override def reviewPr(input: PrReviewInput): IO[Reviewed[PrReview]] =
+    prReviewIO.onCancel(cancelled.set(true)).map(Reviewed(_, reviewerCost))
+  override def refine(input: RefineInput): IO[Reviewed[RefineResult]] =
+    refineIO.onCancel(cancelled.set(true)).map(Reviewed(_, reviewerCost))
+  override def profileRepo(input: RepoProfilerInput): IO[Reviewed[RepoProfile]] =
+    profileRepoIO.onCancel(cancelled.set(true)).map(Reviewed(_, reviewerCost))
+  override def classifyFailure(input: FailureClassifierInput): IO[Reviewed[Classification]] =
+    classifyFailureIO.onCancel(cancelled.set(true)).map(Reviewed(_, reviewerCost))
+  override def learnConventions(input: ConventionLearnerInput): IO[Reviewed[ConventionDeltas]] =
+    learnConventionsIO.onCancel(cancelled.set(true)).map(Reviewed(_, reviewerCost))
 
   override def costFrom(event: AgentEvent): Option[Cost] = None
 
@@ -75,7 +78,8 @@ object FakeReviewerConnector:
       classifyFailureIO: IO[Classification] =
         IO.raiseError(new IllegalStateException("classifyFailureIO not programmed")),
       learnConventionsIO: IO[ConventionDeltas] =
-        IO.raiseError(new IllegalStateException("learnConventionsIO not programmed"))
+        IO.raiseError(new IllegalStateException("learnConventionsIO not programmed")),
+      reviewerCost: Option[Cost] = None
   ): IO[FakeReviewerConnector] =
     Ref.of[IO, Boolean](false).map { cancelled =>
       new FakeReviewerConnector(
@@ -85,6 +89,7 @@ object FakeReviewerConnector:
         profileRepoIO,
         classifyFailureIO,
         learnConventionsIO,
-        cancelled
+        cancelled,
+        reviewerCost
       )
     }

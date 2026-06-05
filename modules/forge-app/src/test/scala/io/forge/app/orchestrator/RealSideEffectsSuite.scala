@@ -15,6 +15,7 @@ import io.forge.agents.{
   RefineInput,
   RefineResult,
   RepoProfilerInput,
+  Reviewed,
   StreamingSession
 }
 import io.forge.app.config.ForgeConfig
@@ -442,18 +443,18 @@ class RealSideEffectsSuite extends munit.FunSuite:
     def resumeHeadlessDriver(sessionId: String, systemPromptPath: os.Path, message: String): IO[AgentSession] =
       IO.pure(RealSideEffectsSuite.NoopStreaming)
     def questionMechanism: QuestionMechanism = QuestionMechanism.Native
-    def reviewDesign(input: DesignReviewInput): IO[DesignReview] = IO.raiseError(new NotImplementedError)
-    def reviewPr(input: PrReviewInput): IO[PrReview] = IO.raiseError(new NotImplementedError)
-    def refine(input: RefineInput): IO[RefineResult] = IO.raiseError(new NotImplementedError)
-    def profileRepo(input: RepoProfilerInput): IO[io.forge.core.profile.RepoProfile] =
+    def reviewDesign(input: DesignReviewInput): IO[Reviewed[DesignReview]] = IO.raiseError(new NotImplementedError)
+    def reviewPr(input: PrReviewInput): IO[Reviewed[PrReview]] = IO.raiseError(new NotImplementedError)
+    def refine(input: RefineInput): IO[Reviewed[RefineResult]] = IO.raiseError(new NotImplementedError)
+    def profileRepo(input: RepoProfilerInput): IO[Reviewed[io.forge.core.profile.RepoProfile]] =
       IO.raiseError(new NotImplementedError)
     def classifyFailure(
         input: io.forge.agents.FailureClassifierInput
-    ): IO[io.forge.core.profile.Classification] =
+    ): IO[Reviewed[io.forge.core.profile.Classification]] =
       IO.raiseError(new NotImplementedError)
     def learnConventions(
         input: io.forge.agents.ConventionLearnerInput
-    ): IO[io.forge.core.profile.ConventionDeltas] =
+    ): IO[Reviewed[io.forge.core.profile.ConventionDeltas]] =
       IO.raiseError(new NotImplementedError)
     def schemaMechanism: SchemaMechanism = SchemaMechanism.Native
     def costFrom(event: AgentEvent): Option[Cost] = None

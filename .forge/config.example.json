@@ -12,7 +12,8 @@
 
   "maxFeatureCostUsd": 25.0,
   "maxPieceCostUsd": 8.0,
-  "maxTurnCostUsd": 2.0,
+  "_comment_maxTurnCostUsd": "Post-hoc advisory only (cost is reported at turn-end, so this no longer kills a turn); the threshold above which `forge stats` flags an expensive turn. The preventive caps are maxFeatureCostUsd/maxPieceCostUsd; the mid-turn interrupt is the settle.* wall-clock cap.",
+  "maxTurnCostUsd": 15.0,
 
   "auditMode": "summary",
   "logRetention": "keep-local",

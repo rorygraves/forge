@@ -37,12 +37,12 @@
 |---|---|---|
 | 0 — Slice 0 | CLI capabilities validated | ✅ closed |
 | 1 — MVP | Single-repo self-host end-to-end | ✅ closed |
-| 2 — MLP | Pleasant single-repo daily-driver | open — Slice 2.0 (observability) ✅, Slice 2.1 (TUI) ✅, §3.4 OSS-readiness ✅ (config example + README + standalone `forge` launcher; published-binary polish still open); §3.5 tuning / a small dogfood-#2 resilience pass still open |
+| 2 — MLP | Pleasant single-repo daily-driver | open — Slice 2.0 (observability) ✅, Slice 2.1 (TUI) ✅, §3.4 OSS-readiness ✅ (config example + README + standalone `forge` launcher; published-binary polish still open); **§3.5 tuning + S4-3 reviewer-cost widening — implementation landed (Slice 2.2, contract 1.16), pending whole-section review**; a small dogfood-#2 resilience pass still open |
 | 3 — v1.0: **Repo Adaptation** ⭐ | Deterministic spine + agentic senses; works on any repo via its CLAUDE.md + a derived, hashed `RepoProfile` | ✅ **closed 2026-06-05** (contract `forge-design-1.15.md`) — **all six sub-slices 3.0–3.5 ✅ closed**; **exit criterion MET live** (`queryclient-config` on the Node/TS fork `rorygraves/toast-stats` → `FeatureDone`, §8.2 prettier-collapse; [`design-phase3-exit.md`](design-phase3-exit.md) closed); **whole-section review landed** — all findings fixed (F3 CiReadiness late-check, S4-5 reviewer config, D4 commit identity, P0 `pr_based`/schema-2 trunk-push safety, P1 §8.2 autofix staging, P2 profiler reads README) |
 | 4 — v2.0 | Workspace (multi-repo) + workstreams + daemon + multi-workstream cockpit TUI | needs `forge-design-2.0.md` first |
 | 5 — v3.0+ | Agentic-dev cockpit (knowledge base, reactive review, custom triggers) | concept |
 
-**Live docs:** this roadmap · spec [`forge-design-1.15.md`](forge-design-1.15.md) · [`design-rationale.md`](design-rationale.md) · index [`README.md`](README.md). The per-slice `design-*.md` files (`design-1.4.md` … `design-3.5.md`) are *closed* audit trails kept for historical reference — the index sorts live-vs-historical.
+**Live docs:** this roadmap · spec [`forge-design-1.16.md`](forge-design-1.16.md) · [`design-rationale.md`](design-rationale.md) · index [`README.md`](README.md). The per-slice `design-*.md` files (`design-1.4.md` … `design-3.5.md`) are *closed* audit trails kept for historical reference; [`design-2.2-tuning.md`](design-2.2-tuning.md) (Slice 2.2 — §3.5 driver/reviewer tuning + S4-3) is the most recent, **implementation landed, pending whole-section review**. The index sorts live-vs-historical.
 
 ---
 
@@ -577,10 +577,19 @@ out-scoped the observability slice (full dispositions in
   `reviewer.wallClockCapSec`) replaces the `ConnectorFactory` hard-wiring, read by
   `ConnectorFactory` + `Orchestrator.reviewerWallClock` + `ProfileCommand` (one
   source of truth), contract [`forge-design-1.14.md`](forge-design-1.14.md) §18.
-  **Still open:** reviewer process-retry knobs, the driver settle-cap *tuning*
-  against real attributed data (the szork run flagged the implement settle cap as
-  too tight — `maxTurnCostUsd = $2.0` vs an actual $9.56 turn), and **S4-3**
-  reviewer-cost widening. Those land via a later `forge-design-1.x.md` revision.
+  **Slice 2.2 landed the rest (2026-06-05, contract
+  [`forge-design-1.16.md`](forge-design-1.16.md); plan
+  [`design-2.2-tuning.md`](design-2.2-tuning.md)):** (a) **S4-3 reviewer-cost
+  widening** — the `Connector` reviewer/sensor methods return `Reviewed[A]` =
+  verdict + `Option[Cost]`, surfaced on `ReviewerOutcome.Settled` and written as a
+  `cost.update` (`actor="reviewer"`) that folds into `Feature.cost` (feature+piece,
+  never turn), so the §12 caps are no longer driver-session-only (`classifyFailure`
+  write deferred — rarest path; `profileRepo` exempt — no feature); (b) the cap
+  re-tuning + the **per-turn-cap-is-post-hoc** finding — `maxTurnCostUsd` is now a
+  non-killing advisory (the $2 cap could only kill *after* the $9.56 turn already
+  completed), retuned 2 → 15; the wall-clock settle cap is the only mid-turn
+  interrupt. Reviewer process-retry *counts* need no change. **`[~]` stays open
+  until the whole-section code review lands** (then flip to `[x]`).
 - [x] **Driver-respawn-avoidance on resume-from-NHI** (design-2.0 §4 **D3**
   large half). ✅ **CLOSED 2026-06-01** — all five chunks (D3-0…D3-4) landed and
   the spec deltas are reconciled into the live contract (then v1.5, now

@@ -499,6 +499,7 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     val review = connector
       .reviewDesign(DesignReviewInput(FeatureId("feat-1"), 1, "design md content"))
       .unsafeRunSync()
+      .value
     assertEquals(review.verdict, ReviewVerdict.Approve)
     assertEquals(review.summary, "All good.")
     assertEquals(review.blockers, Vector.empty[ReviewBlocker])
@@ -538,6 +539,7 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     val profile = connector
       .profileRepo(RepoProfilerInput("szork", None, None, None, Vector.empty, Vector.empty))
       .unsafeRunSync()
+      .value
     assertEquals(profile.buildTool, "sbt")
     assertEquals(profile.commands.map(_.kind.asString), Vector("format"))
     assert(profile.commands.head.autofix)
@@ -582,6 +584,7 @@ class ClaudeConnectorSuite extends munit.FunSuite:
         FailureClassifierInput(FeatureId("feat-1"), "ci", "scalafmt: 1 files must be formatted", profile)
       )
       .unsafeRunSync()
+      .value
     assertEquals(c.kind, io.forge.core.profile.FailureKind.DeterministicFix)
     assertEquals(c.suggested, Some(io.forge.core.profile.CommandKind.Format))
     assertEquals(c.confidence, 0.97)
@@ -624,6 +627,7 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     val d = connector
       .learnConventions(ConventionLearnerInput(FeatureId("feat-1"), profile, None, Vector.empty, Vector.empty))
       .unsafeRunSync()
+      .value
     assertEquals(d.addCommands.map(_.kind.asString), Vector("format"))
     assert(d.addCommands.head.autofix)
     assertEquals(d.claudeMdProposal.map(_.suggestedAddition), Some("Run `sbt scalafmtAll` before settling."))
@@ -662,6 +666,7 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     val review = connector
       .reviewDesign(DesignReviewInput(FeatureId("feat-1"), 1, "design md content"))
       .unsafeRunSync()
+      .value
     assertEquals(review.verdict, ReviewVerdict.Approve)
     assertEquals(review.summary, "Looks fine.")
 
@@ -699,6 +704,7 @@ class ClaudeConnectorSuite extends munit.FunSuite:
     val review = connector
       .reviewDesign(DesignReviewInput(FeatureId("feat-1"), 1, "design md content"))
       .unsafeRunSync()
+      .value
     assertEquals(review.verdict, ReviewVerdict.Approve)
     assertEquals(review.summary, "Salvaged.")
 

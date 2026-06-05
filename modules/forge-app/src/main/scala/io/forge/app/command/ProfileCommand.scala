@@ -67,7 +67,9 @@ object ProfileCommand:
   ): IO[ExitCode] =
     gatherInput(paths).flatMap { input =>
       reviewer.profileRepo(input, ReviewerLimits(cap)).flatMap {
-        case ReviewerOutcome.Settled(profile) =>
+        // S4-3: `profileRepo` is out-of-band (`forge profile`) with no `Feature`/action-log to attribute spend to, so its
+        // cost is intentionally not folded into `Feature.cost` (the `Reviewed`/`Settled` still carries it).
+        case ReviewerOutcome.Settled(profile, _) =>
           store.save(profile) >> Console[IO].println(summary(paths, profile)).as(ExitCode.Success)
         case ReviewerOutcome.Timeout =>
           Console[IO]

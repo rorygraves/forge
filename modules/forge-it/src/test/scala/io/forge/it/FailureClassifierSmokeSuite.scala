@@ -130,7 +130,7 @@ class FailureClassifierSmokeSuite extends munit.FunSuite:
         reviewerModel = claudeModel
       )
     new RealReviewerCall(connector).classifyFailure(classifierInput, limits).unsafeRunSync() match
-      case ReviewerOutcome.Settled(c) => assertPlausible(c)
+      case ReviewerOutcome.Settled(c, _) => assertPlausible(c)
       case other => fail(s"expected a settled Classification, got $other")
 
   test("classifyFailure (codex) on a real scalafmt failure → DeterministicFix(Format)".flaky):
@@ -143,5 +143,5 @@ class FailureClassifierSmokeSuite extends munit.FunSuite:
       reviewerAssets = Some(assetsFor("codex"))
     )
     new RealReviewerCall(connector).classifyFailure(classifierInput, limits).unsafeRunSync() match
-      case ReviewerOutcome.Settled(c) => assertPlausible(c)
+      case ReviewerOutcome.Settled(c, _) => assertPlausible(c)
       case other => fail(s"expected a settled Classification, got $other")

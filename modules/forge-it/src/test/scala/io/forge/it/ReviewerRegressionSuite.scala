@@ -269,7 +269,7 @@ class ReviewerRegressionSuite extends munit.FunSuite:
     case Pass, SchemaFail, ProcessFail, Timeout, NotConfigured
 
   private def classify[A](o: ReviewerOutcome[A]): Score = o match
-    case ReviewerOutcome.Settled(_) => Score.Pass
+    case ReviewerOutcome.Settled(_, _) => Score.Pass
     case ReviewerOutcome.Timeout => Score.Timeout
     case ReviewerOutcome.AdapterFailure(err) =>
       err match
@@ -347,7 +347,7 @@ class ReviewerRegressionSuite extends munit.FunSuite:
   private def assertWiresEndToEnd(rc: RealReviewerCall): Unit =
     val outcome = withRetry(rc.designReview(designFixtures.head, limits), ProcessRetries).unsafeRunSync()
     outcome match
-      case ReviewerOutcome.Settled(_) => () // clean schema decode — the wiring proof
+      case ReviewerOutcome.Settled(_, _) => () // clean schema decode — the wiring proof
       case other =>
         fail(s"expected Settled from a healthy reviewer call; got ${classify(other)} ($other)")
 

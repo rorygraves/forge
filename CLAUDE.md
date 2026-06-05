@@ -28,18 +28,26 @@ that first; everything below is Claude-Code-specific.
   scalafmt CI failure on `szork` routed to `RunLocalCommand(sbt scalafmtAll)` →
   CI green, `attempts` unchanged, `forge stats` folding "1 fix-up round avoided"
   — dogfood-#2's \$1.78 / ~12 min / 2 rounds collapsed to a ~few-second \$0 step.
-  The live contract is now [`docs/forge-design-1.15.md`](docs/forge-design-1.15.md)
+  The live contract is now [`docs/forge-design-1.16.md`](docs/forge-design-1.16.md)
   (1.14 = S4-5 §18 `reviewer` block + D4 §6.5 `commitIdentity`; 1.15 = the
-  whole-section-review fixes — P0 `BranchModel.pr_based` + `schemaVersion 2`
+  Phase-3 whole-section-review fixes — P0 `BranchModel.pr_based` + `schemaVersion 2`
   direct-push safety, P1 §8.2 autofix staging guards, P2 profiler reads README;
-  1.7→1.15 are standalone-by-freeze Phase-3 revisions). **Phase-3 exit criterion
+  **1.16 = Phase-2 §3.5 — S4-3 reviewer-cost widening (`Connector` reviewer/sensor
+  methods return `Reviewed[A]` = verdict + `Option[Cost]`; reviewer spend joins
+  `Feature.cost` via an `actor="reviewer"` `cost.update`) + the per-turn cost cap
+  as a non-killing post-hoc advisory (`maxTurnCostUsd` 2 → 15)**; 1.7→1.16 are
+  standalone-by-freeze revisions). **Phase-3 exit criterion
   MET live 2026-06-05** (the Node/TS `queryclient-config` run, design-phase3-exit.md
   ✅ closed). All section-review findings are fixed: F3 (CiReadiness
   late-check), S4-5 (reviewer model/cap), D4 (commit identity), and the P0/P1/P2
   review findings. **Phase 3 (v1.0 Repo Adaptation) ✅ CLOSED 2026-06-05 — the
-  whole-section review landed clean and flipped the roadmap §4 bullet.** Next
-  open work is Phase 2's remaining tail (§3.4 OSS-readiness, §3.5 driver/reviewer
-  tuning) or opening `forge-design-2.0.md` for Phase 4 (multi-repo workspace).
+  whole-section review landed clean and flipped the roadmap §4 bullet.**
+  **Slice 2.2 (Phase-2 §3.5 driver/reviewer tuning + S4-3 reviewer-cost widening)
+  — implementation landed 2026-06-05 (contract 1.16, plan
+  [`docs/design-2.2-tuning.md`](docs/design-2.2-tuning.md)); roadmap §3.5 `[~]`
+  stays open pending a whole-section code review.** Remaining open work is the rest
+  of Phase 2's tail (§3.4 published-binary polish, a small dogfood-#2 resilience
+  pass) or opening `forge-design-2.0.md` for Phase 4 (multi-repo workspace).
   Older closed audit trails include
   [`docs/design-2.1-tui.md`](docs/design-2.1-tui.md)
   (Slice 2.1 — Phase-2 TUI, ✅ closed 2026-06-01): read-only `forge tui

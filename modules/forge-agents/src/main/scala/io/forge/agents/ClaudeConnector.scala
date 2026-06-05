@@ -136,21 +136,21 @@ final class ClaudeConnector(
 
   // --- reviewer methods ----
 
-  def reviewDesign(input: DesignReviewInput): IO[DesignReview] =
+  def reviewDesign(input: DesignReviewInput): IO[Reviewed[DesignReview]] =
     runReviewer(
       assets => assets.designReview,
       ReviewerPrompts.designReviewBody(input),
       ReviewDecoders.designReview
     )
 
-  def reviewPr(input: PrReviewInput): IO[PrReview] =
+  def reviewPr(input: PrReviewInput): IO[Reviewed[PrReview]] =
     runReviewer(
       assets => assets.prReview,
       ReviewerPrompts.prReviewBody(input),
       ReviewDecoders.prReview
     )
 
-  def refine(input: RefineInput): IO[RefineResult] =
+  def refine(input: RefineInput): IO[Reviewed[RefineResult]] =
     runReviewer(
       assets => assets.refine,
       ReviewerPrompts.refineBody(input),
@@ -159,21 +159,21 @@ final class ClaudeConnector(
 
   // --- sensor methods (§7.11) ----
 
-  def profileRepo(input: RepoProfilerInput): IO[RepoProfile] =
+  def profileRepo(input: RepoProfilerInput): IO[Reviewed[RepoProfile]] =
     runReviewer(
       assets => assets.profileRepo,
       ReviewerPrompts.repoProfileBody(input),
       ReviewDecoders.repoProfile
     )
 
-  def classifyFailure(input: FailureClassifierInput): IO[io.forge.core.profile.Classification] =
+  def classifyFailure(input: FailureClassifierInput): IO[Reviewed[io.forge.core.profile.Classification]] =
     runReviewer(
       assets => assets.classifyFailure,
       ReviewerPrompts.classifyFailureBody(input),
       ReviewDecoders.failureClassification
     )
 
-  def learnConventions(input: ConventionLearnerInput): IO[io.forge.core.profile.ConventionDeltas] =
+  def learnConventions(input: ConventionLearnerInput): IO[Reviewed[io.forge.core.profile.ConventionDeltas]] =
     runReviewer(
       assets => assets.learnConventions,
       ReviewerPrompts.learnConventionsBody(input),
@@ -233,7 +233,7 @@ final class ClaudeConnector(
       pick: ReviewerAssets => ReviewerAssets.PerMethod,
       body: String,
       decode: Value => Either[String, A]
-  ): IO[A] =
+  ): IO[Reviewed[A]] =
     reviewerAssets match
       case None =>
         IO.raiseError(
@@ -260,7 +260,9 @@ final class ClaudeConnector(
           decoded <- IO.fromEither(
             decode(structured).left.map(detail => StructuredOutputMalformed(detail))
           )
-        yield decoded
+        // S4-3: the same envelope carries `total_cost_usd` / `usage` / `modelUsage`; surface it so reviewer spend
+        // joins `Feature.cost` (the cost block is the shared `ClaudeEventParser.costFromResult`).
+        yield Reviewed(decoded, ClaudeConnector.extractReviewerCost(envelope))
 
 object ClaudeConnector:
 
@@ -541,6 +543,12 @@ object ClaudeConnector:
     * fails, salvage a single JSON object out of prose / a Markdown fence before giving up. `Left(detail)` describes
     * what was missing or wrong; the caller maps to [[StructuredOutputMissing]] / [[StructuredOutputMalformed]].
     */
+  /** S4-3 — the cost the reviewer one-shot envelope reported (`total_cost_usd` / `usage` / `modelUsage`), or `None`
+    * when the envelope carries no cost (e.g. an `is_error` result). Delegates to [[ClaudeEventParser.costFromResult]]
+    * so the streaming-driver and one-shot reviewer paths share one cost parser.
+    */
+  def extractReviewerCost(envelope: Value): Option[Cost] = ClaudeEventParser.costFromResult(envelope)
+
   def extractStructuredOutput(envelope: Value): Either[String, Value] =
     envelope.objOpt match
       case None => Left(s"Claude result envelope was not a JSON object")

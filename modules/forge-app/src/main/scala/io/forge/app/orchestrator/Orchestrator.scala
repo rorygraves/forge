@@ -287,8 +287,9 @@ final class Orchestrator(
         totalsRef <- Ref.of[IO, CostTotals](CostTotals.zero)
         out <- loop(feature, profile, driverRef, totalsRef, justEntered = true)
         // §11.7: on the transition to FeatureDone, consult the ConventionLearner out of band. Runs *after* the loop
-        // reached its terminal, never gating it; `maybeLearnConventions` no-ops unless `out` is FeatureDone.
-        _ <- maybeLearnConventions(out, profile)
+        // reached its terminal, never gating it; `maybeLearnConventions` no-ops unless `out` is FeatureDone. `totalsRef`
+        // (still in scope post-loop) lets its settled cost join `Feature.cost` (S4-3).
+        _ <- maybeLearnConventions(out, profile, totalsRef)
       yield out
 
   // ---------------------------------------------------------------------------
@@ -311,7 +312,11 @@ final class Orchestrator(
     * the auto-PR-open is a deferred follow-up, design-3.0 §4), and a `profile.conventions_learned` audit action records
     * what was proposed.
     */
-  private def maybeLearnConventions(feature: Feature, profile: Option[RepoProfile]): IO[Unit] =
+  private def maybeLearnConventions(
+      feature: Feature,
+      profile: Option[RepoProfile],
+      totalsRef: Ref[IO, CostTotals]
+  ): IO[Unit] =
     val body = (feature.state, profile) match
       case (FsmState.FeatureDone, Some(p)) if config.adapt.enabled && config.adapt.conventionLearner =>
         log.replay(feature.id).flatMap { actions =>
@@ -324,7 +329,16 @@ final class Orchestrator(
             readClaudeDoc.flatMap { claudeDoc =>
               val input = ConventionLearnerInput(feature.id, p, claudeDoc, failures, comments)
               reviewer.learnConventions(input, ReviewerLimits(reviewerWallClock)).flatMap {
-                case ReviewerOutcome.Settled(deltas) => applyConventionDeltas(feature, p, deltas)
+                case ReviewerOutcome.Settled(deltas, cost) =>
+                  // S4-3: this post-FeatureDone sensor still spends real money on the feature's behalf — fold it into
+                  // the feature total (piece=None ⇒ no piece scope; it cannot affect any §12 gate, which already
+                  // passed). The log is append-only, so `forge stats` reads a coherent total across the learner call.
+                  val recordCost = cost match
+                    case Some(c) =>
+                      reviewerCostDraft(feature, None, "learn-conventions", totalsRef, c)
+                        .flatMap(d => log.append(feature.id, d).void)
+                    case None => IO.unit
+                  recordCost >> applyConventionDeltas(feature, p, deltas)
                 case _ => IO.unit // Timeout / AdapterFailure — advisory, dropped (§14.2)
               }
             }
@@ -867,7 +881,10 @@ final class Orchestrator(
     else
       val input = FailureClassifierInput(feature.id, gate = gate, failureLog = failureLog, profile = profile)
       reviewer.classifyFailure(input, ReviewerLimits(reviewerWallClock)).map {
-        case ReviewerOutcome.Settled(llm) =>
+        // S4-3: the call's cost rides on `Settled` but its `cost.update` write is deferred (design-2.2-tuning §4) —
+        // wiring it would thread the live `totalsRef` through the CI-watcher + local-build-gate side-effect chains for
+        // the rarest reviewer call (Unknown-classification only). Bounded under-count, documented as an S4-series item.
+        case ReviewerOutcome.Settled(llm, _) =>
           failureRouter.routeFrom(llm, profile, failureLog, config.adapt, source = "llm")
         case _ => rulesRouted // timeout / adapter / process failure → keep the rules Escalate (don't block on a stall).
       }
@@ -1162,12 +1179,13 @@ final class Orchestrator(
       piece: Option[PieceId],
       role: String,
       totals: CostTotals,
-      turn: Cost
+      turn: Cost,
+      actor: String = "driver"
   ): ActionDraft =
     ActionDraft(
       feature.id,
       piece,
-      actor = Some("driver"),
+      actor = Some(actor),
       role = Some(role),
       kind = "cost.update",
       payload = ujson.Obj(
@@ -1181,6 +1199,26 @@ final class Orchestrator(
         "turnTotalUsd" -> ujson.Num(totals.turn.toDouble)
       )
     )
+
+  /** §19 `cost.update` for a reviewer/sensor one-shot (S4-3) — fold the call's cost into the running totals and draft
+    * the action with `actor = "reviewer"`. The `turn` scope is **never** touched (reviewer spend is not a driver turn);
+    * the `piece` scope is touched only when the call is piece-scoped (a PR review / refine), not for the feature-level
+    * design review or the post-feature `learnConventions` (`piece = None`). `Replay.applyCostUpdate` is actor-agnostic,
+    * so this folds into `Feature.cost` exactly like a driver `cost.update`. The caller co-persists the returned draft
+    * atomically with the FSM transition it accompanies.
+    */
+  private def reviewerCostDraft(
+      feature: Feature,
+      piece: Option[PieceId],
+      role: String,
+      totalsRef: Ref[IO, CostTotals],
+      cost: Cost
+  ): IO[ActionDraft] =
+    totalsRef
+      .updateAndGet(t =>
+        t.copy(feature = t.feature + cost.usd, piece = if piece.isDefined then t.piece + cost.usd else t.piece)
+      )
+      .map(totals => costUpdateDraft(feature, piece, role, totals, cost, actor = "reviewer"))
 
   /** §19 `session.complete` (new in Slice 2.0 Task 2.0.2; `resumed` added D3-4) — `{ phase, piece, durationMs, model,
     * turnCostUsd, success, resumed }`. An audit-only record (a no-op projection in `Replay`); folded by `forge stats`
@@ -1294,7 +1332,8 @@ final class Orchestrator(
           case Right(in) =>
             reviewer.designReview(in, limits).flatMap { o =>
               val ev = designReviewEvent(round, o)
-              logReviewerRequestChanges(feature, ev).as(RaceResult.FromReviewer(ev))
+              val spend = reviewerSpendOf(o, SessionPhase.DesignReview, piece = None)
+              logReviewerRequestChanges(feature, ev).as(RaceResult.FromReviewer(ev, spend))
             }
         }
 
@@ -1306,7 +1345,8 @@ final class Orchestrator(
               case Right(in) =>
                 reviewer.prReview(in, limits).flatMap { o =>
                   val ev = prReviewEvent(s.p, o)
-                  logReviewerRequestChanges(feature, ev).as(RaceResult.FromReviewer(ev))
+                  val spend = reviewerSpendOf(o, SessionPhase.CodeReview, piece = Some(s.p))
+                  logReviewerRequestChanges(feature, ev).as(RaceResult.FromReviewer(ev, spend))
                 }
             }
           case other =>
@@ -1318,7 +1358,10 @@ final class Orchestrator(
             sideEffects.refineInput(feature, s.p).flatMap {
               case Left(reason) => IO.pure(RaceResult.FromReviewer(FsmEvent.HarnessError(reason)))
               case Right(in) =>
-                reviewer.refine(in, limits).map(o => RaceResult.FromReviewer(refineEvent(o)))
+                reviewer.refine(in, limits).map { o =>
+                  val spend = reviewerSpendOf(o, SessionPhase.Refine, piece = Some(s.p))
+                  RaceResult.FromReviewer(refineEvent(o), spend)
+                }
             }
           case other =>
             IO.raiseError(new IllegalStateException(s"Refine source selected in non-refining state $other"))
@@ -1374,14 +1417,24 @@ final class Orchestrator(
 
       case RaceResult.FromWatcher(event) => applyAndPersist(feature, event)
 
-      case RaceResult.FromReviewer(event) =>
-        // §11.2 step 13: a design-review `Approve` is an FSM no-op — the orchestrator must commit the design assets +
-        // open the design PR, then feed the resulting snapshot to advance into DesignAwaitingMerge.
-        val (f1, drafts) = Fsm.transition(feature, event, fsmConfig)
-        (event, f1.state == feature.state) match
-          case (FsmEvent.DesignReviewReceived(_, DesignReviewVerdict.Approve), true) =>
-            sideEffects.commitDesignAndOpenPr(feature).flatMap(e => applyAndPersist(feature, eventOrHarness(e)))
-          case _ => persistTransition(f1, drafts).as(f1)
+      case RaceResult.FromReviewer(event, spend) =>
+        // S4-3: fold the settled reviewer call's cost into the running totals and co-persist a `cost.update`
+        // (actor="reviewer") in the SAME atomic append as the transition it accompanies — so reviewer spend joins
+        // `Feature.cost` exactly like a driver settle's cost.update (empty when the call carried no cost).
+        val costDraftsIO: IO[Vector[ActionDraft]] = spend match
+          case Some(s) => reviewerCostDraft(feature, s.piece, roleOf(s.phase), totalsRef, s.cost).map(Vector(_))
+          case None => IO.pure(Vector.empty)
+        costDraftsIO.flatMap { costDrafts =>
+          // §11.2 step 13: a design-review `Approve` is an FSM no-op — the orchestrator must commit the design assets +
+          // open the design PR, then feed the resulting snapshot to advance into DesignAwaitingMerge.
+          val (f1, drafts) = Fsm.transition(feature, event, fsmConfig)
+          (event, f1.state == feature.state) match
+            case (FsmEvent.DesignReviewReceived(_, DesignReviewVerdict.Approve), true) =>
+              sideEffects
+                .commitDesignAndOpenPr(feature)
+                .flatMap(e => applyAndPersist(feature, eventOrHarness(e), costDrafts))
+            case _ => persistTransition(f1, costDrafts ++ drafts).as(f1)
+        }
 
       case RaceResult.FromUser(cmd) => applyAndPersist(feature, FsmEvent.UserCommandReceived(cmd))
 
@@ -1440,21 +1493,33 @@ final class Orchestrator(
           .void
       case _ => IO.unit
 
+  /** S4-3 — lift a settled reviewer outcome's cost into a [[ReviewerSpend]] tagged with the phase + piece. `None` for
+    * `Timeout` / `AdapterFailure` (no cost) and for a `Settled` whose envelope carried no cost.
+    */
+  private def reviewerSpendOf[A](
+      outcome: ReviewerOutcome[A],
+      phase: SessionPhase,
+      piece: Option[PieceId]
+  ): Option[ReviewerSpend] =
+    outcome match
+      case ReviewerOutcome.Settled(_, Some(cost)) => Some(ReviewerSpend(phase, piece, cost))
+      case _ => None
+
   private def designReviewEvent(round: Int, outcome: ReviewerOutcome[DesignReview]): FsmEvent =
     outcome match
-      case ReviewerOutcome.Settled(review) => FsmEvent.DesignReviewReceived(round, designVerdict(review))
+      case ReviewerOutcome.Settled(review, _) => FsmEvent.DesignReviewReceived(round, designVerdict(review))
       case ReviewerOutcome.Timeout => FsmEvent.SettleTimeout(SessionPhase.DesignReview, "design review wall-clock cap")
       case ReviewerOutcome.AdapterFailure(err) => FsmEvent.HarnessError(s"design review failed: ${err.message}")
 
   private def prReviewEvent(piece: PieceId, outcome: ReviewerOutcome[PrReview]): FsmEvent =
     outcome match
-      case ReviewerOutcome.Settled(review) => FsmEvent.CodeReviewVerdict(piece, prVerdict(review))
+      case ReviewerOutcome.Settled(review, _) => FsmEvent.CodeReviewVerdict(piece, prVerdict(review))
       case ReviewerOutcome.Timeout => FsmEvent.SettleTimeout(SessionPhase.CodeReview, "code review wall-clock cap")
       case ReviewerOutcome.AdapterFailure(err) => FsmEvent.HarnessError(s"code review failed: ${err.message}")
 
   private def refineEvent(outcome: ReviewerOutcome[RefineResult]): FsmEvent =
     outcome match
-      case ReviewerOutcome.Settled(result) => FsmEvent.RefineOutcome(refineVerdict(result))
+      case ReviewerOutcome.Settled(result, _) => FsmEvent.RefineOutcome(refineVerdict(result))
       case ReviewerOutcome.Timeout => FsmEvent.SettleTimeout(SessionPhase.Refine, "refine wall-clock cap")
       case ReviewerOutcome.AdapterFailure(err) => FsmEvent.HarnessError(s"refine failed: ${err.message}")
 
@@ -1628,9 +1693,16 @@ object Orchestrator:
       */
     case Rejected(currentState: FsmState, reason: String)
 
-/** Loop-local tag for which source produced the racing event — drives the source-driven session-clear rule. */
+/** Loop-local tag for which source produced the racing event — drives the source-driven session-clear rule.
+  *
+  * `FromReviewer` optionally carries the reviewer/sensor call's spend (S4-3): when present, the winner dispatcher folds
+  * it into the running totals and co-persists a `cost.update` (actor="reviewer") with the transition it accompanies.
+  */
 private enum RaceResult:
   case FromMonitor(report: MonitorReport)
   case FromWatcher(event: FsmEvent)
-  case FromReviewer(event: FsmEvent)
+  case FromReviewer(event: FsmEvent, spend: Option[ReviewerSpend] = None)
   case FromUser(cmd: UserCommand)
+
+/** S4-3 — a settled reviewer/sensor call's cost, tagged with the phase + piece to attribute it to. */
+private final case class ReviewerSpend(phase: SessionPhase, piece: Option[PieceId], cost: Cost)

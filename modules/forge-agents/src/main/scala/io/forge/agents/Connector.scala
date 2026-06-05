@@ -79,14 +79,14 @@ trait Connector:
 
   // --- reviewer methods ----
 
-  /** Review a design markdown. */
-  def reviewDesign(input: DesignReviewInput): IO[DesignReview]
+  /** Review a design markdown. Returns the verdict paired with the reviewer call's cost (S4-3). */
+  def reviewDesign(input: DesignReviewInput): IO[Reviewed[DesignReview]]
 
-  /** Review a PR diff. */
-  def reviewPr(input: PrReviewInput): IO[PrReview]
+  /** Review a PR diff. Returns the verdict paired with the reviewer call's cost (S4-3). */
+  def reviewPr(input: PrReviewInput): IO[Reviewed[PrReview]]
 
-  /** Refine the plan after a piece merges (§14.3). */
-  def refine(input: RefineInput): IO[RefineResult]
+  /** Refine the plan after a piece merges (§14.3). Returns the result paired with the reviewer call's cost (S4-3). */
+  def refine(input: RefineInput): IO[Reviewed[RefineResult]]
 
   // --- sensor methods (§7.11, Phase 3) ----
 
@@ -97,7 +97,7 @@ trait Connector:
     * consumes deterministically (§11.0). The output is wall-clock-capped orchestrator-side via the `ReviewerCall`
     * boundary.
     */
-  def profileRepo(input: RepoProfilerInput): IO[RepoProfile]
+  def profileRepo(input: RepoProfilerInput): IO[Reviewed[RepoProfile]]
 
   /** `FailureClassifier` sensor (§7.11): perceive a gate failure (`failureLog` + `profile`) into a [[Classification]].
     * A reviewer-side one-shot exactly like [[profileRepo]] — Native schema (`~/.forge/schemas/failure-classifier.json`)
@@ -107,7 +107,7 @@ trait Connector:
     * read-only input the spine routes on deterministically (§8.2); the core never re-invokes it on replay.
     * Wall-clock-capped orchestrator-side via the `ReviewerCall` boundary.
     */
-  def classifyFailure(input: FailureClassifierInput): IO[io.forge.core.profile.Classification]
+  def classifyFailure(input: FailureClassifierInput): IO[Reviewed[io.forge.core.profile.Classification]]
 
   /** `ConventionLearner` sensor (§7.11, Task 3.2): perceive a finished feature's failure→remedy patterns (`failures` +
     * the current `profile` + `claudeDoc`) into proposed [[io.forge.core.profile.ConventionDeltas]]. A reviewer-side
@@ -117,7 +117,7 @@ trait Connector:
     * via `ProfileStore.save`, the CLAUDE.md edit persisted for human review). Wall-clock-capped orchestrator-side via
     * the `ReviewerCall` boundary; a stall/failure is dropped (the §14.2 refinery posture).
     */
-  def learnConventions(input: ConventionLearnerInput): IO[io.forge.core.profile.ConventionDeltas]
+  def learnConventions(input: ConventionLearnerInput): IO[Reviewed[io.forge.core.profile.ConventionDeltas]]
 
   /** Schema enforcement (§7.4/§7.5). */
   def schemaMechanism: SchemaMechanism

@@ -36,12 +36,14 @@ class ConnectorContractSuite extends munit.FunSuite:
     def runFixup(prompt: FixupPrompt): IO[AgentSession] = IO.pure(NoopSession)
     def resumeHeadlessDriver(sessionId: String, systemPromptPath: os.Path, message: String): IO[AgentSession] =
       IO.pure(NoopSession)
-    def reviewDesign(input: DesignReviewInput): IO[DesignReview] = notImplemented
-    def reviewPr(input: PrReviewInput): IO[PrReview] = notImplemented
-    def refine(input: RefineInput): IO[RefineResult] = notImplemented
-    def profileRepo(input: RepoProfilerInput): IO[RepoProfile] = notImplemented
-    def classifyFailure(input: FailureClassifierInput): IO[io.forge.core.profile.Classification] = notImplemented
-    def learnConventions(input: ConventionLearnerInput): IO[io.forge.core.profile.ConventionDeltas] = notImplemented
+    def reviewDesign(input: DesignReviewInput): IO[Reviewed[DesignReview]] = notImplemented
+    def reviewPr(input: PrReviewInput): IO[Reviewed[PrReview]] = notImplemented
+    def refine(input: RefineInput): IO[Reviewed[RefineResult]] = notImplemented
+    def profileRepo(input: RepoProfilerInput): IO[Reviewed[RepoProfile]] = notImplemented
+    def classifyFailure(input: FailureClassifierInput): IO[Reviewed[io.forge.core.profile.Classification]] =
+      notImplemented
+    def learnConventions(input: ConventionLearnerInput): IO[Reviewed[io.forge.core.profile.ConventionDeltas]] =
+      notImplemented
     def costFrom(event: AgentEvent): Option[Cost] = event match
       case AgentEvent.CostUpdate(c) => Some(c)
       case _ => None

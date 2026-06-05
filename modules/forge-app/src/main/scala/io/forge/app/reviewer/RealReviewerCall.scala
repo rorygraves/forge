@@ -12,6 +12,7 @@ import io.forge.agents.{
   RefineInput,
   RefineResult,
   RepoProfilerInput,
+  Reviewed,
   ReviewerError
 }
 import io.forge.core.profile.{Classification, ConventionDeltas, RepoProfile}
@@ -70,11 +71,11 @@ final class RealReviewerCall(connector: Connector) extends ReviewerCall:
 
   private def runWithCap[A](
       limits: ReviewerLimits,
-      call: IO[A]
+      call: IO[Reviewed[A]]
   ): IO[ReviewerOutcome[A]] =
     val attempted: IO[ReviewerOutcome[A]] =
       call.attempt.flatMap {
-        case Right(value) => IO.pure(ReviewerOutcome.Settled(value))
+        case Right(reviewed) => IO.pure(ReviewerOutcome.Settled(reviewed.value, reviewed.cost))
         case Left(err: ReviewerError) => IO.pure(ReviewerOutcome.AdapterFailure(err))
         case Left(other) => IO.raiseError(other)
       }

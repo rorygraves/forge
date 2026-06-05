@@ -104,7 +104,7 @@ class RepoProfilerSmokeSuite extends munit.FunSuite:
         reviewerModel = claudeModel
       )
     new RealReviewerCall(connector).profileRepo(forgeInput, limits).unsafeRunSync() match
-      case ReviewerOutcome.Settled(profile) => assertPlausible(profile)
+      case ReviewerOutcome.Settled(profile, _) => assertPlausible(profile)
       case other => fail(s"expected a settled RepoProfile, got $other")
 
   test("profileRepo (codex) on the forge repo decodes into a plausible RepoProfile".flaky):
@@ -117,5 +117,5 @@ class RepoProfilerSmokeSuite extends munit.FunSuite:
       reviewerAssets = Some(assetsFor("codex"))
     )
     new RealReviewerCall(connector).profileRepo(forgeInput, limits).unsafeRunSync() match
-      case ReviewerOutcome.Settled(profile) => assertPlausible(profile)
+      case ReviewerOutcome.Settled(profile, _) => assertPlausible(profile)
       case other => fail(s"expected a settled RepoProfile, got $other")

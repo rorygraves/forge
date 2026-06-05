@@ -34,9 +34,15 @@ final case class ForgeConfig(
     maxFixupRounds: Int = 3,
     maxDesignReviewRounds: Int = 3,
     maxHaltRespawns: Int = 5,
+    // §12 budget caps. `maxFeatureCostUsd` / `maxPieceCostUsd` are the **preventive** caps — a cumulative breach
+    // records a non-killing pending `BudgetBreached` that refuses the *next* driver spawn (§12 check 2). `maxTurnCostUsd`
+    // is a **post-hoc advisory** (Slice 2.2 A1): cost is reported only at turn-end, so the per-turn cap can no longer
+    // prevent or kill the turn it fires on — it is the threshold above which `forge stats` flags an unusually expensive
+    // turn. Retuned 2.00 → 15.00 against dogfood data (the szork implement turn was $9.56; the old $2 cap post-hoc-killed
+    // it). The mid-turn interrupt is the wall-clock `settle.*` cap, not a cost cap. See `RealSessionMonitor.applyCaps`.
     maxFeatureCostUsd: Double = 25.00,
     maxPieceCostUsd: Double = 8.00,
-    maxTurnCostUsd: Double = 2.00,
+    maxTurnCostUsd: Double = 15.00,
     auditMode: String = "summary",
     logRetention: String = "keep-local",
     baseFreshness: BaseFreshnessConfig = BaseFreshnessConfig(),

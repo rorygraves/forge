@@ -43,7 +43,7 @@ class ReviewerCallHappySuite extends CatsEffectSuite:
         connector <- FakeReviewerConnector.make(designReviewIO = IO.pure(review))
         outcome <- new RealReviewerCall(connector).designReview(designInput, limits)
       yield outcome
-    program.assertEquals(ReviewerOutcome.Settled(review))
+    program.assertEquals(ReviewerOutcome.Settled(review, None))
 
   test("prReview clean settle → Settled(result)"):
     val review = PrReview(ReviewVerdict.RequestChanges, Vector.empty, "needs work")
@@ -52,7 +52,7 @@ class ReviewerCallHappySuite extends CatsEffectSuite:
         connector <- FakeReviewerConnector.make(prReviewIO = IO.pure(review))
         outcome <- new RealReviewerCall(connector).prReview(prInput, limits)
       yield outcome
-    program.assertEquals(ReviewerOutcome.Settled(review))
+    program.assertEquals(ReviewerOutcome.Settled(review, None))
 
   test("refine clean settle → Settled(result)"):
     val result = RefineResult(RefineOutcome.NoChange, "no change", None)
@@ -61,7 +61,7 @@ class ReviewerCallHappySuite extends CatsEffectSuite:
         connector <- FakeReviewerConnector.make(refineIO = IO.pure(result))
         outcome <- new RealReviewerCall(connector).refine(refineInput, limits)
       yield outcome
-    program.assertEquals(ReviewerOutcome.Settled(result))
+    program.assertEquals(ReviewerOutcome.Settled(result, None))
 
   test("ReviewerProcessFailure → AdapterFailure(ReviewerProcessFailure)"):
     val err = ReviewerProcessFailure("boom")

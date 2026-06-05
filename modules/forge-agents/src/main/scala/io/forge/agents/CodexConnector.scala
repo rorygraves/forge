@@ -146,21 +146,21 @@ final class CodexConnector(
 
   // --- reviewer methods ----
 
-  def reviewDesign(input: DesignReviewInput): IO[DesignReview] =
+  def reviewDesign(input: DesignReviewInput): IO[Reviewed[DesignReview]] =
     runReviewer(
       assets => assets.designReview,
       ReviewerPrompts.designReviewBody(input),
       ReviewDecoders.designReview
     )
 
-  def reviewPr(input: PrReviewInput): IO[PrReview] =
+  def reviewPr(input: PrReviewInput): IO[Reviewed[PrReview]] =
     runReviewer(
       assets => assets.prReview,
       ReviewerPrompts.prReviewBody(input),
       ReviewDecoders.prReview
     )
 
-  def refine(input: RefineInput): IO[RefineResult] =
+  def refine(input: RefineInput): IO[Reviewed[RefineResult]] =
     runReviewer(
       assets => assets.refine,
       ReviewerPrompts.refineBody(input),
@@ -169,21 +169,21 @@ final class CodexConnector(
 
   // --- sensor methods (§7.11) ----
 
-  def profileRepo(input: RepoProfilerInput): IO[RepoProfile] =
+  def profileRepo(input: RepoProfilerInput): IO[Reviewed[RepoProfile]] =
     runReviewer(
       assets => assets.profileRepo,
       ReviewerPrompts.repoProfileBody(input),
       ReviewDecoders.repoProfile
     )
 
-  def classifyFailure(input: FailureClassifierInput): IO[io.forge.core.profile.Classification] =
+  def classifyFailure(input: FailureClassifierInput): IO[Reviewed[io.forge.core.profile.Classification]] =
     runReviewer(
       assets => assets.classifyFailure,
       ReviewerPrompts.classifyFailureBody(input),
       ReviewDecoders.failureClassification
     )
 
-  def learnConventions(input: ConventionLearnerInput): IO[io.forge.core.profile.ConventionDeltas] =
+  def learnConventions(input: ConventionLearnerInput): IO[Reviewed[io.forge.core.profile.ConventionDeltas]] =
     runReviewer(
       assets => assets.learnConventions,
       ReviewerPrompts.learnConventionsBody(input),
@@ -223,7 +223,7 @@ final class CodexConnector(
       pick: ReviewerAssets => ReviewerAssets.PerMethod,
       body: String,
       decode: Value => Either[String, A]
-  ): IO[A] =
+  ): IO[Reviewed[A]] =
     reviewerAssets match
       case None =>
         IO.raiseError(
@@ -245,7 +245,7 @@ final class CodexConnector(
         for
           combined <- IO.delay(CodexPrompt.withSystemBlock(per.systemPrompt, body))
           argv = CodexConnector.execArgv(binary, model, reviewerSettings, combined)
-          payload <- Subprocess
+          collected <- Subprocess
             .spawn(argv, cwd = cwd, env = extraEnv)
             // Same Codex-reads-stdin behaviour as `spawnHeadless` / `CodexStreamingSession.runOneTurn` — without
             // this, `reviewDesign` / `reviewPr` / `refine` hang until `reviewerTimeout` and surface as
@@ -253,10 +253,18 @@ final class CodexConnector(
             // because their shell scripts never read stdin.
             .evalTap(_.closeStdin)
             .use(sp => CodexConnector.collectReviewerPayload(sp, reviewerTimeout))
+          (payload, tokensOpt) = collected
           decoded <- IO.fromEither(
             decode(payload).left.map(detail => StructuredOutputMalformed(detail))
           )
-        yield decoded
+        // S4-3: cost is `usdFor(model, tokens)` — `None` when no `turn.completed` line was seen; a model missing from
+        // the price table still yields a `Cost` with `usd = 0` (mirrors `CodexEventParser.parseTurnCompleted`).
+        yield Reviewed(
+          decoded,
+          tokensOpt.map(t =>
+            Cost("openai", model, t.inputTokens, t.outputTokens, priceTable.usdFor(model, t).getOrElse(BigDecimal(0)))
+          )
+        )
 
 object CodexConnector:
 
@@ -316,7 +324,7 @@ object CodexConnector:
     * message — and ignore any narration text that preceded it. Slice 0 transcripts only ever showed one, but multiple
     * is allowed by Codex's stream model.
     */
-  def collectReviewerPayload(sp: Subprocess, timeout: FiniteDuration): IO[Value] =
+  def collectReviewerPayload(sp: Subprocess, timeout: FiniteDuration): IO[(Value, Option[CodexTokens])] =
     val drainStdout = sp.stdout.compile.toVector
     val drainStderr = sp.stderr.compile.toVector
     val collect =
@@ -342,9 +350,11 @@ object CodexConnector:
             )
           )
         else
+          // S4-3: the JSONL stream we just drained also carries the `turn.completed.usage` line; surface its tokens
+          // alongside the agent_message payload so the connector can attach the reviewer call's cost.
           IO.fromEither(
             extractAgentMessageText(stdoutLines).left.map(StructuredOutputMissing(_))
-          )
+          ).map(payload => (payload, extractTurnTokens(stdoutLines)))
 
   /** Extract the **last** `item.completed{type:agent_message}.text` payload from a Codex JSONL stream and parse it as
     * JSON. Returns `Left` when no agent_message line is present, when the field is missing, or when the text isn't
@@ -382,3 +392,33 @@ object CodexConnector:
         catch
           case e: ujson.ParsingFailedException =>
             Left(s"Codex agent_message text was not valid JSON: ${e.getMessage}")
+
+  /** S4-3 — extract the **last** `turn.completed.usage` token counts from a Codex JSONL stream, mirroring
+    * [[CodexEventParser.parseTurnCompleted]]'s usage block (same keys). `None` when no `turn.completed` line is
+    * present. Helper is `def` (not on a parser instance) so tests can hit it directly, like
+    * [[extractAgentMessageText]].
+    */
+  def extractTurnTokens(lines: Vector[String]): Option[CodexTokens] =
+    lines.iterator
+      .map(_.trim)
+      .filter(_.nonEmpty)
+      .flatMap { line =>
+        try
+          val v = ujson.read(line)
+          if v.objOpt.flatMap(_.get("type")).flatMap(_.strOpt).contains("turn.completed") then
+            val u = v.obj.get("usage").flatMap(_.objOpt)
+            Some(
+              CodexTokens(
+                inputTokens = u.flatMap(_.get("input_tokens")).flatMap(_.numOpt).map(_.toLong).getOrElse(0L),
+                cachedInputTokens =
+                  u.flatMap(_.get("cached_input_tokens")).flatMap(_.numOpt).map(_.toLong).getOrElse(0L),
+                outputTokens = u.flatMap(_.get("output_tokens")).flatMap(_.numOpt).map(_.toLong).getOrElse(0L),
+                reasoningOutputTokens =
+                  u.flatMap(_.get("reasoning_output_tokens")).flatMap(_.numOpt).map(_.toLong).getOrElse(0L)
+              )
+            )
+          else None
+        catch case _: ujson.ParsingFailedException => None
+      }
+      .toVector
+      .lastOption

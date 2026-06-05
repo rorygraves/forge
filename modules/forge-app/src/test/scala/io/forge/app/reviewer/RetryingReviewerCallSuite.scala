@@ -22,9 +22,9 @@ class RetryingReviewerCallSuite extends CatsEffectSuite:
   private val refineInput = RefineInput(FeatureId("feat-1"), PieceId("p1"), designMarkdown = "# design", "{}")
 
   private val approveDesign =
-    ReviewerOutcome.Settled(DesignReview(ReviewVerdict.Approve, Vector.empty, Vector.empty, "ok"))
-  private val approvePr = ReviewerOutcome.Settled(PrReview(ReviewVerdict.Approve, Vector.empty, "ok"))
-  private val refineNoChange = ReviewerOutcome.Settled(RefineResult(RefineOutcome.NoChange, "", None))
+    ReviewerOutcome.Settled(DesignReview(ReviewVerdict.Approve, Vector.empty, Vector.empty, "ok"), None)
+  private val approvePr = ReviewerOutcome.Settled(PrReview(ReviewVerdict.Approve, Vector.empty, "ok"), None)
+  private val refineNoChange = ReviewerOutcome.Settled(RefineResult(RefineOutcome.NoChange, "", None), None)
 
   /** A [[ReviewerCall]] that pops a scripted outcome per call and counts how many times each method was invoked. */
   private final class ScriptedReviewerCall(
@@ -143,12 +143,12 @@ class RetryingReviewerCallSuite extends CatsEffectSuite:
     val classification = Classification(FailureKind.Unknown, 0.4, None, "ambiguous")
     val classifyInput = FailureClassifierInput(FeatureId("feat-1"), gate = "ci", failureLog = "boom", profile = null)
     for
-      fake <- scripted(classify = List(procFail, procFail, ReviewerOutcome.Settled(classification)))
+      fake <- scripted(classify = List(procFail, procFail, ReviewerOutcome.Settled(classification, None)))
       decorated = new RetryingReviewerCall(fake, reviewRetries = 2, refineRetries = 0)
       out <- decorated.classifyFailure(classifyInput, limits)
       n <- fake.calls.get
     yield
-      assertEquals(out, ReviewerOutcome.Settled(classification): ReviewerOutcome[Classification])
+      assertEquals(out, ReviewerOutcome.Settled(classification, None): ReviewerOutcome[Classification])
       assertEquals(n, 3) // initial + 2 review retries; refineRetries=0 must not apply here
 
   test("learnConventions draws on reviewRetries (shares the reviewer one-shot budget)"):
@@ -162,12 +162,12 @@ class RetryingReviewerCallSuite extends CatsEffectSuite:
         reviewerComments = Vector.empty
       )
     for
-      fake <- scripted(learn = List(procFail, procFail, ReviewerOutcome.Settled(deltas)))
+      fake <- scripted(learn = List(procFail, procFail, ReviewerOutcome.Settled(deltas, None)))
       decorated = new RetryingReviewerCall(fake, reviewRetries = 2, refineRetries = 0)
       out <- decorated.learnConventions(learnInput, limits)
       n <- fake.calls.get
     yield
-      assertEquals(out, ReviewerOutcome.Settled(deltas): ReviewerOutcome[ConventionDeltas])
+      assertEquals(out, ReviewerOutcome.Settled(deltas, None): ReviewerOutcome[ConventionDeltas])
       assertEquals(n, 3) // initial + 2 review retries; refineRetries=0 must not apply here
 
   test("retry count of 0 is a transparent pass-through (one call, failure surfaced)"):

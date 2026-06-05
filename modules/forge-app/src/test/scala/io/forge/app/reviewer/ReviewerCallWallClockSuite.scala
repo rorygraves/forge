@@ -89,7 +89,7 @@ class ReviewerCallWallClockSuite extends CatsEffectSuite:
       yield (outcome, cancelled)
     TestControl.executeEmbed(program).map { case (outcome, cancelled) =>
       outcome match
-        case ReviewerOutcome.Settled(r) => assertEquals(r, review)
+        case ReviewerOutcome.Settled(r, _) => assertEquals(r, review)
         case other => fail(s"expected Settled, got $other")
       assert(!cancelled, "no cancellation when the reviewer settles before the cap")
     }

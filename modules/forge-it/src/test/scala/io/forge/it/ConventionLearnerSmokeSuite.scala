@@ -140,7 +140,7 @@ class ConventionLearnerSmokeSuite extends munit.FunSuite:
         reviewerModel = claudeModel
       )
     new RealReviewerCall(connector).learnConventions(learnerInput, limits).unsafeRunSync() match
-      case ReviewerOutcome.Settled(d) => assertPlausible(d)
+      case ReviewerOutcome.Settled(d, _) => assertPlausible(d)
       case other => fail(s"expected a settled ConventionDeltas, got $other")
 
   test("learnConventions (codex) on a paid format fix-up → a plausible proposal".flaky):
@@ -153,5 +153,5 @@ class ConventionLearnerSmokeSuite extends munit.FunSuite:
       reviewerAssets = Some(assetsFor("codex"))
     )
     new RealReviewerCall(connector).learnConventions(learnerInput, limits).unsafeRunSync() match
-      case ReviewerOutcome.Settled(d) => assertPlausible(d)
+      case ReviewerOutcome.Settled(d, _) => assertPlausible(d)
       case other => fail(s"expected a settled ConventionDeltas, got $other")

@@ -305,7 +305,7 @@ class OrchestratorCiRoutingSuite extends munit.FunSuite:
         FakeReviewerCall.approveDesign,
         ReviewerOutcome.Timeout,
         FakeReviewerCall.refineNoChange,
-        classifyOutcome = IO.pure(ReviewerOutcome.Settled(llmClassification))
+        classifyOutcome = IO.pure(ReviewerOutcome.Settled(llmClassification, None))
       )
 
     val out = (for

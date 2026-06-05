@@ -4,7 +4,7 @@ import cats.effect.{IO, Ref}
 import cats.effect.testkit.TestControl
 import fs2.Stream
 import io.forge.agents.{AgentEvent, StreamingSession}
-import io.forge.core.cost.{Cost, CostTotals}
+import io.forge.core.cost.CostTotals
 import io.forge.core.fsm.SessionPhase
 
 import scala.concurrent.duration.DurationInt
@@ -32,9 +32,6 @@ class SessionMonitorReviewRound2Suite extends CatsEffectSuite:
     maxPieceCostUsd = None,
     maxFeatureCostUsd = None
   )
-
-  private def cost(usd: String): Cost =
-    Cost(provider = "p", model = "m", inputTokens = 0L, outputTokens = 0L, usd = BigDecimal(usd))
 
   /** Streaming-session fake whose `kill()` raises a configurable exception. Used to confirm that a raising kill is
     * captured onto the published outcome instead of orphaning the monitor.
@@ -64,29 +61,9 @@ class SessionMonitorReviewRound2Suite extends CatsEffectSuite:
         case other => fail(s"expected SettleTimeout(Spec, _, Some(_)), got $other")
     }
 
-  test("turn-budget path: kill() raises → TurnBudgetBreached published with killError = Some(msg), no hang"):
-    val killException = new RuntimeException("subprocess already reaped")
-    val events = Stream.emit[IO, AgentEvent](AgentEvent.CostUpdate(cost("1.50")))
-    val program =
-      for
-        session <- IO.pure(new FailingKillSession(killException))
-        totals <- Ref.of[IO, CostTotals](CostTotals.zero)
-        monitor = new RealSessionMonitor
-        outcome <- monitor.monitor(SessionPhase.Implement, None, session, events, limits, totals).map(_.outcome)
-      yield outcome
-    TestControl.executeEmbed(program).map { outcome =>
-      outcome match
-        case MonitorOutcome.TurnBudgetBreached(
-              SessionPhase.Implement,
-              turnUsd,
-              capUsd,
-              Some(msg)
-            ) =>
-          assertEquals(turnUsd, BigDecimal("1.50"))
-          assertEquals(capUsd, BigDecimal("1.00"))
-          assertEquals(msg, "subprocess already reaped")
-        case other => fail(s"expected TurnBudgetBreached(Implement, _, _, Some(_)), got $other")
-    }
+  // (The turn-budget kill-failure variant was removed in Slice 2.2 A1: the per-turn cost cap no longer kills, so there
+  // is no breach-path kill whose failure to capture. The settle-timeout kill-failure paths above/below still pin the
+  // round-2 `.attempt` resilience.)
 
   test("kill() raises a Throwable with null message → killError falls back to Throwable.toString"):
     // Defensive: `t.getMessage` can return null (e.g. some custom exceptions). The monitor must not crash on the

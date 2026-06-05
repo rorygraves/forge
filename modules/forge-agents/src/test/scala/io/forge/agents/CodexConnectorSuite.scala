@@ -676,6 +676,7 @@ class CodexConnectorSuite extends munit.FunSuite:
     val review = connector
       .reviewDesign(DesignReviewInput(FeatureId("feat-1"), 1, "design md"))
       .unsafeRunSync()
+      .value
     assertEquals(review.verdict, ReviewVerdict.RequestChanges)
     assertEquals(review.summary, "Needs work.")
     assertEquals(review.blockers.size, 1)
@@ -717,6 +718,7 @@ class CodexConnectorSuite extends munit.FunSuite:
     val profile = connector
       .profileRepo(RepoProfilerInput("szork", None, None, None, Vector.empty, Vector.empty))
       .unsafeRunSync()
+      .value
     assertEquals(profile.buildTool, "sbt")
     assertEquals(profile.commands.map(_.kind.asString), Vector("format"))
     assert(profile.commands.head.autofix)
@@ -762,6 +764,7 @@ class CodexConnectorSuite extends munit.FunSuite:
         FailureClassifierInput(FeatureId("feat-1"), "ci", "scalafmt: 1 files must be formatted", profile)
       )
       .unsafeRunSync()
+      .value
     assertEquals(c.kind, io.forge.core.profile.FailureKind.DeterministicFix)
     assertEquals(c.suggested, Some(io.forge.core.profile.CommandKind.Format))
 
@@ -805,6 +808,7 @@ class CodexConnectorSuite extends munit.FunSuite:
     val d = connector
       .learnConventions(ConventionLearnerInput(FeatureId("feat-1"), profile, None, Vector.empty, Vector.empty))
       .unsafeRunSync()
+      .value
     assertEquals(d.addCommands.map(_.kind.asString), Vector("format"))
     assert(d.addCommands.head.autofix)
     assertEquals(d.summary, "add the format autofix gate")

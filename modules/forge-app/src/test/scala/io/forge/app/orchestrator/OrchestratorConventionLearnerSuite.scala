@@ -98,7 +98,7 @@ class OrchestratorConventionLearnerSuite extends munit.FunSuite:
         input: ConventionLearnerInput,
         limits: ReviewerLimits
     ): IO[ReviewerOutcome[ConventionDeltas]] =
-      IO { captured.set(Some(input)); learnCalls.incrementAndGet(); ReviewerOutcome.Settled(deltas) }
+      IO { captured.set(Some(input)); learnCalls.incrementAndGet(); ReviewerOutcome.Settled(deltas, None) }
 
   private val featureId = FeatureId("feat")
   private val designPr = PrNumber(100)

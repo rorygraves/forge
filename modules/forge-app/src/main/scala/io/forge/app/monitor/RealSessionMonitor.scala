@@ -13,11 +13,15 @@ import io.forge.core.fsm.{BudgetScope, SessionPhase, SettleOutcome}
   * `Resource.background` scope.
   *
   * **Kill discipline** (mirrors §12 / the F6 coherence anchor):
-  *   - Settle timeout → `session.kill()`, then publish.
-  *   - Per-turn USD breach → `session.kill()`, then publish (§12 check 3).
+  *   - Settle timeout → `session.kill()`, then publish. This is the **only** mid-turn interrupt — the wall-clock cap.
+  *   - Per-turn USD cap (`maxTurnCostUsd`) → **post-hoc advisory, no kill** (Slice 2.2 A1 / S4-3). Cost is reported
+  *     only in the turn-end frame, so a per-turn breach is observed only after the turn (and its spend) is complete;
+  *     killing then reclaims nothing and, for the single-turn headless drivers, only strands an already-settled turn.
+  *     The overrun stays visible via the `cost.update` / `session.complete` audit.
   *   - Feature- or piece-scope USD breach → record a pending breach and keep consuming events; on the next
   *     `AgentEvent.Result` (or stream end) publish `BudgetBreached` without killing. §12 check 2: "let current turn
-  *     complete, no new spawns" — the orchestrator refuses the next spawn.
+  *     complete, no new spawns" — the orchestrator refuses the next spawn. These cumulative caps are the real budget
+  *     enforcement.
   *   - Clean settle (`AgentEvent.Result`) → publish `Settled`, no kill.
   *
   * **Cancellation safety (PR-F review round 1 P1).** Foreground returns from `result.get` as soon as the Deferred is
@@ -35,8 +39,9 @@ import io.forge.core.fsm.{BudgetScope, SessionPhase, SettleOutcome}
   * route through `finish` (`sideEffect = IO.unit`, never throws, `killError` always `None`).
   *
   * The monitor reads `runningTotals` via `updateAndGet` but **does not reset** `CostTotals.turn` on turn boundaries —
-  * that is the orchestrator's responsibility per the contract docstring on [[SessionMonitor]]. The per-turn cap is
-  * checked against `CostTotals.turn` after each `CostUpdate` delta is folded in.
+  * that is the orchestrator's responsibility per the contract docstring on [[SessionMonitor]]. The cumulative
+  * feature/piece caps are checked against `CostTotals.feature` / `.piece` after each `CostUpdate` delta is folded in;
+  * the per-turn cap no longer gates (it is advisory — see the kill-discipline note above).
   */
 final class RealSessionMonitor extends SessionMonitor:
 
@@ -96,14 +101,12 @@ final class RealSessionMonitor extends SessionMonitor:
             handleEvent(
               phase,
               piece,
-              session,
               limits,
               runningTotals,
               pendingBreach,
               turnCost,
               durationMs,
-              finish,
-              finishWithKill
+              finish
             )
           )
           .compile
@@ -131,14 +134,12 @@ final class RealSessionMonitor extends SessionMonitor:
   private def handleEvent(
       phase: SessionPhase,
       piece: Option[PieceId],
-      session: AgentSession,
       limits: SessionLimits,
       runningTotals: Ref[IO, CostTotals],
       pendingBreach: Ref[IO, Option[MonitorOutcome.BudgetBreached]],
       turnCost: Ref[IO, Option[Cost]],
       durationMs: Ref[IO, Option[Long]],
-      finish: MonitorOutcome => IO[Unit],
-      finishWithKill: (Option[String] => MonitorOutcome, IO[Unit]) => IO[Unit]
+      finish: MonitorOutcome => IO[Unit]
   )(event: AgentEvent): IO[Unit] =
     event match
       case AgentEvent.CostUpdate(cost) =>
@@ -152,7 +153,7 @@ final class RealSessionMonitor extends SessionMonitor:
                 turn = old.turn + cost.usd
               )
             }
-            .flatMap(applyCaps(phase, piece, session, limits, pendingBreach, finish, finishWithKill))
+            .flatMap(applyCaps(piece, limits, pendingBreach))
 
       case AgentEvent.Result(success, dur) =>
         // End-of-turn boundary: a pending feature/piece breach beats Settled (§12 check 2 — current turn was
@@ -170,41 +171,39 @@ final class RealSessionMonitor extends SessionMonitor:
 
       case _ => IO.unit
 
+  /** §12 budget checks on each `CostUpdate`. **The per-turn cost cap (`maxTurnCostUsd`) is a post-hoc advisory, not a
+    * mid-turn interrupt, and no longer kills** (S4-3 / Slice 2.2 A1): cost is reported only in the turn-end frame, so
+    * by the time a per-turn breach is observed the turn — and its spend — is already complete. Killing then reclaims
+    * nothing and, for the single-turn headless drivers (Implement/Fixup), only strands an already-settled, valuable
+    * turn (the szork `$9.56`-vs-`$2` finding). The mid-turn interrupt is the **wall-clock settle cap** (the timer race
+    * in [[monitor]]); the cumulative **feature/piece caps below remain the real budget enforcement** — they record a
+    * non-killing pending breach that refuses the *next* spawn (§12 check 2). The per-turn overrun stays visible via the
+    * `cost.update` / `session.complete` audit the orchestrator writes for the settle.
+    */
   private def applyCaps(
-      phase: SessionPhase,
       piece: Option[PieceId],
-      session: AgentSession,
       limits: SessionLimits,
-      pendingBreach: Ref[IO, Option[MonitorOutcome.BudgetBreached]],
-      finish: MonitorOutcome => IO[Unit],
-      finishWithKill: (Option[String] => MonitorOutcome, IO[Unit]) => IO[Unit]
+      pendingBreach: Ref[IO, Option[MonitorOutcome.BudgetBreached]]
   )(totals: CostTotals): IO[Unit] =
-    if totals.turn > limits.maxTurnCostUsd then
-      // Per-turn breach: kill immediately (§12 check 3) and publish.
-      finishWithKill(
-        killErr => MonitorOutcome.TurnBudgetBreached(phase, totals.turn, limits.maxTurnCostUsd, killErr),
-        session.kill()
-      )
-    else
-      // Feature/piece breach: record once and let the current turn complete (§12 check 2). Use `orElse` so a
-      // subsequent CostUpdate that also breaches doesn't overwrite the first detected breach.
-      val breach: Option[MonitorOutcome.BudgetBreached] =
-        limits.maxFeatureCostUsd
-          .filter(totals.feature > _)
-          .map(cap => MonitorOutcome.BudgetBreached(BudgetScope.Feature, totals, cap))
-          .orElse {
-            limits.maxPieceCostUsd
-              .filter(totals.piece > _)
-              .map { cap =>
-                val scope = piece match
-                  case Some(p) => BudgetScope.Piece(p)
-                  case None => BudgetScope.Harness
-                MonitorOutcome.BudgetBreached(scope, totals, cap)
-              }
-          }
-      breach match
-        case Some(b) => pendingBreach.update(_.orElse(Some(b)))
-        case None => IO.unit
+    // Feature/piece breach: record once and let the current turn complete (§12 check 2). Use `orElse` so a
+    // subsequent CostUpdate that also breaches doesn't overwrite the first detected breach.
+    val breach: Option[MonitorOutcome.BudgetBreached] =
+      limits.maxFeatureCostUsd
+        .filter(totals.feature > _)
+        .map(cap => MonitorOutcome.BudgetBreached(BudgetScope.Feature, totals, cap))
+        .orElse {
+          limits.maxPieceCostUsd
+            .filter(totals.piece > _)
+            .map { cap =>
+              val scope = piece match
+                case Some(p) => BudgetScope.Piece(p)
+                case None => BudgetScope.Harness
+              MonitorOutcome.BudgetBreached(scope, totals, cap)
+            }
+        }
+    breach match
+      case Some(b) => pendingBreach.update(_.orElse(Some(b)))
+      case None => IO.unit
 
 object RealSessionMonitor:
   /** Fold one `AgentEvent.CostUpdate` delta into the running per-turn aggregate (Slice 2.0). Tokens and USD sum; the
