@@ -27,8 +27,9 @@ deleted; git holds the full lineage either way.)
 
 **All Phase-3 implementation plans are now closed** (Slices 3.0–3.5) — see the
 historical table below. The Phase-3 *phase-level* exit criterion (a live run on a
-new, unseen, non-Scala repo) is still open; it is tracked in [`roadmap.md`](roadmap.md) §4,
-not a per-slice plan.
+new, unseen, non-Scala repo) is still open; it is tracked in [`roadmap.md`](roadmap.md) §4
+and planned in [`design-phase3-exit.md`](design-phase3-exit.md) (🟡 open — design +
+pre-flight runbook; target = a fork of `taverns-red/toast-stats`, Node·TS + prettier).
 
 ## Reference / support
 
