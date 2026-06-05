@@ -93,7 +93,7 @@ a daemon-spawned process (that is B4 / 4.1+).
   sweep still passes (no new `.forge` literal). *Landed first — it is the
   contract every later task sits on, and it is backward-compatible.*
 
-- [ ] **Task 4.0.2 — `forge-instance` module: instance model + registry store.**
+- [x] **Task 4.0.2 — `forge-instance` module: instance model + registry store.**
   New module `forge-instance` (dependsOn `forge-core` for `ForgePaths`/ids).
   `Instance(name, dir)`, a `RepoRegistry` (registered repo paths, validated to
   be git repos), and `InstanceStore` reading/writing
@@ -134,6 +134,21 @@ a daemon-spawned process (that is B4 / 4.1+).
   `ForgePathsSuite` split into committed-vs-local groups + a default-equivalence
   test; `forge-core` green and the smell sweep still passes. Remaining tasks
   (4.0.2 instance model, 4.0.3 CLI, 4.0.4 wiring, 4.0.5 live re-run) open.
+- **2026-06-05** — **Task 4.0.2 (instance model + registry store) landed.** New
+  `forge-instance` module (dependsOn `forge-core`): `Instance(name, dir)` runtime
+  handle deriving the `config.json` / `repos.json` / `workers/<feature>/` leaves;
+  persisted `InstanceConfig` + `RepoRegistry`/`RegisteredRepo` (upickle, schema
+  v1); `trait InstanceStore` + `FileInstanceStore(home)` with `create` /
+  `load` / `list` / `addRepo` / `listRepos`; typed `InstanceError`
+  (`NoSuchInstance` / `DuplicateInstance` / `RepoNotFound` / `NotAGitRepo` /
+  `DuplicateRepo` / `Malformed` / `IoFailure`). `InstanceName` opaque id added to
+  `forge-core` (Ids + Json codec); the `~/.forge/instances/` anchor lives on a new
+  `ForgePaths` companion (`instancesRoot` / `instanceDir`) so the no-`.forge`-literal
+  smell sweep still covers it. Registry persisted with plain `os.write.over` (no
+  daemon yet — carry-forward §4 records this as a temporary 4.0 simplification).
+  12 `FileInstanceStoreSuite` tests over a tmp `home` + `InstanceName` cases in
+  `IdsSuite`; full `sbt test` green (forge-instance 12, forge-core 468), smell
+  sweep passes. Tasks 4.0.3 (CLI), 4.0.4 (wiring), 4.0.5 (live re-run) open.
 
 ---
 

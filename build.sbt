@@ -62,6 +62,17 @@ lazy val `forge-core` = (project in file("modules/forge-core"))
     libraryDependencies ++= Seq(catsEffect, upickle, osLib)
   )
 
+// Phase-4 Slice 4.0 (Task 4.0.2): the per-user Forge **instance** model + registry store
+// (`~/.forge/instances/<name>/{config.json,repos.json,workers/}`). Depends on forge-core for `ForgePaths`
+// (instance topology) + `InstanceName`/`FeatureId` ids + the `io.forge.core.Json` codecs. No daemon / container /
+// worker process yet — "worker" here is only the B1 local-runtime re-root directory (see docs/design-4.0.md).
+lazy val `forge-instance` = (project in file("modules/forge-instance"))
+  .dependsOn(`forge-core`)
+  .settings(commonSettings)
+  .settings(
+    libraryDependencies ++= Seq(catsEffect, upickle, osLib)
+  )
+
 lazy val `forge-agents` = (project in file("modules/forge-agents"))
   .dependsOn(`forge-core`)
   .settings(commonSettings)
@@ -147,6 +158,7 @@ lazy val `forge-it` = (project in file("modules/forge-it"))
 lazy val root = (project in file("."))
   .aggregate(
     `forge-core`,
+    `forge-instance`,
     `forge-agents`,
     `forge-git`,
     `forge-specs`,

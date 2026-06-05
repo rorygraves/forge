@@ -58,3 +58,20 @@ object Sha:
   def apply(s: String): Sha =
     fromString(s).fold(msg => throw IllegalArgumentException(msg), identity)
   extension (s: Sha) def value: String = s
+
+opaque type InstanceName = String
+object InstanceName:
+  /** Phase-4 §4 instance name (`forge-design-2.0.md` §4). Same shape as [[FeatureId]] — a lowercase letter then up to
+    * 49 chars of `[a-z0-9-]` — because the name is used verbatim as the `~/.forge/instances/<name>/` directory segment,
+    * so it must be a safe, collision-resistant path component.
+    */
+  val Pattern: Regex = "^[a-z][a-z0-9-]{0,49}$".r
+
+  def fromString(s: String): Either[String, InstanceName] =
+    if Pattern.matches(s) then Right(s)
+    else Left(s"invalid InstanceName '$s' (must match ${Pattern.regex})")
+
+  def apply(s: String): InstanceName =
+    fromString(s).fold(msg => throw IllegalArgumentException(msg), identity)
+
+  extension (n: InstanceName) def value: String = n

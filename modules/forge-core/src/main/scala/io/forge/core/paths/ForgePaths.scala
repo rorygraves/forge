@@ -1,6 +1,6 @@
 package io.forge.core.paths
 
-import io.forge.core.{FeatureId, PieceId}
+import io.forge.core.{FeatureId, InstanceName, PieceId}
 
 /** §4 + §18 path helper. Every `.forge/...` location flows through this single object — no other call site in the
   * codebase hardcodes a `.forge/...` literal. PR-A A4 graduates this from a smell test to a build-enforced rule.
@@ -133,3 +133,19 @@ final class ForgePaths(val repoRoot: os.Path, val home: os.Path = os.home, local
 
   /** `.forge/prices.json` — per-repo override of the user price table. */
   val pricesRepo: os.Path = repoForgeDir / "prices.json"
+
+end ForgePaths
+
+/** Companion — the per-user **instance** topology (Phase-4 §4 / `forge-design-2.0.md` §4). These anchor at
+  * `~/.forge/instances/` and depend only on `home`, not on any repo checkout, so they live on the companion (an
+  * instance is not tied to a `repoRoot`) rather than on the per-repo [[ForgePaths]] instance. Keeping the `.forge`
+  * segment here means the build-enforced "no `.forge` literal outside ForgePaths.scala" smell sweep still covers the
+  * instance paths, so `forge-instance` derives its per-instance leaves (`config.json`, `repos.json`, `workers/`) off
+  * [[instanceDir]] without ever spelling `.forge` itself.
+  */
+object ForgePaths:
+  /** `~/.forge/instances/` — root of the per-user instance registry (§4). */
+  def instancesRoot(home: os.Path = os.home): os.Path = home / ".forge" / "instances"
+
+  /** `~/.forge/instances/<name>/` — a single instance's directory. */
+  def instanceDir(name: InstanceName, home: os.Path = os.home): os.Path = instancesRoot(home) / name.value

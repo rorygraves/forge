@@ -44,3 +44,12 @@ class IdsSuite extends munit.FunSuite:
     assert(Sha.fromString("0" * 41).isLeft)
     assert(Sha.fromString("ABC1234").isLeft) // uppercase
     assert(Sha.fromString("xyz1234").isLeft) // non-hex
+
+  test("InstanceName.fromString accepts safe directory-component names"):
+    List("demo", "my-instance", "a", "team-1").foreach: s =>
+      assertEquals(InstanceName.fromString(s).map(_.value), Right(s))
+
+  test("InstanceName rejects empty, capitals, leading digit, and oversize input"):
+    List("", "Demo", "1team", "a" * 51).foreach: s =>
+      assert(InstanceName.fromString(s).isLeft, s"expected '$s' to be rejected")
+    intercept[IllegalArgumentException](InstanceName("Bad Name"))
