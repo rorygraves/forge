@@ -73,6 +73,18 @@ lazy val `forge-instance` = (project in file("modules/forge-instance"))
     libraryDependencies ++= Seq(catsEffect, upickle, osLib)
   )
 
+// Phase-4 Slice 4.1 (Task 4.1.1): the long-running **daemon** supervisor. Owns the instance lock, the durable instance
+// state store (append-only instance action log + rebuildable cache — contract §6.4 / O8), and the JSON-RPC-2.0-over-
+// Unix-socket status/control API (O2) that the CLI/TUI clients speak. Depends on forge-instance (Instance model + lock
+// + socket path) and transitively forge-core. fs2-io supplies the `JdkUnixSockets` transport (JDK-21 native). No daemon
+// lifecycle / worker process / container yet beyond the skeleton — see docs/design-4.1.md.
+lazy val `forge-daemon` = (project in file("modules/forge-daemon"))
+  .dependsOn(`forge-instance`)
+  .settings(commonSettings)
+  .settings(
+    libraryDependencies ++= Seq(catsEffect, fs2Core, fs2Io, osLib, upickle)
+  )
+
 lazy val `forge-agents` = (project in file("modules/forge-agents"))
   .dependsOn(`forge-core`)
   .settings(commonSettings)
@@ -161,6 +173,7 @@ lazy val root = (project in file("."))
   .aggregate(
     `forge-core`,
     `forge-instance`,
+    `forge-daemon`,
     `forge-agents`,
     `forge-git`,
     `forge-specs`,

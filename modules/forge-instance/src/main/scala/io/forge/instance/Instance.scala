@@ -41,6 +41,24 @@ final case class Instance(name: InstanceName, dir: os.Path):
   /** `instances/<name>/.lock.json` — sibling holder-metadata for [[lockFile]] (the §13 "who holds it?" diagnostic). */
   def lockMetadataFile: os.Path = dir / ".lock.json"
 
+  /** `instances/<name>/daemon.sock` — the Unix-domain socket the daemon (Phase-4 §6.1 / Slice 4.1) binds and the
+    * CLI/TUI clients connect to (JSON-RPC 2.0 over the socket — contract §6.3 / O2). Lives beside the instance lock the
+    * daemon holds. A leftover stale socket file from a crashed daemon is unlinked before re-bind (the OS lock, not the
+    * socket file, is the liveness authority).
+    */
+  def socketFile: os.Path = dir / "daemon.sock"
+
+  /** `instances/<name>/log/instance.jsonl` — the durable append-only **instance action log** (contract §6.4 / O8): the
+    * daemon's source of truth, mirroring the per-feature `ForgePaths.featureLog` idiom at the instance level. Written
+    * only by the daemon (single-writer, §6.3.1). Landed in Task 4.1.2.
+    */
+  def instanceLog: os.Path = dir / "log" / "instance.jsonl"
+
+  /** `instances/<name>/state/instance.json` — the rebuildable instance **state cache** (a fold of [[instanceLog]],
+    * atomic-written), mirroring the per-feature `ForgePaths.stateFile`. Landed in Task 4.1.2.
+    */
+  def instanceStateFile: os.Path = dir / "state" / "instance.json"
+
 object Instance:
   /** Resolve the on-disk directory for `name` under `home`'s instance root (default `os.home`) — does **not** touch
     * disk. Use [[InstanceStore]] to create/load with existence + decode checks.
