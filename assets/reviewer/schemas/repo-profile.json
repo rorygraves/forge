@@ -72,7 +72,8 @@
         },
         "branchModel": {
           "type": "string",
-          "enum": ["trunk_based", "git_flow"]
+          "enum": ["pr_based", "trunk_based", "git_flow"],
+          "description": "pr_based = PRs merge to a single main/trunk (the common GitHub flow; the safe default). git_flow = long-lived develop/release branches. trunk_based = the repo commits DIRECTLY to the trunk with NO PR/review process — emit this ONLY for a genuinely no-PR repo."
         },
         "mergeStrategy": {
           "type": "string",

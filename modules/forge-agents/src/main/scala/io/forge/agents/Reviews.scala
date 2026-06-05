@@ -86,14 +86,18 @@ final case class RefineResult(
 final case class RepoFile(path: String, content: String)
 
 /** §7.11 `RepoProfiler` input — the repo facts the sensor reads to produce a [[io.forge.core.profile.RepoProfile]]: the
-  * agent docs (`AGENTS.md` / `CLAUDE.md`), the build files, and the CI workflow files. Repo-level (no feature),
-  * mirroring [[io.forge.core.profile.ProfileStore]]. The connector renders these into a stable prompt body
+  * agent docs (`AGENTS.md` / `CLAUDE.md` / `README.md`), the build files, and the CI workflow files. Repo-level (no
+  * feature), mirroring [[io.forge.core.profile.ProfileStore]]. The connector renders these into a stable prompt body
   * ([[ReviewerPrompts.repoProfileBody]]) and decodes the structured reply via [[ReviewDecoders.repoProfile]].
+  *
+  * `readmeDoc` is the repo's `README.md` (P2): repos often document the canonical package manager, test command, or
+  * merge requirements only there, so it is a first-class profiler input alongside the agent guides.
   */
 final case class RepoProfilerInput(
     repoName: String,
     agentsDoc: Option[String],
     claudeDoc: Option[String],
+    readmeDoc: Option[String],
     buildFiles: Vector[RepoFile],
     workflowFiles: Vector[RepoFile]
 )

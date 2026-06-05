@@ -101,6 +101,9 @@ object ProfileCommand:
         repoName = root.last,
         agentsDoc = readOpt(root / "AGENTS.md"),
         claudeDoc = readOpt(root / "CLAUDE.md"),
+        // P2: README often carries the canonical package manager / test command / merge requirements not in the agent
+        // guides, so it is a first-class profiler input (roadmap §4 contract).
+        readmeDoc = readOpt(root / "README.md"),
         buildFiles = BuildFileCandidates.flatMap(leaf => readFile(root / leaf, leaf)),
         workflowFiles = workflowFiles(root)
       )

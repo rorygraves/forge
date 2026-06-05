@@ -65,13 +65,14 @@ class RealSideEffectsSuite extends munit.FunSuite:
       prForBranch: Either[GhError, Option[PrNumber]] = Right(None),
       connector: Connector = new FakeConnector,
       headBranch: BranchName = BranchName("forge/feat/p1"),
-      commitIdentity: Option[CommitIdentity] = None
+      commitIdentity: Option[CommitIdentity] = None,
+      worktreeClean: Boolean = true
   ): RealSideEffects =
     val paths = ForgePaths(repoRoot, repoRoot / "home")
     new RealSideEffects(
       connector = connector,
       branchManager = new FakeBranchManager(calls, prNumber),
-      git = new FakeGitClient(calls, status, headBranch),
+      git = new FakeGitClient(calls, status, headBranch, worktreeClean),
       gh = new FakeGhClient(diff, prForBranchResult = prForBranch),
       changeCollector = new DefaultChangeCollector,
       specStore = new FakeSpecStore(design, Map(p1 -> pieceSpec)),
@@ -260,6 +261,43 @@ class RealSideEffectsSuite extends munit.FunSuite:
     assert(ev.isLeft, ev.toString)
     assert(!os.exists(repo / "should-not-run"), "a command after a failing one must not run")
 
+  // --- runLocalAutofixAndPush (§8.2 CI autofix — P1: clean-worktree guard + staging policy) ---
+
+  tempFixture.test("runLocalAutofixAndPush: clean worktree + delta → classified stage, style commit, push"): repo =>
+    val calls = ArrayBuffer.empty[String]
+    val status = Vector(StatusEntry('M', ' ', "src/Main.scala", None, ignored = false))
+    val se = sut(repo, calls = calls, status = status) // worktreeClean defaults true
+    val ev = se
+      .runLocalAutofixAndPush(feature(FsmState.PieceImplementing(p1)), p1, fmtCmd("sh", "-c", "true"))
+      .unsafeRunSync()
+    assertEquals(ev, Right(()))
+    assert(calls.exists(_.startsWith("git.stage")), calls.mkString(" | "))
+    assert(calls.exists(_.startsWith("git.commit(style(feat):")), calls.mkString(" | "))
+    assert(calls.exists(_.startsWith("bm.push")), calls.mkString(" | "))
+
+  tempFixture.test("runLocalAutofixAndPush: P1 — a dirty worktree before the formatter → Left, no commit/push"): repo =>
+    val calls = ArrayBuffer.empty[String]
+    val status = Vector(StatusEntry('M', ' ', "src/Main.scala", None, ignored = false))
+    val se = sut(repo, calls = calls, status = status, worktreeClean = false)
+    val ev = se
+      .runLocalAutofixAndPush(feature(FsmState.PieceImplementing(p1)), p1, fmtCmd("sh", "-c", "true"))
+      .unsafeRunSync()
+    assert(ev.isLeft, ev.toString)
+    assert(ev.left.exists(_.contains("dirty")), ev.toString)
+    assert(!calls.exists(_.startsWith("git.commit")), s"must not commit on a dirty tree: ${calls.mkString(" | ")}")
+    assert(!calls.exists(_.startsWith("bm.push")), s"must not push on a dirty tree: ${calls.mkString(" | ")}")
+
+  tempFixture.test("runLocalAutofixAndPush: P1 — a denied formatter delta is refused via the staging policy"): repo =>
+    // The formatter touched a denied path; routing through classifyChanges (not raw stage-all) must deny it.
+    val calls = ArrayBuffer.empty[String]
+    val status = Vector(StatusEntry('M', ' ', ".env", None, ignored = false))
+    val se = sut(repo, calls = calls, status = status)
+    val ev = se
+      .runLocalAutofixAndPush(feature(FsmState.PieceImplementing(p1)), p1, fmtCmd("sh", "-c", "true"))
+      .unsafeRunSync()
+    assert(ev.isLeft, ev.toString)
+    assert(!calls.exists(_.startsWith("git.commit")), s"a denied delta must not be committed: ${calls.mkString(" | ")}")
+
   // --- runLocalBuildGate / writeBuildFailures / launchBuildFixup (§8.3 Build gate, 1.8) ---
 
   private def buildCmd(argv: String*): io.forge.core.profile.RepoCommand =
@@ -423,7 +461,8 @@ class RealSideEffectsSuite extends munit.FunSuite:
   private final class FakeGitClient(
       calls: ArrayBuffer[String],
       statusEntries: Vector[StatusEntry],
-      initialBranch: BranchName = BranchName("forge/feat/p1")
+      initialBranch: BranchName = BranchName("forge/feat/p1"),
+      worktreeClean: Boolean = true
   ) extends GitClient:
     // Track the current HEAD so `currentBranch` reflects an in-method `checkout` (e.g. openConventionsPr) and the
     // pre-commit HEAD assertion (`RealSideEffects.assertHeadIs`) sees the branch Forge expects. Flows whose branch was
@@ -443,7 +482,7 @@ class RealSideEffectsSuite extends munit.FunSuite:
     def deleteRemoteTag(name: String): IO[Either[GitError, Unit]] = IO.pure(Right(()))
     def deleteLocalTag(name: String): IO[Either[GitError, Unit]] = IO.pure(Right(()))
     def listTags(pattern: Option[String]): IO[Either[GitError, Vector[String]]] = IO.pure(Right(Vector.empty))
-    def isWorktreeClean: IO[Either[GitError, Boolean]] = IO.pure(Right(false))
+    def isWorktreeClean: IO[Either[GitError, Boolean]] = IO.pure(Right(worktreeClean))
     def stage(paths: Vector[String]): IO[Either[GitError, Unit]] =
       IO { calls += s"git.stage(${paths.mkString(",")})"; Right(()) }
     def status(includeIgnored: Boolean): IO[Either[GitError, Vector[StatusEntry]]] = IO.pure(Right(statusEntries))

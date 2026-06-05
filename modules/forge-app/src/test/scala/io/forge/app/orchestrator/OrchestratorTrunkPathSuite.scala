@@ -282,3 +282,35 @@ class OrchestratorTrunkPathSuite extends munit.FunSuite:
       offers = noCiOffers
     )
     assertOpenedPrNotTrunk(out, trunkCommits, openPrCalls)
+
+  tempFixture.test("PrBased profile keeps the PR path (the post-P0 safe default, no trunk commit)"): root =>
+    val prBased = trunkProfile.copy(workflow = trunkProfile.workflow.copy(branchModel = BranchModel.PrBased))
+    val c @ (_, trunkCommits, openPrCalls, _) = counters
+    val out = driveTo(
+      root,
+      Some(prBased),
+      noCiConfig(testConfig),
+      failTimes = 0,
+      c,
+      startFeature(Vector(inProgress(p1, 1)), FsmState.PieceImplementing(p1)),
+      settles = Vector(implSettle),
+      offers = noCiOffers
+    )
+    assertOpenedPrNotTrunk(out, trunkCommits, openPrCalls)
+
+  tempFixture.test("P0 safety: a stale pre-pr_based TrunkBased profile (schemaVersion 1) does NOT direct-push"): root =>
+    // In v1 the profiler emitted trunk_based as the DEFAULT for ordinary PR repos. A committed v1 trunk_based profile
+    // must therefore degrade to the PR lifecycle, not push straight to main, until the repo is re-profiled under v2.
+    val staleTrunk = trunkProfile.copy(schemaVersion = 1)
+    val c @ (_, trunkCommits, openPrCalls, _) = counters
+    val out = driveTo(
+      root,
+      Some(staleTrunk),
+      noCiConfig(testConfig),
+      failTimes = 0,
+      c,
+      startFeature(Vector(inProgress(p1, 1)), FsmState.PieceImplementing(p1)),
+      settles = Vector(implSettle),
+      offers = noCiOffers
+    )
+    assertOpenedPrNotTrunk(out, trunkCommits, openPrCalls)

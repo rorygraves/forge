@@ -94,19 +94,35 @@ object MergeStrategy:
   given ReadWriter[MergeStrategy] =
     readwriter[String].bimap(_.asString, s => fromString(s).fold(m => throw IllegalArgumentException(m), identity))
 
-/** Branch model the repo follows — shapes where Forge opens its PRs. */
+/** Branch model the repo follows — shapes whether Forge opens a PR per piece or commits straight to the trunk.
+  *
+  *   - [[PrBased]] — the common GitHub flow: short-lived piece branches whose **PRs merge to a single main/trunk**.
+  *     This drives the full §11 PR lifecycle (branch → push → CI → review → merge) and is the **safe default** the
+  *     profiler emits when in doubt.
+  *   - [[GitFlow]] — long-lived `develop`/`release` branches. Behaviourally identical to [[PrBased]] today (the PR
+  *     lifecycle); kept distinct so the workflow shape is recorded honestly.
+  *   - [[TrunkBased]] — the repo commits **directly to the trunk with no PR / review process** (§11.4 trunk path,
+  *     design-3.3 W3). This is the one value that lets Forge push straight to `baseBranch`, so the profiler must emit
+  *     it **only** for a genuinely no-PR repo, and the orchestrator additionally gates the direct-push on the profile
+  *     having been sensed under the *current* schema (`Orchestrator.shouldCommitToTrunk`) — a pre-`pr_based` profile
+  *     (`schemaVersion < 2`) saying `trunk_based` carried the old "PRs merge to trunk" meaning, so it degrades to the
+  *     safe PR path until re-profiled.
+  */
 enum BranchModel:
+  case PrBased
   case TrunkBased
   case GitFlow
 
 object BranchModel:
   def fromString(s: String): Either[String, BranchModel] = s match
+    case "pr_based" => Right(PrBased)
     case "trunk_based" => Right(TrunkBased)
     case "git_flow" => Right(GitFlow)
     case other => Left(s"unknown branch model '$other'")
 
   extension (b: BranchModel)
     def asString: String = b match
+      case PrBased => "pr_based"
       case TrunkBased => "trunk_based"
       case GitFlow => "git_flow"
 
@@ -164,7 +180,13 @@ final case class RepoProfile(
   def contentHash: String = RepoProfile.hash(this)
 
 object RepoProfile:
-  val CurrentSchemaVersion: Int = 1
+  /** Bumped 1 → 2 when `BranchModel.PrBased` was introduced: in v1, `trunk_based` was the profiler's *default* for any
+    * PR-to-trunk repo, but the orchestrator reads `TrunkBased` as direct-commit-no-PR. A v1 `trunk_based` profile is
+    * therefore ambiguous (likely a normal PR repo), so the §11.4 direct-push path requires `schemaVersion ==
+    * CurrentSchemaVersion` — a v1 profile degrades to the safe PR lifecycle until re-profiled under v2 (where the
+    * profiler emits `pr_based` for PR repos and `trunk_based` only for genuinely no-PR repos).
+    */
+  val CurrentSchemaVersion: Int = 2
 
   def fromJson(s: String): RepoProfile = read[RepoProfile](s)
   def toJson(p: RepoProfile, indent: Int = 2): String = write(p, indent = indent)

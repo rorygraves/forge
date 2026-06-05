@@ -78,6 +78,7 @@ class RepoProfilerSmokeSuite extends munit.FunSuite:
       repoName = "forge",
       agentsDoc = readOpt("AGENTS.md"),
       claudeDoc = readOpt("CLAUDE.md"),
+      readmeDoc = readOpt("README.md"),
       buildFiles = readOpt("build.sbt").map(c => RepoFile("build.sbt", c)).toVector,
       workflowFiles = Vector.empty
     )

@@ -715,7 +715,7 @@ class CodexConnectorSuite extends munit.FunSuite:
       reviewerAssets = Some(assets)
     )
     val profile = connector
-      .profileRepo(RepoProfilerInput("szork", None, None, Vector.empty, Vector.empty))
+      .profileRepo(RepoProfilerInput("szork", None, None, None, Vector.empty, Vector.empty))
       .unsafeRunSync()
     assertEquals(profile.buildTool, "sbt")
     assertEquals(profile.commands.map(_.kind.asString), Vector("format"))

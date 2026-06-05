@@ -1,6 +1,6 @@
 package io.forge.agents
 
-import io.forge.core.profile.RepoProfile
+import io.forge.core.profile.{BranchModel, RepoProfile}
 
 /** Task 3.0.3 — `ReviewDecoders.repoProfile` validation. The load-bearing case is the second test: the decoder, fed the
   * **hand-authored `szork` / `forge` fixtures** (the committed `.forge/profile.json` exemplars the §0 exit criterion
@@ -34,6 +34,18 @@ class RepoProfileDecoderSuite extends munit.FunSuite:
     assert(fmt.autofix && fmt.required)
     assertEquals(fmt.argv, Vector("sbt", "scalafmtAll"))
     assertEquals(profile.workflow.ciRequiredChecks, Vector("backend"))
+
+  test("decodes the post-P0 branchModel values (pr_based the default, trunk_based still valid)"):
+    def jsonWith(branchModel: String): String =
+      s"""{
+         |  "buildTool": "npm",
+         |  "commands": [],
+         |  "commitIdentity": { "name": "forge[bot]", "email": "forge@users.noreply.github.com" },
+         |  "workflow": { "reviewRequired": true, "ciRequiredChecks": [], "branchModel": "$branchModel", "mergeStrategy": "squash" }
+         |}""".stripMargin
+    assertEquals(decode(jsonWith("pr_based")).map(_.workflow.branchModel), Right(BranchModel.PrBased))
+    assertEquals(decode(jsonWith("trunk_based")).map(_.workflow.branchModel), Right(BranchModel.TrunkBased))
+    assertEquals(decode(jsonWith("git_flow")).map(_.workflow.branchModel), Right(BranchModel.GitFlow))
 
   test("decoder agrees with the canonical model on the hand-authored szork / forge fixtures"):
     for leaf <- List("szork.json", "forge.json") do

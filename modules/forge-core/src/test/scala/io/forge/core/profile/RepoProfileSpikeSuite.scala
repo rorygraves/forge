@@ -55,10 +55,12 @@ class RepoProfileSpikeSuite extends munit.FunSuite:
       assertEquals(fmt.map(_.argv), Some(Vector("sbt", "scalafmtAll")))
       assert(fmt.exists(c => c.autofix && c.determinism == Determinism.Deterministic))
 
-  test("szork carries the dogfood-#2 workflow shape (backend+frontend required, squash)"):
+  test("szork carries the dogfood-#2 workflow shape (backend+frontend required, squash, PR-based)"):
     assertEquals(szork.workflow.ciRequiredChecks, Vector("backend", "frontend"))
     assertEquals(szork.workflow.mergeStrategy, MergeStrategy.Squash)
-    assertEquals(szork.workflow.branchModel, BranchModel.TrunkBased)
+    // szork is a normal PR repo → pr_based (the post-P0 default). It must NOT be trunk_based, which would let Forge
+    // push straight to main with no PR.
+    assertEquals(szork.workflow.branchModel, BranchModel.PrBased)
 
   // --- classification of the real logs ---
 

@@ -312,16 +312,31 @@ final class RealSideEffects(
     // style commit, rather than an amend, is used deliberately: szork-style squash-merge collapses it on merge, it
     // needs no force-push and so no lease race, and it is an honest, auditable record of the autofix. It is NOT a
     // fix-up round: no driver, no LLM, no attempts increment, since the loop never transitions on a Right here.
+    //
+    // P1 — two guards keep the autofix from committing anything but the formatter's own delta:
+    //  (1) the worktree must be CLEAN before the formatter runs. The piece is already committed+pushed and the driver
+    //      has settled, so the only legitimate state here is clean; a dirty tree means an operator edited files while
+    //      Forge polled CI, and sweeping those into a `style(...)` commit (possibly past the staging deny/ask policy)
+    //      is exactly the bug. A dirty tree degrades the autofix to a Left → a normal fix-up round.
+    //  (2) the formatter's resulting changes are classified through the SAME `ChangeCollector` deny/ask path as every
+    //      other commit (`classifyChanges`/`stageChanges`), not raw `git.status()` + stage-all — so a formatter that
+    //      touches a denied path (e.g. it rewrites something under a deny pattern) aborts rather than committing it.
     (for
-      _ <- runCommand(command.argv)
-      status <- et(git.status())(gitErr)
-      changedPaths = status.map(_.path).distinct
+      cleanBefore <- et(git.isWorktreeClean)(gitErr)
       _ <- EitherT.cond[IO](
-        changedPaths.nonEmpty,
+        cleanBefore,
+        (),
+        s"refusing to autofix '${command.argv.mkString(" ")}': the worktree is dirty before the formatter ran " +
+          "(uncommitted changes would be swept into the style commit) — routing to a fix-up round instead"
+      )
+      _ <- runCommand(command.argv)
+      included <- classifyChanges
+      _ <- EitherT.cond[IO](
+        included.nonEmpty,
         (),
         s"autofix '${command.argv.mkString(" ")}' rewrote nothing — the failure is not a formatting issue"
       )
-      _ <- et(git.stage(changedPaths))(gitErr)
+      _ <- stageChanges(included)
       _ <- assertHeadIs(feature.manifest.pieceBranch(piece))
       committed <- et(git.commit(s"style(${feature.id.value}): ${command.argv.mkString(" ")}", commitIdentity))(gitErr)
       _ <- EitherT.cond[IO](

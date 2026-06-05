@@ -65,11 +65,12 @@ class ProfileCommandSuite extends munit.FunSuite:
     assertEquals(exit, ExitCode(1))
     assert(!os.exists(paths.profileFile), "no profile.json should be written on failure")
 
-  test("gatherInput reads AGENTS.md / CLAUDE.md / build files / workflow files when present"):
+  test("gatherInput reads AGENTS.md / CLAUDE.md / README.md / build files / workflow files when present"):
     val paths = tempPaths()
     val root = paths.repoRoot
     os.write(root / "AGENTS.md", "agents guide")
     os.write(root / "CLAUDE.md", "claude guide")
+    os.write(root / "README.md", "use pnpm; run `pnpm test`")
     os.write(root / "build.sbt", "scalaVersion := \"3.7.1\"")
     os.makeDir.all(root / ".github" / "workflows")
     os.write(root / ".github" / "workflows" / "ci.yml", "name: CI")
@@ -78,6 +79,7 @@ class ProfileCommandSuite extends munit.FunSuite:
     assertEquals(input.repoName, root.last)
     assertEquals(input.agentsDoc, Some("agents guide"))
     assertEquals(input.claudeDoc, Some("claude guide"))
+    assertEquals(input.readmeDoc, Some("use pnpm; run `pnpm test`")) // P2
     assertEquals(input.buildFiles.map(_.path), Vector("build.sbt"))
     assertEquals(input.workflowFiles.map(_.path), Vector(".github/workflows/ci.yml"))
 
@@ -86,5 +88,6 @@ class ProfileCommandSuite extends munit.FunSuite:
     val input = ProfileCommand.gatherInput(paths).unsafeRunSync()
     assertEquals(input.agentsDoc, None)
     assertEquals(input.claudeDoc, None)
+    assertEquals(input.readmeDoc, None)
     assertEquals(input.buildFiles, Vector.empty)
     assertEquals(input.workflowFiles, Vector.empty)

@@ -947,14 +947,22 @@ final class Orchestrator(
     config.adapt.workflowGate && profile.exists(!_.workflow.reviewRequired)
 
   /** design-3.3 W3 — pure decision: should a piece commit straight to trunk (no PR) on this run? True only when
-    * `adapt.workflowGate` is on AND the resolved profile declares `workflow.branchModel = TrunkBased`. An unprofiled
-    * run (incl. `adapt.enabled = false`, folded into a `None` profile by [[resolveProfile]]), `workflowGate = false`,
-    * or a `GitFlow` repo keeps the 1.10 PR lifecycle. Consumed by [[withTrunkBranchModel]], which rewrites the pure
+    * `adapt.workflowGate` is on AND the resolved profile declares `workflow.branchModel = TrunkBased` **AND** that
+    * profile was sensed under the current schema (`schemaVersion == CurrentSchemaVersion`). An unprofiled run (incl.
+    * `adapt.enabled = false`, folded into a `None` profile by [[resolveProfile]]), `workflowGate = false`, a `PrBased`
+    * / `GitFlow` repo, **or a pre-`pr_based` (`schemaVersion < 2`) profile** keeps the 1.10 PR lifecycle. The
+    * schema-version gate is the safety belt for the P0 semantic flip: in v1 the profiler emitted `trunk_based` as the
+    * *default* for ordinary PR-to-trunk repos (it meant "PRs merge to a single trunk"), but the orchestrator reads
+    * `TrunkBased` as direct-commit-no-PR — so a stale v1 `trunk_based` profile must NOT trigger a direct push; it
+    * degrades safely to PRs until the repo is re-profiled under v2 (which emits `pr_based` for PR repos and
+    * `trunk_based` only for genuinely no-PR repos). Consumed by [[withTrunkBranchModel]], which rewrites the pure
     * table's `ClassifyCommitOpenPr` to `ClassifyCommitToTrunk` — the FSM stays profile-agnostic (the §6.1 replay
     * invariant: the branch-model decision lives here in the orchestrator, never in `Fsm.transition`).
     */
   private def shouldCommitToTrunk(profile: Option[RepoProfile]): Boolean =
-    config.adapt.workflowGate && profile.exists(_.workflow.branchModel == BranchModel.TrunkBased)
+    config.adapt.workflowGate && profile.exists(p =>
+      p.workflow.branchModel == BranchModel.TrunkBased && p.schemaVersion == RepoProfile.CurrentSchemaVersion
+    )
 
   /** Rewrite a post-settle [[SettleEffect]] for the resolved branch model: under `TrunkBased` (see
     * [[shouldCommitToTrunk]]) the piece-driver `ClassifyCommitOpenPr` becomes `ClassifyCommitToTrunk`; every other

@@ -14,6 +14,9 @@ Each section is delimited by a `##` header.
 - `Repo` — the repository name/slug.
 - `AGENTS.md` — the repo's agent/contributor guide, or `(none)`.
 - `CLAUDE.md` — the repo's Claude-specific guide, or `(none)`.
+- `README.md` — the repo's README, or `(none)`. Often the only place the
+  canonical package manager, test command, or merge requirements are
+  documented — weight it accordingly.
 - `Build files` — the build definition(s) (`build.sbt`, `package.json`,
   `Cargo.toml`, `pom.xml`, …), each under a `###` path header.
 - `CI workflow files` — the CI workflow definitions
@@ -105,12 +108,19 @@ to use — in that case use what the repo says.
 - `ciRequiredChecks` — the **names** of the CI checks/jobs that must be
   green to merge (the job names from the workflow files, e.g.
   `backend`, `frontend`, `build`). Empty array if none are evident.
-- `branchModel` — `trunk_based` (PRs merge to a single main/trunk) unless
-  the docs describe long-lived `develop`/`release` branches
-  (`git_flow`).
+- `branchModel` — one of:
+  - `pr_based` — the common GitHub flow: short-lived branches whose **PRs
+    merge to a single main/trunk**. **This is the default** — use it
+    whenever the repo uses pull requests, even if it merges to one `main`.
+  - `git_flow` — the docs describe long-lived `develop`/`release` branches.
+  - `trunk_based` — the repo commits **directly to the trunk with no PR /
+    review process** (e.g. the docs say "push straight to `main`", no PR
+    template, no review). Emit this **only** for a genuinely no-PR repo: it
+    is the one value that lets the tool push straight to `main` without a
+    PR, so when in any doubt use `pr_based`.
 - `mergeStrategy` — `squash`, `merge`, or `rebase`, from what the repo
   documents or its PR settings. Default to `squash` if unstated (the most
-  common for trunk-based repos).
+  common for PR-based repos).
 
 ## What NOT to do
 
