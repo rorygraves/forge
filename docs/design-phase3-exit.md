@@ -475,9 +475,22 @@ run-time and now ✅ fixed in code (§9).
   prior live work-around (a fresh `forge resume --after-human-push` to reset the
   discovery clock) is no longer needed. *Worked example:* the `git_flow` Node
   profile's 4 required checks where one is two jobs deep.
-- **D4 — commit identity from profile** (sensed but not consumed; uses ambient
-  git). Not blocking this gate; revisit if the run shows wrong-author commits.
-- **S4-5 — reviewer model from profile/config** (still pinned in
-  `ConnectorFactory`). Stack-independent; out of scope here.
+- **D4 — commit identity from profile** ✅ **FIXED (2026-06-05).** Was sensed-but-unused
+  (`RepoProfile.commitIdentity`, default `forge[bot]`, decoded but never read; every
+  commit used ambient git). Now consumed: `GitClient.commit` takes an optional
+  `author`; `OrchestratorBuilder` resolves the identity once per run (gated on
+  `adapt.enabled` + a profiled repo) and threads it through `RealSideEffects` to every
+  commit; `RealGitClient` applies it as a per-invocation `-c user.name`/`-c user.email`
+  (author **and** committer). Unprofiled / `adapt.enabled = false` stays ambient.
+  `RealGitClientCommitSuite` (+2, real-git override + ambient fallback),
+  `RealSideEffectsSuite` (+2). Contract: [`forge-design-1.14.md`](forge-design-1.14.md)
+  §6.5 / §11.4.
+- **S4-5 — reviewer model + cap from config** ✅ **FIXED (2026-06-05).** Was pinned in
+  `ConnectorFactory` (`haiku` / `gpt-5.3-codex` / 3-min, mirrored by hand in
+  `Orchestrator` + `ProfileCommand`). Now the §18 `reviewer` block
+  (`io.forge.app.config.ReviewerConfig`), read by `ConnectorFactory` +
+  `Orchestrator.reviewerWallClock` (+ `ProfileCommand`'s cap) — one source of truth, no
+  drift; defaults reproduce the C15 v1 values byte-for-byte. `ForgeConfigLoaderSuite`
+  (+2). Contract: [`forge-design-1.14.md`](forge-design-1.14.md) §18.
 - **W5 — no-CI-repo short-circuit** (deferred; moot for toast-stats). Stays
   deferred until a real no-CI target exists.

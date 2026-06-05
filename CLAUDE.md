@@ -28,11 +28,14 @@ that first; everything below is Claude-Code-specific.
   scalafmt CI failure on `szork` routed to `RunLocalCommand(sbt scalafmtAll)` →
   CI green, `attempts` unchanged, `forge stats` folding "1 fix-up round avoided"
   — dogfood-#2's \$1.78 / ~12 min / 2 rounds collapsed to a ~few-second \$0 step.
-  The live contract is now [`docs/forge-design-1.13.md`](docs/forge-design-1.13.md)
-  (the §19 `profile.*` + `review.request_changes` audit kinds; 1.7→1.13 are
-  standalone-by-freeze Phase-3 revisions). **Next Phase-3 work = the
-  phase-level exit criterion:** a live end-to-end run on a new, unseen,
-  non-Scala (Node/Python) repo with zero hardcoded-config edits (roadmap §4).
+  The live contract is now [`docs/forge-design-1.14.md`](docs/forge-design-1.14.md)
+  (S4-5 = the §18 `reviewer` model/cap block; D4 = §6.5 `commitIdentity`
+  consumed into the §11.4/§11.6 commit step; 1.7→1.14 are standalone-by-freeze
+  Phase-3 revisions). **Phase-3 exit criterion MET live 2026-06-05** (the Node/TS
+  `queryclient-config` run, design-phase3-exit.md ✅ closed); its one carried-forward
+  Forge gap (F3, CiReadiness late-check) plus the two residual "inherit a default"
+  items (**S4-5** reviewer model/cap, **D4** commit identity) are now all ✅ fixed.
+  **Next Phase-3 work = the whole-section review** that flips the roadmap §4 bullet.
   Older closed audit trails include
   [`docs/design-2.1-tui.md`](docs/design-2.1-tui.md)
   (Slice 2.1 — Phase-2 TUI, ✅ closed 2026-06-01): read-only `forge tui

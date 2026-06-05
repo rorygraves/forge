@@ -543,14 +543,17 @@ are the forward-looking homes for the design-2.0 §4 carry-forwards that
 out-scoped the observability slice (full dispositions in
 [`design-2.0.md`](design-2.0.md) §4 and [`design-rationale.md`](design-rationale.md)):
 
-- [ ] **Reviewer + driver model / wall-clock-cap / retry §18 tuning**
-  (design-rationale **S4-5**, and **S4-3** reviewer-cost widening). The §18
-  config knobs (`reviewer.model` / `reviewer.wallClockCapSec` /
-  `reviewer.processRetries`, and the driver settle caps) stay hard-pinned at the
-  C15-validated defaults until tuned against real attributed data. The szork run
-  already flagged the live target: the implement settle cap was too tight
-  (`maxTurnCostUsd = $2.0` vs an actual $9.56 turn). A §18 schema extension, so
-  it lands via a `forge-design-1.x.md` revision.
+- [~] **Reviewer + driver model / wall-clock-cap / retry §18 tuning**
+  (design-rationale **S4-5**, and **S4-3** reviewer-cost widening). **The S4-5
+  model + cap knobs landed** (Phase-3 section-review prep, 2026-06-05): the §18
+  `reviewer` block (`reviewer.claudeModel` / `reviewer.codexModel` /
+  `reviewer.wallClockCapSec`) replaces the `ConnectorFactory` hard-wiring, read by
+  `ConnectorFactory` + `Orchestrator.reviewerWallClock` + `ProfileCommand` (one
+  source of truth), contract [`forge-design-1.14.md`](forge-design-1.14.md) §18.
+  **Still open:** reviewer process-retry knobs, the driver settle-cap *tuning*
+  against real attributed data (the szork run flagged the implement settle cap as
+  too tight — `maxTurnCostUsd = $2.0` vs an actual $9.56 turn), and **S4-3**
+  reviewer-cost widening. Those land via a later `forge-design-1.x.md` revision.
 - [x] **Driver-respawn-avoidance on resume-from-NHI** (design-2.0 §4 **D3**
   large half). ✅ **CLOSED 2026-06-01** — all five chunks (D3-0…D3-4) landed and
   the spec deltas are reconciled into the live contract (then v1.5, now
@@ -863,6 +866,18 @@ deterministic step rather than a paid fix-up round.
 > polling while any *observed* check is still pending (non-`Completed`), declaring
 > a required check missing only once CI is otherwise settled. `CiReadiness.scala`
 > (`isPending` helper) + `CiReadinessSuite` (+3). See design-phase3-exit §9.
+>
+> **Two residual "inherit a default" items closed before the section review — ✅ FIXED
+> (2026-06-05):** these were the only places Phase 3 still inherited a default instead
+> of sensing/configuring it (the §4 intro's "hardcoded reviewer models, ambient git
+> identity"). **S4-5** — the reviewer model + 3-min cap, hard-wired in `ConnectorFactory`,
+> are now the §18 `reviewer` config block (read by `ConnectorFactory` +
+> `Orchestrator.reviewerWallClock` + `ProfileCommand` — one source of truth; defaults =
+> the C15 v1 values). **D4** — `RepoProfile.commitIdentity` (sensed but never consumed)
+> is now wired into the §11.4/§11.6 commit step, so a profiled run authors commits as
+> `forge[bot]` instead of the operator's ambient git identity. Contract:
+> [`forge-design-1.14.md`](forge-design-1.14.md) (§18 + §6.5/§11.4); see
+> design-phase3-exit §9.
 
 ### 4.1 v2 candidates from design §20, picked by lived experience
 
