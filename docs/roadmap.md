@@ -37,7 +37,7 @@
 |---|---|---|
 | 0 — Slice 0 | CLI capabilities validated | ✅ closed |
 | 1 — MVP | Single-repo self-host end-to-end | ✅ closed |
-| 2 — MLP | Pleasant single-repo daily-driver | open — Slice 2.0 (observability) ✅, Slice 2.1 (TUI) ✅; §3.4 OSS / §3.5 tuning / a small dogfood-#2 resilience pass still open |
+| 2 — MLP | Pleasant single-repo daily-driver | open — Slice 2.0 (observability) ✅, Slice 2.1 (TUI) ✅, §3.4 OSS-readiness ✅ (config example + README + standalone `forge` launcher; published-binary polish still open); §3.5 tuning / a small dogfood-#2 resilience pass still open |
 | 3 — v1.0: **Repo Adaptation** ⭐ | Deterministic spine + agentic senses; works on any repo via its CLAUDE.md + a derived, hashed `RepoProfile` | ✅ **closed 2026-06-05** (contract `forge-design-1.15.md`) — **all six sub-slices 3.0–3.5 ✅ closed**; **exit criterion MET live** (`queryclient-config` on the Node/TS fork `rorygraves/toast-stats` → `FeatureDone`, §8.2 prettier-collapse; [`design-phase3-exit.md`](design-phase3-exit.md) closed); **whole-section review landed** — all findings fixed (F3 CiReadiness late-check, S4-5 reviewer config, D4 commit identity, P0 `pr_based`/schema-2 trunk-push safety, P1 §8.2 autofix staging, P2 profiler reads README) |
 | 4 — v2.0 | Workspace (multi-repo) + workstreams + daemon + multi-workstream cockpit TUI | needs `forge-design-2.0.md` first |
 | 5 — v3.0+ | Agentic-dev cockpit (knowledge base, reactive review, custom triggers) | concept |
@@ -536,9 +536,20 @@ prompt diffs in git; they're load-bearing for behaviour.
   Documentation section points at the live `forge-design-1.15.md`,
   `design-rationale.md`, and the `docs/README.md` index.
 - LICENSE already in place.
-- **Still open: standalone launcher / packaging.** There is no `forge` binary on
-  `PATH` yet — everything runs through `sbt "forge-app/run …"`. The README's
-  "Trying it today" note flags this as the remaining distribution gap.
+- ✅ **Standalone launcher / packaging** (2026-06-05) — `sbt-assembly` builds a
+  self-contained `forge.jar` (every module + the `assets/` and
+  `prices.example.json` classpath resources, so `AssetInstaller`'s
+  `getResourceAsStream` reads work outside the checkout). `scripts/install-forge.sh`
+  builds it, copies it to `~/.forge/lib/forge.jar`, and installs the thin `bin/forge`
+  launcher (`java -jar`, no `cd` — Forge resolves the target repo from `os.pwd` /
+  `--repo-root`) onto `PATH`. README's "Trying it today" + Run-Forge sections now
+  lead with `forge <command>`; `sbt "forge-app/run …"` stays documented as the
+  from-source dev path. Verified end-to-end: install to a sandbox `FORGE_HOME`,
+  `forge --repo-root <repo> status` runs standalone from a non-Forge directory.
+- **Still open: published binary / OS package.** The jar is still built from this
+  checkout — there is no released `forge` artifact (Homebrew / GitHub release /
+  Coursier) yet. The README "Heads-up" note flags this as the remaining
+  distribution-polish gap.
 - ✅ **Resolve the termflow dependency for fresh clones** (was carried forward
   from Slice 2.1 / design-rationale **BT1**) — **RESOLVED UPSTREAM 2026-06-01.**
   `forge-tui` is written against termflow `0.4.0`; at Slice 2.1 close that was
