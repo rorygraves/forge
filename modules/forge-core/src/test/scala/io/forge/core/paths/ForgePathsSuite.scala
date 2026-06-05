@@ -60,25 +60,81 @@ class ForgePathsSuite extends munit.FunSuite:
     assertEquals(paths.pricesRepo, repoRoot / ".forge" / "prices.json")
 
   // --- enclosing-directory invariants ----------------------------------------
+  //
+  // Phase-4 B1 (forge-design-2.0.md §4.3) splits the per-repo `.forge/` tree into two roots: the COMMITTED family
+  // (specs / config / profile / overrides / per-repo prices — versioned, merged via PR) stays anchored at
+  // `repoRoot/.forge`; the LOCAL-RUNTIME family (log / state / lock — gitignored, worker-owned) re-roots under
+  // `localRoot/.forge`. With the default `localRoot = repoRoot` both still sit under `repoRoot/.forge` (v1 layout).
 
-  test("every per-repo path is strictly under repoRoot/.forge"):
-    val perRepo = Vector(
-      paths.featureSpecDir(feature),
-      paths.design(feature),
-      paths.manifest(feature),
-      paths.decomposition(feature),
-      paths.pieceSpec(feature, piece),
-      paths.auditDir(feature),
-      paths.audit(feature, "x.md"),
-      paths.featureLog(feature),
-      paths.stateFile(feature),
-      paths.lockFile,
-      paths.lockMetadataFile,
-      paths.pricesRepo
-    )
+  private val committedPaths = Vector(
+    paths.featureSpecDir(feature),
+    paths.design(feature),
+    paths.manifest(feature),
+    paths.decomposition(feature),
+    paths.pieceSpec(feature, piece),
+    paths.auditDir(feature),
+    paths.audit(feature, "x.md"),
+    paths.configFile,
+    paths.profileFile,
+    paths.overridesDir,
+    paths.overrideFile("claude"),
+    paths.pricesRepo
+  )
+
+  private def localRuntimePaths(p: ForgePaths) = Vector(
+    p.featureLog(feature),
+    p.stateFile(feature),
+    p.pollBaselineFile(feature),
+    p.lockFile,
+    p.lockMetadataFile
+  )
+
+  test("every committed path is strictly under repoRoot/.forge"):
     val root = repoRoot / ".forge"
-    perRepo.foreach: p =>
+    committedPaths.foreach: p =>
       assert(p.startsWith(root), s"$p is not under $root")
+
+  test("with default localRoot, local-runtime paths are also under repoRoot/.forge (v1 layout unchanged)"):
+    val root = repoRoot / ".forge"
+    localRuntimePaths(paths).foreach: p =>
+      assert(p.startsWith(root), s"$p is not under $root")
+
+  // --- B1 re-root: localRoot re-homes only the local-runtime family --------------
+
+  private val instanceLocalRoot = os.root / "home" / "alice" / ".forge" / "instances" / "demo" / "workers" / "f1"
+  private val reRooted = ForgePaths(repoRoot, home, localRootOpt = Some(instanceLocalRoot))
+
+  test("B1: local-runtime paths re-root under localRoot/.forge"):
+    val localRoot = instanceLocalRoot / ".forge"
+    assertEquals(reRooted.featureLog(feature), localRoot / "log" / "stripe-webhook.jsonl")
+    assertEquals(reRooted.stateFile(feature), localRoot / "state" / "stripe-webhook.json")
+    assertEquals(reRooted.pollBaselineFile(feature), localRoot / "state" / "stripe-webhook.poll-baselines.json")
+    assertEquals(reRooted.lockFile, localRoot / "state" / ".lock")
+    assertEquals(reRooted.lockMetadataFile, localRoot / "state" / ".lock.json")
+
+  test("B1: committed paths stay anchored at repoRoot/.forge even when re-rooted"):
+    val root = repoRoot / ".forge"
+    // The committed accessors do not depend on `paths`'s instance — re-read them off `reRooted`.
+    val committedReRooted = Vector(
+      reRooted.featureSpecDir(feature),
+      reRooted.manifest(feature),
+      reRooted.configFile,
+      reRooted.profileFile,
+      reRooted.overridesDir,
+      reRooted.pricesRepo
+    )
+    committedReRooted.foreach: p =>
+      assert(p.startsWith(root), s"$p is not under $root")
+    // and none of them leak into the re-rooted local dir
+    committedReRooted.foreach: p =>
+      assert(!p.startsWith(instanceLocalRoot / ".forge"), s"$p must not be under the local re-root")
+
+  test("B1: localRoot defaults to repoRoot — re-rooted-with-repoRoot equals the v1 layout"):
+    val defaultLocal = ForgePaths(repoRoot, home)
+    val explicitLocal = ForgePaths(repoRoot, home, localRootOpt = Some(repoRoot))
+    assertEquals(defaultLocal.featureLog(feature), explicitLocal.featureLog(feature))
+    assertEquals(defaultLocal.lockFile, explicitLocal.lockFile)
+    assertEquals(defaultLocal.localForgeDir, defaultLocal.repoForgeDir)
 
   test("pricesUser is strictly under home/.forge"):
     assert(paths.pricesUser.startsWith(home / ".forge"), s"${paths.pricesUser} not under ${home / ".forge"}")
