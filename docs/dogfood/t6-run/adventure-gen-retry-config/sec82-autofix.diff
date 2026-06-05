@@ -1,0 +1,29 @@
+FILE: .forge/specs/adventure-gen-retry-config/manifest.json
+@@ -16,7 +16,7 @@
+       "acceptanceHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+       "status": "in_progress",
+       "baseSha": "faa363509cfe30e69f27b25ab56c99899d4bdd6e",
+-      "prNumber": null,
++      "prNumber": 19,
+       "mergeCommit": null,
+       "mergedAt": null,
+       "attempts": 0
+FILE: src/main/scala/org/llm4s/szork/api/AdventureGenConfig.scala
+@@ -16,10 +16,14 @@ case class AdventureGenConfig(
+ object AdventureGenConfig {
+   lazy val instance: AdventureGenConfig = load()
+ 
+-  /** Loads the adventure-generation retry configuration from the environment, falling back to the historical inline defaults when an override is absent or unparseable.
++  /** Loads the adventure-generation retry configuration from the environment, falling back to the historical inline
++    * defaults when an override is absent or unparseable.
+     *
+-    * @param reader the configuration source to read environment overrides from; defaults to the process environment loader
+-    * @return a fully-resolved AdventureGenConfig whose fields equal the environment overrides where present and the historical defaults otherwise
++    * @param reader
++    *   the configuration source to read environment overrides from; defaults to the process environment loader
++    * @return
++    *   a fully-resolved AdventureGenConfig whose fields equal the environment overrides where present and the
++    *   historical defaults otherwise
+     */
+   def load(reader: ConfigReader = EnvLoader): AdventureGenConfig = {
+     val defaults = AdventureGenConfig()

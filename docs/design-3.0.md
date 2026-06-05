@@ -278,6 +278,27 @@ Tier-1 closes the slice's exit criterion; Tier 2/3 can land incrementally behind
 
 ## 3. Status log
 
+- **2026-06-05 — T6 resolved: the §8.2 CI-fail → local-autofix routing fired *live* (dogfood #4,
+  `adventure-gen-retry-config`).** Drove a real end-to-end Forge run on `llm4s/szork` (Mode A,
+  `adapt.localGate = false`, `branchModel = git_flow`) with a feature **engineered to force a guaranteed
+  scalafmt reflow** — a piece acceptance criterion mandating inline `@param`/`@return` ScalaDoc, which
+  scalafmt 3.7.17 deterministically splits (proven against szork's real `.scalafmt.conf` before the run).
+  The implement driver wrote the inline form; with the local gate off it survived to CI; `backend`'s
+  `scalafmtCheckAll` failed; the §8.2 router classified it `deterministic_fix` (conf 0.97, **source =
+  rules**, no LLM tail), ran `RunLocalCommand(sbt scalafmtAll)`, committed `style(...) 6b5433ed1`, pushed,
+  CI re-ran **green**, and the FSM advanced `PieceAwaitingCi → PieceAwaitingReview` with **no
+  `PieceCiFailed` and `attempts` = 0**. `forge stats` records *"1 fix-up round avoided."* This is the §0
+  exit criterion live and measured — dogfood-#2's **$1.78 / ~12 min / 2 rounds** collapsed to a
+  ~few-second local step at **$0 driver cost**. Evidence:
+  [`dogfood/t6-run/adventure-gen-retry-config/`](dogfood/t6-run/adventure-gen-retry-config/); write-up:
+  [`dogfood/adventure-gen-retry-config.md`](dogfood/adventure-gen-retry-config.md). The §4 **T6** entry is
+  flipped to resolved. Two by-design observations (the engineered inline-`@param` criterion is
+  self-contradictory with scalafmt's split form, so the run looped on the *code-review* gate after the
+  §8.2 heal — a spec-design lesson, not a §8.2 defect; and szork's third-party Codex auto-reviewer injected
+  one bounded design-PR feedback round) are in the write-up's findings, not Forge bugs. With T6 closed, the
+  §0 exit criterion is met live; the roadmap §4 bullet stays **unticked** pending only the whole-section
+  review.
+
 - **2026-06-04 — D8 resolved: reviewer-comment mining (the `ConventionLearner`'s second signal).** Closed the deferred
   half of Task 3.2: the learner now mines *recurring reviewer comments* alongside failure→remedy patterns, completing the
   §7.11/§11.7 "failure patterns + recurring reviewer comments" framing. Added the backing signal first (the
@@ -569,18 +590,37 @@ deferral findings, retained for the record:
 The Task 3.1.2 box is now ticked (live re-run performed + spine validated + §8.2 unit-proven against
 the real failing log); the roadmap §4 bullet stays **unticked** until T6 + the whole-section review.
 
-### T6 — live §8.2 *trigger* not yet demonstrated — open (the §0 residual)
+### T6 — live §8.2 *trigger* — ✅ demonstrated 2026-06-05 (dogfood #4, `adventure-gen-retry-config`)
 
-dogfood #3 (T5) ran on Mode A specifically to exercise the §8.2 CI-fail → local-autofix path, but the
-implement *and* fix-up drivers both produced scalafmt-conformant code, so no formatting check failed
-and the router had nothing to route. A natural §8.2 trigger is **stochastic** — it needs the driver to
-mis-format (dogfood #2's was a scaladoc scalafmt reflowed). The routing is exhaustively unit-proven,
-incl. end-to-end against the real dogfood-#2 failing-check log, so this is a *live-demonstration* gap,
-not a correctness gap. To close: either (a) drive a feature engineered to force a guaranteed reflow
-(e.g. a piece spec mandating a long scaladoc block), or (b) formally accept the unit proof + the
-spine-validation as sufficient. Until then, "Phase 3 has teeth" rests on the unit proof against the
-real log, not on a live capture. Two **runnable findings** from dogfood #3 also belonged to the next
-Forge maintenance pass:
+**Resolved by driving option (a): a feature engineered to force a *guaranteed* reflow.** dogfood #3
+(T5) never triggered §8.2 because a natural mis-format is **stochastic** — modern Claude/Codex usually
+format correctly. dogfood #4 ([`dogfood/adventure-gen-retry-config.md`](dogfood/adventure-gen-retry-config.md))
+made it **deterministic** by exploiting a config-specific scalafmt rule the driver cannot pre-empt and
+would not naturally satisfy: a piece acceptance criterion mandating ScalaDoc with **inline
+`@param`/`@return` tags**. scalafmt 3.7.17 (szork's pinned version, `maxColumn = 120`) *always* rewrites
+an inline tag description onto its own continuation line — proven against szork's real `.scalafmt.conf`
+before the run, not invented. Because scaladoc is a comment, it does not affect compile/test, so szork's
+`backend` job (compile → test → **Check formatting**) fails *only* on `scalafmtCheckAll` — the clean
+format-only failure the rules classifier needs.
+
+**The §8.2 collapse fired live and passed every criterion** (full evidence:
+[`dogfood/t6-run/adventure-gen-retry-config/`](dogfood/t6-run/adventure-gen-retry-config/)):
+real scalafmt CI failure on piece PR #19 → `profile.failure_classified {gate:ci, kind:deterministic_fix,
+confidence:0.97, route:RunLocalCommand, source:rules}` (no LLM tail) → `RunLocalCommand(sbt scalafmtAll)`
+→ `style(...)` autofix commit `6b5433ed1` → push → CI re-ran **green** → `PieceAwaitingCi →
+PieceAwaitingReview` with **no `PieceCiFailed` and `attempts` unchanged at 0**. `forge stats` records
+*"1 fix-up round avoided — a CI failure was remedied by the repo's own deterministic autofix (Phase 3
+§8.2), with no driver fix-up turn."* This collapses dogfood-#2's **$1.78 / ~12 min / 2 driver fix-up
+rounds** to a ~few-second local step at **$0 driver/LLM cost** — the §0 exit criterion, live and measured.
+**Phase 3 now has teeth on a live run, not only against the unit fixture.**
+
+One honest caveat (dogfood #4 finding #1, *by design of the test*): the engineered "inline `@param`"
+criterion is self-contradictory with what scalafmt enforces (the split form), so after the §8.2 CI heal,
+Forge's own reviewer correctly requested changes (gate=`code`) and the run entered a review↔CI fix-up
+loop. That contradiction was deliberate — it is the cleanest way to *guarantee* the reflow — and the run
+was stopped once the §8.2 assertion was captured. It is a spec-design lesson (don't mandate an
+anti-formatter style), **not** a §8.2 or Forge defect; the §8.2 routing itself behaved exactly as
+specified. Two **runnable findings** from dogfood #3 also belonged to the next Forge maintenance pass:
 
 - **finding #5 recurrence — ✅ resolved 2026-06-04.** The transient GitHub 503 on the §9 `PRWatcher`
   poll no longer hard-NHIs. `pollOnce` now maps a `GhError.Transient` (the 503/5xx/network-blip bucket)

@@ -1,0 +1,14 @@
+feature adventure-gen-retry-config — run stats
+
+  phase             turns    wall-clock        cost
+  ─────────────────────────────────────────────────
+  design-revision       1        1m 23s       $0.64
+    └ 1 resumed (continued prior session — re-exploration avoided)
+  implement             1         55.1s       $0.34
+  fixup                 1         43.4s       $0.21
+  ─────────────────────────────────────────────────
+  total                 3         3m 1s       $1.19
+
+  waiting (human)                1m 53s
+    design merge                 1m 53s
+  note: 1 fix-up round avoided — a CI failure was remedied by the repo's own deterministic autofix (Phase 3 §8.2), with no driver fix-up turn.

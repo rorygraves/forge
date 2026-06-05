@@ -6,13 +6,19 @@
 > the scalafmt CI failure routes to a local `scalafmtAll`, `attempts` stays 0, and
 > `forge stats` shows the avoided round."* Until it lands, Phase 3 is *types-without-teeth*.
 >
-> **Status:** **DRIVEN 2026-06-03 (dogfood #3, `music-poll-config`).** Outcome: spine
-> validated live (`profile.snapshot`, full §11 lifecycle, observability), but the §8.2
-> *trigger* did NOT fire — the driver produced scalafmt-conformant code, so no CI
-> formatting failure occurred. See [`music-poll-config.md`](music-poll-config.md) for the
-> full run + findings (incl. a finding-#5 recurrence and an operator concurrent-git race).
-> The live §8.2-trigger demonstration is carried forward as design-3.0 **T6**. This runbook
-> stays valid for a future engineered-reflow attempt (§3 + Mode A).
+> **Status:** **§8.2 TRIGGER DEMONSTRATED LIVE 2026-06-05 (dogfood #4,
+> `adventure-gen-retry-config`).** dogfood #3 (2026-06-03, `music-poll-config`) validated the
+> spine but the §8.2 *trigger* did not fire — the driver formatted correctly (a natural reflow
+> is stochastic). dogfood #4 closed design-3.0 **T6** by driving a feature **engineered to
+> force a guaranteed reflow** (§3.1 below): a piece acceptance criterion mandating inline
+> `@param`/`@return` ScalaDoc, which scalafmt 3.7.17 deterministically splits. The §8.2 router
+> classified the real scalafmt CI failure `deterministic_fix` (source=rules, no LLM), ran
+> `RunLocalCommand(sbt scalafmtAll)`, committed+pushed the autofix, CI re-ran green, **no
+> `PieceCiFailed`, `attempts` = 0**, `forge stats` = *"1 fix-up round avoided."* Full run:
+> [`adventure-gen-retry-config.md`](adventure-gen-retry-config.md); evidence:
+> [`t6-run/adventure-gen-retry-config/`](t6-run/adventure-gen-retry-config/). This runbook stays
+> valid for re-runs; **§3.1 below is the deterministic-reflow recipe.** (dogfood #3's findings
+> #5 / concurrent-git race were resolved separately — design-3.0 T6 status log.)
 
 ---
 
@@ -75,9 +81,7 @@ CLAUDE.md discipline flags for fakes).
    `printf '.forge/\n' >> .git/info/exclude`.
 4. **Drop the hand-authored profile** at `<szork>/.forge/profile.json` (Forge loads it
    automatically at run start via `ProfileStore.load` → `profile.snapshot`; no `forge profile`
-   LLM call is needed). Content — copy verbatim from [`profile.szork.json`](profile.szork.json)
-   in this directory (identical to the committed
-   `modules/forge-core/src/test/resources/profiles/szork.json` fixture):
+   LLM call is needed):
 
    ```json
    {
@@ -89,9 +93,18 @@ CLAUDE.md discipline flags for fakes).
        { "kind": "test",   "argv": ["sbt", "test"],             "determinism": "heuristic",     "required": true,  "autofix": false }
      ],
      "commitIdentity": { "name": "forge[bot]", "email": "forge@users.noreply.github.com" },
-     "workflow": { "reviewRequired": true, "ciRequiredChecks": ["backend", "frontend"], "branchModel": "trunk_based", "mergeStrategy": "squash" }
+     "workflow": { "reviewRequired": true, "ciRequiredChecks": ["backend", "frontend"], "branchModel": "git_flow", "mergeStrategy": "squash" }
    }
    ```
+
+   > **⚠️ `branchModel` must be `git_flow` for this run (changed 2026-06-05, dogfood #4).** szork is a
+   > PR + branch-protection repo. The committed fixture
+   > `modules/forge-core/src/test/resources/profiles/szork.json` (and earlier copies of this runbook) say
+   > `"trunk_based"` — written before the §11 `TrunkBased` no-PR lifecycle was wired (design-3.3-trunk,
+   > 2026-06-04). With `adapt.workflowGate = true` (the default), `branchModel: "trunk_based"` now routes the
+   > orchestrator to the **commit-straight-to-trunk path with no `PieceAwaitingCi` tail** — so the §8.2 CI gate
+   > never runs and the router has nothing to route. Use `git_flow` to keep the PR-based CI lifecycle this
+   > runbook targets. (The decoder fixture is a *test* fixture and is intentionally left at `trunk_based`.)
 
 5. **Forge config — set `adapt.localGate = false` for Mode A** (the only change from defaults; keep
    `enabled`/`autofix`/`workflowGate` at their `true` defaults so the §8.2 router and its
@@ -128,6 +141,38 @@ Drafting → DesignReviewing(1, approve) → DesignAwaitingMerge → [merge desi
 → PieceAwaitingReview → (reviewer approve) → PieceAwaitingMerge → [merge piece PR]
 → Refining → FeatureDone
 ```
+
+---
+
+## 3.1 The deterministic-reflow recipe (engineer a *guaranteed* §8.2 trigger)
+
+A natural §8.2 trigger is **stochastic** — it needs the driver to mis-format, which modern
+Claude/Codex usually don't (this is why dogfood #3 never fired §8.2). dogfood #4 closed T6 by
+making the mis-format **deterministic**: exploit a config-specific scalafmt rule the driver
+cannot pre-empt and would not naturally satisfy.
+
+**The lever (proven against szork's real `.scalafmt.conf`, v3.7.17, `maxColumn = 120`):** a piece
+acceptance criterion mandating ScalaDoc with **inline `@param`/`@return` tags** — i.e. `@param name
+the description…` on one line. scalafmt 3.7.17 *always* rewrites an inline tag description onto its
+own indented continuation line, and wraps prose >120 cols. Two independent triggers in one. An LLM
+driver writes the inline form by default and (with `localGate = false`) never runs scalafmt before
+committing, so the mis-format reliably reaches CI. Because scaladoc is a comment it does **not**
+affect compile/test, so szork's `backend` job (compile → test → **Check formatting**) fails *only*
+on `scalafmtCheckAll` — the clean format-only failure the rules classifier pins as
+`deterministic_fix`.
+
+**Feature shape that worked:** "extract some inline literals into a documented `*Config` object
+mirroring `MusicPollConfig`, with a `load` factory whose ScalaDoc uses inline `@param`/`@return`
+tags." Seed the directive brief into `.forge/specs/<feature>/design.md` *before* `forge spec` (the
+REPL loads it as the spawn brief) and instruct the driver to produce all spec files in one turn and
+ask no questions — then a single `/done` finalises the spec.
+
+> **Known side effect (by design):** an *inline*-`@param` acceptance criterion is self-contradictory
+> with scalafmt's *split* form, so after the §8.2 CI heal Forge's own reviewer (gate=`code`) will
+> request changes and the run enters a review↔CI fix-up loop. That is fine for a §8.2 *demonstration*
+> — the assertion is captured at `PieceAwaitingCi`; stop the run there. For a feature you actually
+> want to **merge**, do **not** mandate an anti-formatter style: require scaladoc but let scalafmt own
+> its exact shape (dogfood #4 finding #1).
 
 ---
 
