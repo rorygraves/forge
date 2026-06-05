@@ -16,10 +16,17 @@
 > 3.1 is the highest-ROI first runnable and shares all of 3.0's types. Later sub-slices
 > (RepoProfiler role population, ConventionLearner) get their own plans if they grow.
 >
-> **Status:** 🟡 open — 2026-06-02. Tier-1 types + deterministic routing **landed ahead of
-> this plan via the Phase-3 spike** (commit `16396d2`, `forge-core` 420/420 green); the
-> remaining Tier-1 work is wiring the live CI-fail routing into the orchestrator and
-> re-running the dogfood-#2 case to measure the collapse on a real run.
+> **Status:** ✅ closed — 2026-06-05. The §0 exit criterion is met **live and measured**:
+> T6 (dogfood #4) drove the §8.2 scalafmt CI failure → local `sbt scalafmtAll` collapse on a
+> real `szork` run — no driver fix-up turn, no LLM, `attempts` unchanged, `forge stats` folding
+> "1 fix-up round avoided" (dogfood-#2's \$1.78 / ~12 min / 2 rounds → a ~few-second \$0 step).
+> Every Task (3.0.1/3.0.2/3.0.3, 3.1.1/3.1.2/3.1.3-Format/3.1.4, 3.2) landed; Tier-2/3 came along
+> behind Tier 1. Carry-forwards placed durably (§4): the §8.3 **Build** gate resolved in its own
+> slice (D2 → [`forge-design-1.8.md`](forge-design-1.8.md)); the §19 `profile.*` audit set
+> reconciled into the contract through 1.13 (D3/D7/D8); the remaining **T2 / T4 / D1 / D4 / D5 / D6**
+> are recorded "revisit-if" deferrals (no code or contract gap). Whole-section review done; the
+> roadmap §4 sub-slice 3.0/3.1 bullets are ticked. Tier-1 types + deterministic routing originally
+> **landed ahead of this plan via the Phase-3 spike** (commit `16396d2`, `forge-core` 420/420 green).
 
 ---
 
@@ -94,7 +101,7 @@ Landed:
 - `src/test/resources/profiles/{szork,forge}.json` — committed fixtures; the suite proves the
   model expresses both real repos.
 
-### Task 3.1.2 — live CI-fail routing wired into the orchestrator + dogfood re-run  ⬅ **gating** [ ]
+### Task 3.1.2 — live CI-fail routing wired into the orchestrator + dogfood re-run  ⬅ **gating** [x] (code 2026-06-02; live §8.2 trigger 2026-06-05 — T6)
 
 The step that turns the spike's unit proof into a real run. Risk: the §11.5 failed-check edge,
 `attempts` accounting, and the gh log fetch are all live-CLI / FSM-touching — exercise with a
@@ -129,9 +136,9 @@ real run, not just fakes (the `gh` wire-shape + subprocess-lifecycle discipline 
       [`dogfood/music-poll-config.md`](dogfood/music-poll-config.md);
       runbook [`dogfood/t5-cifail-routing-runbook.md`](dogfood/t5-cifail-routing-runbook.md).
 
-**Exit:** the §0 criterion, modulo the **T6** carry-forward (a live §8.2 *trigger* — engineer a
-guaranteed reflow, or accept the unit proof). Phase 3 has teeth (the routing is proven against the
-real failing log); only the live natural-trigger demonstration is outstanding.
+**Exit:** the §0 criterion — **met live 2026-06-05** (T6 resolved: a guaranteed-reflow feature fired
+§8.2 on a real `szork` run; §4 **T6**). Phase 3 has teeth on a live run, not only against the unit
+fixture.
 
 ### Tier 2 — self-sufficiency
 
@@ -269,14 +276,40 @@ real failing log); only the live natural-trigger demonstration is outstanding.
 
 ## 2. Order of work
 
-3.1.1 ✅ → 3.0.1 ✅ → 3.1.2 (code ✅; live re-run deferred — T5) → 3.0.2 ✅ → 3.1.3 (Format gate
-✅; Build gate deferred — D2) → 3.0.3 ✅ → 3.1.4 ✅ → 3.2 ✅ (sensor + profile deltas + CLAUDE.md PR; D9 resolved) →
-**{3.1.3-Build (own slice — D2), T5 live re-run, D8 reviewer-comment mining} (next)**.
-Tier-1 closes the slice's exit criterion; Tier 2/3 can land incrementally behind it.
+3.1.1 ✅ → 3.0.1 ✅ → 3.1.2 ✅ (code 2026-06-02; live §8.2 trigger 2026-06-05 — T6) → 3.0.2 ✅ → 3.1.3 ✅
+(Format gate; Build gate → own slice, D2) → 3.0.3 ✅ → 3.1.4 ✅ → 3.2 ✅ (sensor + profile deltas + CLAUDE.md PR;
+D9 resolved) → 3.1.3-Build ✅ (own slice — D2) → T5 ✅ → T6 ✅ → D8 ✅ → **slice closed 2026-06-05**.
+Tier-1 closed the slice's exit criterion; Tier 2/3 landed incrementally behind it.
 
 ---
 
 ## 3. Status log
+
+- **2026-06-05 — Slice 3.0/3.1 CLOSED (whole-section review).** With T6 (the last gating carry-forward)
+  resolved, the §0 exit criterion is met live and measured, so the slice closes. Whole-section review:
+  every Task landed and is ticked — **3.0.1** (`ProfileStore`/`ForgePaths`/`profile.snapshot`/fixtures),
+  **3.0.2** (profile load + snapshot at feature start), **3.0.3** (`RepoProfiler` LLM sensor + `forge profile`),
+  **3.1.1** (model + rules classifier + routing), **3.1.2** (live CI-fail routing wired + live §8.2 trigger),
+  **3.1.3** (Format gate; Build gate split into its own slice, [`design-3.1-build-gate.md`](design-3.1-build-gate.md), D2),
+  **3.1.4** (LLM `classifyFailure` on `Unknown`), **3.2** (`ConventionLearner` at `FeatureDone` — sensor + profile
+  deltas + CLAUDE.md PR, D9; reviewer-comment mining, D8). Build re-verified docs-only-green
+  (`scalafmtCheckAll; compile; test` exit 0; forge-core 430, forge-agents 235 re-run, the rest cached-green from
+  the D8 commit). **Carry-forwards placed durably** (the §4 list is the durable home; close-out walk):
+  - **Resolved in-flight:** D2 (Build gate → own slice / 1.8), D7 (`profile.conventions_learned` → 1.12 §19),
+    D8 (reviewer-comment mining → 1.13), D9 (conventions PR-open). The full Phase-3 `profile.*` audit set
+    (`snapshot` / `failure_classified` / `local_gate` / `conventions_learned`) plus `review.request_changes` is in
+    the contract through 1.13 — **no §19 contract gap remains** (D3's `profile.local_gate` is enumerated in 1.8 §19).
+  - **Carried forward as recorded "revisit-if" deferrals** (no code or contract gap, each with a disposition in §4):
+    **T2** (`profile.snapshot` records hash + schemaVersion, not the full profile — 1.7 §19), **T4** / **D1**
+    (`RunLocalCommand` fresh `style(...)` commit vs the pre-push Format gate's fold-into-piece-commit — 1.7 §8.3/§11.4;
+    the two are deliberately different because §8.2's target is already pushed), **D4** (decoder stamps `schemaVersion`;
+    `commitIdentity` perceived with a `forge[bot]` default — 1.7 §6/§7.11), **D5** (`forge profile` is the first
+    feature-less state-changing command, takes the §13 lock — 1.7 §15), **D6** (LLM `classifyFailure` gated on the
+    rules `Unknown` sentinel + degrades to rules `Escalate` on stall — 1.7 §7.11/§8.2). These are design records, not
+    open work; promote to a contract revision only if a future need (listed in each entry's "Revisit if…") arises.
+  The roadmap §4 sub-slice **3.0** and **3.1** bullets are now ticked ✅. The Phase-3 *overall* exit criterion (a live
+  run on a new, unseen, non-Scala repo with zero hardcoded-config edits) remains the gate for the **whole phase** —
+  the remaining sub-slices (3.4 `ConventionLearner` was 3.2; the cross-stack live demo) are the next Phase-3 work.
 
 - **2026-06-05 — T6 resolved: the §8.2 CI-fail → local-autofix routing fired *live* (dogfood #4,
   `adventure-gen-retry-config`).** Drove a real end-to-end Forge run on `llm4s/szork` (Mode A,

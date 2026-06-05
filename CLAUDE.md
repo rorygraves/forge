@@ -18,15 +18,22 @@ that first; everything below is Claude-Code-specific.
   [`docs/forge-design-1.7.md`](docs/forge-design-1.7.md) — a focused Phase-3
   revision (spine/senses; changed §3/§6/§7/§8/§11/§18/§19, the rest frozen at
   1.6 per its standalone-by-freeze note).
-- **Active implementation plan:** [`docs/design-3.0.md`](docs/design-3.0.md)
-  (Slice 3.0/3.1 — Repo Adaptation, 🟡 open 2026-06-02). Tier-1 types +
-  deterministic routing **landed via the Phase-3 spike** (commit `16396d2`,
-  `io.forge.core.profile`: `RepoProfile`/`ProfileStore`/`contentHash` +
-  `RuleBasedFailureClassifier` + `FailureRouting`, proven against the real
-  dogfood-#2/#5 logs in `RepoProfileSpikeSuite`, `forge-core` 420/420). Next
-  gating Task 3.1.2: wire the live `gh run view --log-failed` → §8.2 classified
-  routing into §11.5 and re-run the dogfood-#2 case to measure the \$1.78
-  collapse on a real run. The most recent closed audit trail is
+- **Active implementation plan:** none open — **all six Phase-3 sub-slices
+  (3.0–3.5) are ✅ closed.** The most recently closed is
+  [`docs/design-3.0.md`](docs/design-3.0.md) (Slice 3.0/3.1 — Repo Adaptation,
+  ✅ closed 2026-06-05): the `RepoProfile` model/store/hash, the
+  `RuleBasedFailureClassifier` + §8.2 deterministic-fix routing, the
+  `RepoProfiler` + `ConventionLearner` senses. Its §0 exit criterion was met
+  **live and measured** by T6 (dogfood #4, `adventure-gen-retry-config`): a real
+  scalafmt CI failure on `szork` routed to `RunLocalCommand(sbt scalafmtAll)` →
+  CI green, `attempts` unchanged, `forge stats` folding "1 fix-up round avoided"
+  — dogfood-#2's \$1.78 / ~12 min / 2 rounds collapsed to a ~few-second \$0 step.
+  The live contract is now [`docs/forge-design-1.13.md`](docs/forge-design-1.13.md)
+  (the §19 `profile.*` + `review.request_changes` audit kinds; 1.7→1.13 are
+  standalone-by-freeze Phase-3 revisions). **Next Phase-3 work = the
+  phase-level exit criterion:** a live end-to-end run on a new, unseen,
+  non-Scala (Node/Python) repo with zero hardcoded-config edits (roadmap §4).
+  Older closed audit trails include
   [`docs/design-2.1-tui.md`](docs/design-2.1-tui.md)
   (Slice 2.1 — Phase-2 TUI, ✅ closed 2026-06-01): read-only `forge tui
   <feature>` over the committed action log + state cache (Tasks 2.1.1–2.1.4,

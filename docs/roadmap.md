@@ -38,7 +38,7 @@
 | 0 — Slice 0 | CLI capabilities validated | ✅ closed |
 | 1 — MVP | Single-repo self-host end-to-end | ✅ closed |
 | 2 — MLP | Pleasant single-repo daily-driver | open — Slice 2.0 (observability) ✅, Slice 2.1 (TUI) ✅; §3.4 OSS / §3.5 tuning / a small dogfood-#2 resilience pass still open |
-| 3 — v1.0: **Repo Adaptation** ⭐ | Deterministic spine + agentic senses; works on any repo via its CLAUDE.md + a derived, hashed `RepoProfile` | **next** — implementation contract to open as `forge-design-1.7.md` |
+| 3 — v1.0: **Repo Adaptation** ⭐ | Deterministic spine + agentic senses; works on any repo via its CLAUDE.md + a derived, hashed `RepoProfile` | open — **all six sub-slices 3.0–3.5 ✅ closed** (contract `forge-design-1.13.md`); only the **phase-level exit criterion** remains: a live end-to-end run on a new, unseen, non-Scala repo with zero hardcoded-config edits |
 | 4 — v2.0 | Workspace (multi-repo) + workstreams + daemon + multi-workstream cockpit TUI | needs `forge-design-2.0.md` first |
 | 5 — v3.0+ | Agentic-dev cockpit (knowledge base, reactive review, custom triggers) | concept |
 
@@ -783,14 +783,22 @@ honest hard edge").
 - **3.0 — `RepoProfile` model + `ProfileStore` + hash-into-log.** New
   `profile.snapshot` action (§19). Spike: profile szork *and* forge itself,
   commit the captured profiles as fixtures. Proves the determinism story before
-  any LLM is in the loop.
+  any LLM is in the loop. ✅ **closed 2026-06-05** (with 3.1) —
+  [`design-3.0.md`](design-3.0.md).
 - **3.1 — `FailureClassifier` + deterministic-fix routing.** Highest-ROI first
   runnable: re-run the dogfood-#2 formatter case and watch the $1.78 / 12-min
   fix-up collapse to a local `scalafmtAll`. Pipe `gh run view --log-failed` into
-  the fix-up context.
+  the fix-up context. ✅ **closed 2026-06-05** — the §8.2 collapse fired **live and
+  measured** on a real `szork` run (dogfood #4, `adventure-gen-retry-config`): scalafmt
+  CI failure → `RunLocalCommand(sbt scalafmtAll)` → CI green, `attempts` unchanged,
+  `forge stats` folding "1 fix-up round avoided" at $0 driver cost. Plan + close-out:
+  [`design-3.0.md`](design-3.0.md); evidence:
+  [`dogfood/adventure-gen-retry-config.md`](dogfood/adventure-gen-retry-config.md).
 - **3.2 — `RepoProfiler` LLM sensor** replacing hardcoded reviewer config +
   commit-identity sourced from the profile (sense the environment, don't inherit
-  ambient defaults — the tiniest instance of the whole thesis).
+  ambient defaults — the tiniest instance of the whole thesis). ✅ **closed 2026-06-05**
+  — landed as [`design-3.0.md`](design-3.0.md) Task 3.0.3 (`Connector.profileRepo` +
+  `forge profile` writing `.forge/profile.json`); closed in that slice's whole-section review.
 - **3.3 — `WorkflowProfile` FSM parameterization** (review / CI / merge-strategy
   / branch model). ✅ **closed 2026-06-04** — the two knobs whose §11 wiring exists
   today landed: **review-required** (Tier 1 — a `reviewRequired=false` repo skips the
@@ -820,7 +828,11 @@ honest hard edge").
     `forge`) are PR/GitFlow repos, so the slice is proven against scripted fakes
     (`OrchestratorTrunkPathSuite`), with the live win deferred until a real trunk repo exists
     (the W5 / build-gate precedent).
-- **3.4 — `ConventionLearner`** → proposed CLAUDE.md PRs (human-approved).
+- **3.4 — `ConventionLearner`** → proposed CLAUDE.md PRs (human-approved). ✅ **closed
+  2026-06-05** — landed as [`design-3.0.md`](design-3.0.md) Task 3.2: the §11.7 learner at
+  `FeatureDone` mines failure→remedy patterns **and** recurring reviewer comments (D8) into
+  profile deltas + a proposed CLAUDE.md edit **opened as a PR** for human approval (D9, never
+  auto-merged); closed in that slice's whole-section review.
 - **3.5 — Role-trait refactor** (§4.2 below) — the sensors are the first
   concrete third+ roles, so the refactor lands *inside* the phase that needs it.
   ✅ **closed 2026-06-04** — a base `Agent` trait + `Driver` / `Reviewer` /
