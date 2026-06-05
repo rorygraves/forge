@@ -1,6 +1,7 @@
 package io.forge.git.cli
 
 import cats.effect.unsafe.implicits.global
+import io.forge.core.BranchName
 
 /** Task 1.4.10-d2a — `RealGitClient.stage` / `commit` / `status` against a real `git` binary in a throwaway repo. The
   * seam these add (working-tree staging + structured porcelain status + clean-tree-aware commit) is what the §11.4 /
@@ -70,6 +71,26 @@ class RealGitClientCommitSuite extends munit.FunSuite:
     val client = RealGitClient(work)
     assertEquals(client.stage(Vector("h.txt")).unsafeRunSync(), Right(()))
     assertEquals(client.commit("commit past the failing hook").unsafeRunSync(), Right(CommitResult.Committed))
+
+  fixture.test("push bypasses a failing pre-push hook (--no-verify) — local dev hooks don't gate Forge's push (F2)"):
+    work =>
+      // A target repo may install a `pre-push` hook that runs its test/build suite (e.g. a husky `pre-push` running
+      // vitest). Forge's automated push must not be blocked by it — remote CI is the verification. Without --no-verify
+      // the §8.2 autofix push silently fails and degrades the deterministic-fix collapse into a paid fix-up round (F2).
+      val bare = os.temp.dir(prefix = "forge-remote-")
+      try
+        os.proc("git", "-c", "init.defaultBranch=main", "init", "--bare").call(cwd = bare, stderr = os.Pipe)
+        os.proc("git", "remote", "add", "origin", bare.toString).call(cwd = work, stderr = os.Pipe)
+        os.proc("git", "push", "origin", "main").call(cwd = work, stderr = os.Pipe)
+        val hook = work / ".git" / "hooks" / "pre-push"
+        os.write.over(hook, "#!/bin/sh\necho 'pre-push hook intentionally failing' >&2\nexit 1\n", createFolders = true)
+        os.proc("chmod", "+x", hook.toString).call(cwd = work)
+        os.write(work / "p.txt", "pushed\n")
+        val client = RealGitClient(work)
+        assertEquals(client.stage(Vector("p.txt")).unsafeRunSync(), Right(()))
+        assertEquals(client.commit("commit to push").unsafeRunSync(), Right(CommitResult.Committed))
+        assertEquals(client.push(BranchName("main")).unsafeRunSync(), Right(()))
+      finally if os.exists(bare) then os.remove.all(bare)
 
   fixture.test("commit on a clean tree → NothingToCommit (not an error)"): work =>
     val client = RealGitClient(work)

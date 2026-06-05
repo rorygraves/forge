@@ -104,7 +104,12 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
     val flags = Vector.empty[String] ++
       (if forceWithLease then Vector("--force-with-lease") else Vector.empty) ++
       (if force then Vector("--force") else Vector.empty)
-    val argv = Vector("git", "push", "origin", branch.value) ++ flags
+    // `--no-verify`: mirror `commit` — Forge's push is a mechanical orchestration step whose gate of record is remote
+    // CI (§8), not the target repo's local `pre-push` hook. Some repos install one that runs the test/build suite
+    // (e.g. a husky `pre-push` running `vitest`); without this bypass it blocks (or fails) the orchestrator's push —
+    // and critically the §8.2 autofix push, whose failure silently degrades the deterministic-fix collapse into a paid
+    // fix-up round (Phase-3 exit-run finding F2). Let CI be the gate; client hooks are a dev inner-loop concern.
+    val argv = Vector("git", "push", "--no-verify", "origin", branch.value) ++ flags
     IO.blocking {
       val res = os.proc(argv).call(cwd = repoRoot, check = false, stderr = os.Pipe)
       RealGitClient.classifyPush(branch, res.exitCode, res.out.text(), res.err.text())
@@ -114,10 +119,10 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
     run(Vector("git", "tag", name, sha.value)).map(_.map(_ => ()))
 
   override def pushTag(name: String): IO[Either[GitError, Unit]] =
-    run(Vector("git", "push", "origin", name)).map(_.map(_ => ()))
+    run(Vector("git", "push", "--no-verify", "origin", name)).map(_.map(_ => ()))
 
   override def deleteRemoteTag(name: String): IO[Either[GitError, Unit]] =
-    run(Vector("git", "push", "origin", s":refs/tags/$name")).map(_.map(_ => ()))
+    run(Vector("git", "push", "--no-verify", "origin", s":refs/tags/$name")).map(_.map(_ => ()))
 
   override def deleteLocalTag(name: String): IO[Either[GitError, Unit]] =
     run(Vector("git", "tag", "-d", name)).map(_.map(_ => ()))
