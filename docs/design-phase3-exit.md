@@ -280,14 +280,52 @@ Mirror dogfood #4's artifact set:
   (`<you>/toast-stats`): full merge control, free branch protection, sacrificial.
   Surveyed PR-triggering workflows → fork-prep trims all but `ci.yml` (the others
   need fork-absent secrets) + enable Actions on the fork. §1/§3-P0 updated.
-  Awaiting operator go to begin P0.
+- **2026-06-05 (rev 3)** — **P0 + P1 executed and verified (§8).** Fork
+  `rorygraves/toast-stats` prepped + branch-protected; smoke PR confirmed clean CI;
+  `forge profile` auto-derived a correct profile with zero edits; verified the §8.2
+  route resolves `npm run format` despite `required:false`. Paused at the P1/P2
+  boundary — P2 (feature choice + interactive `forge spec`) and P4 (the paid driver
+  run) need the operator. Candidate feature scouted: extract `frontend/src/config/
+  queryClient.ts` inline React-Query literals into a typed config + test, with a
+  double-quote mis-format trigger (prettier `singleQuote:true`).
 
 ---
 
 ## 8. Findings (filled during the run)
 
-_(empty — populated as P0–P4 surface profiler/classifier/lifecycle gaps; each
-finding gets a durable home per the carry-forward discipline.)_
+**P0 (fork prep) — done 2026-06-05.** Forked `taverns-red/toast-stats` →
+`rorygraves/toast-stats` (upstream perm = READ, so a fork was required); enabled
+Actions; trimmed `.github/workflows` to `ci.yml` only (removed the 8 secret-needing
+/ scheduled workflows); branch-protected `main` requiring the **Quality Gates**
+check (no enforced GitHub reviews, admin can merge); cloned the fork fresh to
+`home/toast-stats-fork`. A throwaway smoke PR (#1, closed) confirmed **all `ci.yml`
+checks pass on the fork** (Quality Gates, Security Scan, Test Suite, Flake
+Detection, Trivy) — no fork-noise, so `ci.yml` jobs did **not** need trimming.
+
+**P1 (`forge profile`) — done 2026-06-05, ✅ correct, zero edits.** `sbt
+"forge-app/run profile --repo-root …/toast-stats-fork"` (103s, hash
+`2761aa91a8f17ea0`). Auto-derived: `buildTool: npm`; commands
+`format=npm run format` (deterministic, **autofix:true**), `lint`/`typecheck`/`build:frontend`
+(deterministic), `test` (heuristic); `workflow.reviewRequired: false`,
+`mergeStrategy: squash`, `branchModel: git_flow`, `ciRequiredChecks: [Quality
+Gates, Security Scan, Test Suite, Build Applications]`. Verified, not assumed:
+- "Build Applications" is a **real** `ci.yml` job (`needs:[quality-gates,test]`) —
+  not a phantom; it didn't show in the smoke only because the PR closed before
+  `test` finished. So the sensed required-check set is accurate; the §8 gate won't
+  hang on a never-reporting check.
+- The §8.2 autofix lookup (`FailureRouting.localAutofix`, forge-core:58) filters on
+  `autofix && Deterministic` **only — not `required`** — so `format`'s `required:false`
+  does **not** block the §8.2 collapse.
+- Emergent: because `format` is `required:false`, the §8.3 local format gate (which
+  filters `required:true`) won't pre-fix it → the mis-format reaches CI → **§8.2
+  fires under default config, no `adapt.localGate` toggle / no config edit needed.**
+
+**Minor profiler notes (non-blocking, carry-forward candidates):**
+- `commitIdentity` was *invented* (`forge[bot]` / noreply) rather than sensed — but
+  it is not consumed yet (D4 — ambient git identity used), so decorative for now.
+- `format required:false` is defensible (formatting is auto-fixed, not a hard gate)
+  but means the §8.3 local format-gate is inert for this repo; worth a profiler-prompt
+  review if the §8.3 shift-left behaviour is wanted (revisit-if).
 
 ---
 
