@@ -1,0 +1,9 @@
+{"seq":0,"ts":"2026-06-06T14:35:16.503542Z","kind":"daemon.started","payload":{"pid":56518}}
+{"seq":1,"ts":"2026-06-06T14:35:31.001335Z","kind":"workstream.created","payload":{"workstreamId":"ws-1","goal":"adventure-gen retry config (live worker dogfood #7)"}}
+{"seq":2,"ts":"2026-06-06T14:35:32.872097Z","kind":"worker.spawned","payload":{"workerId":"w-1","workstreamId":"ws-1","repo":"/Users/rory.graves/workspace/home/szork","feature":"adventure-gen-retry-config","checkoutRoot":"/Users/rory.graves/.forge/instances/wkr-smoke/workers/w-1/checkout","pid":56979}}
+{"seq":3,"ts":"2026-06-06T14:35:32.882109Z","kind":"workstream.status","payload":{"workstreamId":"ws-1","status":"Active"}}
+{"seq":4,"ts":"2026-06-06T14:35:33.249401Z","kind":"worker.registered","payload":{"workerId":"w-1","repo":"/Users/rory.graves/workspace/home/szork","feature":"adventure-gen-retry-config"}}
+{"seq":5,"ts":"2026-06-06T14:35:36.335800Z","kind":"worker.event","payload":{"workerId":"w-1","event":{"seq":0,"ts":"2026-06-06T14:35:35.405470Z","feature":"adventure-gen-retry-config","piece":null,"actor":null,"role":null,"kind":"fsm.transition","payload":{"from":"Drafting","to":"InteractiveSpec"}}}}
+{"seq":6,"ts":"2026-06-06T14:35:36.352373Z","kind":"worker.status","payload":{"workerId":"w-1","status":"InteractiveSpec"}}
+{"seq":7,"ts":"2026-06-06T14:35:36.363948Z","kind":"worker.event","payload":{"workerId":"w-1","event":{"seq":1,"ts":"2026-06-06T14:35:35.405470Z","feature":"adventure-gen-retry-config","piece":null,"actor":"driver","role":"spec","kind":"driver.spawn","payload":{"sessionId":"f5051ecc-45b2-4d88-b384-0492f4015796","role":"spec"}}}}
+{"seq":8,"ts":"2026-06-06T14:36:19.452972Z","kind":"daemon.started","payload":{"pid":58645}}

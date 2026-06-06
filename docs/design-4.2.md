@@ -43,6 +43,14 @@
 
 ## 0. Exit criterion for Slice 4.2
 
+> **✅ MET 2026-06-06 (Task 4.2.6).** Live (dogfood #7, `dogfood/4.2-supervisor.md`)
+> + automated (`SupervisorReconcileSuite`): a real `forge daemon` spawned a real
+> `forge worker` process (pid 56979) on an isolated `szork` clone, drove a feature
+> to `InteractiveSpec` exporting events, survived a `kill -9` of the daemon, and on
+> restart was reconciled + reattached (liveness) from the instance log alone
+> (boot #2, cache deleted first). The §6.4(d) feed-*resumption* (durable offsets)
+> is deferred to 4.3 per §4 — 4.2 delivers liveness reattach.
+
 Slice 4.2 is done when **`forge daemon` spawns a real worker *process* on its own
 isolated clone of a registered repo, supervises it (tracks liveness + status +
 exit), aggregates its exported event feed (B3), schedules its poll cadence as
@@ -177,7 +185,7 @@ credential broker (all 4.3).
   exited). Idempotent against the instance log (a retried spawn doesn't
   double-spawn — §6.4).
 
-- [ ] **Task 4.2.6 — reconciliation proof + close-out (exit criterion).** A test
+- [x] **Task 4.2.6 — reconciliation proof + close-out (exit criterion).** A test
   (and a live `forge daemon` exercise, dogfood #7) that spawns a real worker
   process on an isolated clone, drives a small feature far enough to export
   events, `kill -9`s the daemon, restarts it, and asserts the worker survived
@@ -333,6 +341,29 @@ credential broker (all 4.3).
   green, `forge-it` Test/compile green, `scalafmtAll` clean, ForgePaths smell sweep passes. The real-`forge worker`-
   child-spawned-by-a-real-daemon tie-together + the kill-9 reconciliation proof are the Task 4.2.6 live dogfood. Task
   4.2.6 open.
+- **2026-06-06** — **Task 4.2.6 (reconciliation proof + close-out) landed — Slice 4.2 exit criterion MET, live +
+  automated.** (1) **Automated proof:** new `SupervisorReconcileSuite` (forge-app) composes what `SupervisorSuite`
+  (spawn/exit/reconcile, single life) and `DaemonCrashRecoverySuite` (log rebuild, record-only worker) each prove half
+  of — a real `RealWorkerSpawner` child is spawned by a `RealSupervisor`, the supervisor + its `DaemonState` are
+  abandoned mid-life (the child is `Resource.allocated`-orphaned, so it survives), the cache is deleted, a fresh
+  `DaemonState` + `RealSupervisor` boot, and `reconcile` reattaches to the **same still-alive pid** from the log alone
+  (boot #2, no re-spawn, uninterrupted); killing the survivor then records `worker.exited` (`ExternallyObservedExit =
+  -1`) via the rebound `ProcessHandle` watcher, proving the reattach is live. (2) **Live dogfood #7**
+  (`dogfood/4.2-supervisor.md`): a real `forge daemon` (java pid 56518) spawned a real `forge worker` child (pid 56979)
+  on an isolated clone of `szork` (HEAD `faa3635`), drove `adventure-gen-retry-config` `Drafting → InteractiveSpec` with
+  a real `driver.spawn`, was `kill -9`'d (worker survived), and on restart (pid 58645) logged `reconciling 1 worker(s)
+  from the instance log…`, came up boot #2, and reattached to the same pid — `schemaVersion 2` / `bootCount 2` cache
+  rebuilt from the log alone (cache deleted first). (3) **Review finding — FIXED:** `WorkerLauncher.Real` passed
+  `java.class.path` verbatim; `java -jar <relative>/forge.jar` yields a *relative* classpath the worker child (cwd =
+  `workerRoot`) could not resolve (`ClassNotFoundException: io.forge.app.Main`). Now absolutized against the daemon cwd
+  (`WorkerLauncher.absoluteClasspath`, no-op for absolute entries) with `WorkerLauncherSuite` as the regression — a
+  fragility only a live spawn could surface (the supervisor suites stub the launcher). (4) **Review finding — DEFERRED
+  to 4.3** (see §4): the worker feed-*resumption* after a daemon restart (§6.4(d) durable offsets / replay from
+  last-acked) is coupled to the B2/O6 recovery handshake (both 4.3); 4.2 delivers **liveness reattach**, and a naive
+  resume would be at-least-once with crash-boundary duplicates, so it is deferred not half-built. **No contract-text
+  delta required** (§6.4(d) already states the 4.3 target); recorded as a carry-forward + design-rationale note per §23.
+  forge-app 525 unit tests (+2 suites / +4 tests this task), full `sbt test` green, `scalafmtCheckAll` clean,
+  ForgePaths smell sweep passes. **Slice 4.2 ✅ closed.**
 
 ---
 
@@ -347,6 +378,20 @@ credential broker (all 4.3).
   → finalize-on-`cost.update`, durable in the instance log — is **4.3**. 4.2's
   aggregate fan-in of each worker's exported `cost.update` (via the B3 feed) backs
   the cockpit spend view; the *authorization* gate is 4.3.
+- **Worker feed-*resumption* on daemon restart** (§6.4(d)) is **4.3**. 4.2 proves
+  **liveness reattach** (the daemon re-supervises a surviving worker's pid and
+  records its exit — dogfood #7 + `SupervisorReconcileSuite`), but does **not**
+  resume the worker's exported event feed after a restart: `WorkerFeedExporter.follow`
+  ends when its `worker-event` call fails against the dead socket (the worker's
+  `orch.run` continues — it is socket-independent, which is why the worker
+  survives), and is not retried on the rebound socket. The contract's full feed
+  reattach (§6.4(d): **durable worker-side offsets, replay from the last-acked
+  offset, no event lost or double-counted**) is coupled to the B2 budget-authority
+  / O6 credential-broker recovery handshake (both 4.3). It is **deferred, not
+  half-built**: a naive `follow`-retry would be at-least-once with crash-boundary
+  duplicates — precisely what the durable-offset protocol exists to prevent. No
+  contract-text change is required (§6.4(d) already states the 4.3 target); this
+  bullet is the §23 reconciliation record.
 - **Credential broker** (O6) — short-lived-secret injection over the worker
   control channel — is a **4.3** blocker. Not touched in 4.2 (a host-process
   worker uses the ambient host credentials, as today's single-repo `forge run`

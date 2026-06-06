@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 2,
+  "bootCount": 2,
+  "workers": [
+    {
+      "workerId": "w-1",
+      "repo": "/Users/rory.graves/workspace/home/szork",
+      "feature": "adventure-gen-retry-config",
+      "status": "InteractiveSpec",
+      "events": [
+        {
+          "seq": 0,
+          "ts": "2026-06-06T14:35:35.405470Z",
+          "feature": "adventure-gen-retry-config",
+          "piece": null,
+          "actor": null,
+          "role": null,
+          "kind": "fsm.transition",
+          "payload": {
+            "from": "Drafting",
+            "to": "InteractiveSpec"
+          }
+        },
+        {
+          "seq": 1,
+          "ts": "2026-06-06T14:35:35.405470Z",
+          "feature": "adventure-gen-retry-config",
+          "piece": null,
+          "actor": "driver",
+          "role": "spec",
+          "kind": "driver.spawn",
+          "payload": {
+            "sessionId": "f5051ecc-45b2-4d88-b384-0492f4015796",
+            "role": "spec"
+          }
+        }
+      ],
+      "workstreamId": "ws-1",
+      "checkoutRoot": "/Users/rory.graves/.forge/instances/wkr-smoke/workers/w-1/checkout",
+      "pid": 56979
+    }
+  ],
+  "workstreams": [
+    {
+      "id": "ws-1",
+      "goal": "adventure-gen retry config (live worker dogfood #7)",
+      "status": "Active",
+      "workers": [
+        "w-1"
+      ]
+    }
+  ]
+}

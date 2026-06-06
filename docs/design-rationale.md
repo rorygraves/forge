@@ -846,3 +846,20 @@
 **Fallout:** main compiled clean under 3.7.1; only 1 newly-flagged unused import (`forge-app` test) + 7 positional-implicit `Codec` call sites in `forge-it` (rewritten to `(using scala.io.Codec(...))`). All 1342 unit tests green, `forge-it` compiles, scalafmt clean.
 **Watch item ✅ RESOLVED UPSTREAM 2026-06-01:** at Slice 2.1 close this read "termflow `0.4.0` is `publishLocal`-only; Maven Central carries only `0.3.0`; before §3.4 OSS-readiness ship `0.4.0` to Central or pin a Central-published version, else a fresh clone can't resolve the build." That is no longer true — termflow `0.4.0` (both the `termflow_3` aggregator and `termflow-testkit_3`, the exact artifacts `build.sbt` pins) has since been published to Maven Central (`<release>0.4.0`, lastUpdated 2026-04-30; POMs verified HTTP 200). A fresh clone now resolves the build from Central with no `publishLocal` step. No Forge-side action remains; the §3.4 OSS-readiness termflow prerequisite is met by upstream. The live spec `forge-design-1.6.md` §3.3 still carries the now-stale "publishLocal-only" note in its dependency row — that text will be corrected when the next `forge-design-1.7.md` revision is cut (not edited in place, per §23). Durable home: roadmap §3.4.
 **In:** `build.sbt`; §3.3 (dependency row + new §3.3.1 Scala floor). The stale §3.3 placeholder note (`0.0.1`/`0.1.0-SNAPSHOT`) was reconciled into [`forge-design-1.6.md`](forge-design-1.6.md) at Slice 2.1 close-out (Task 2.1.8, design-2.1-tui.md §4 T2). ✅ reconciliation done 2026-06-01.
+
+---
+
+## Phase 4 — Workspace & Workstream platform
+
+### PH4-1. Slice 4.2 reattach is liveness-only; worker feed-resumption is 4.3 (§6.4(d))
+**Decision:** Slice 4.2's restart **reconcile** re-establishes *supervision* over a worker process that survived a daemon crash — it probes the recorded pid (`ProcessHandle.of`), leaves an alive one running, and watches it for exit (recording `worker.exited`). It does **not** resume the worker's exported **event feed**: `WorkerFeedExporter.follow` ends when its `worker-event` call fails against the dead socket and is not retried on the rebound socket (the worker's `orch.run` is socket-independent, which is why the worker survives at all).
+**Origin:** Task 4.2.6 live dogfood #7 (`dogfood/4.2-supervisor.md`). The contract §6.4(d) feed reattach specifies **durable worker-side offsets + replay from the last-acked offset, no event lost or double-counted** — and explicitly couples that to the B2 budget-authority / O6 credential-broker recovery handshake, both **Slice 4.3**.
+**Rejected:** a naive 4.2 `follow`-retry that reconnects to the rebound socket — without durable acks it is at-least-once with possible duplicate `worker.event` records at the crash boundary, precisely the failure the durable-offset protocol exists to prevent. Deferred, not half-built.
+**No contract delta:** §6.4(d) already states the 4.3 target unchanged; this is a sequencing/scope record, not a spec edit (§23).
+**Durable home:** [`design-4.2.md`](design-4.2.md) §4 (carry-forward) + roadmap §5 Slice 4.3 bucket.
+
+### PH4-2. Worker JVM classpath must be absolutized before launch
+**Decision:** `WorkerLauncher.Real` resolves every `java.class.path` entry to an absolute path (against the daemon's cwd) before launching the `forge worker` child.
+**Origin:** Task 4.2.6 dogfood #7 — the first live spawn failed with `ClassNotFoundException: io.forge.app.Main`. `java -jar <relative-path>/forge.jar` yields a *relative* classpath, and the child runs under `cwd = workerRoot` (inside the instance dir), so the relative jar was unresolvable from the child's cwd. A no-op for the already-absolute sbt-run classpath.
+**Why the suites missed it:** `SupervisorSuite` / `SupervisorReconcileSuite` stub the launcher with an `sh` child to keep the OS-process lifecycle fast and classpath-free — so only a live JVM spawn could surface it. The "run code earlier / capture real shapes" discipline anticipates exactly this class of bug.
+**In:** `WorkerLauncher.absoluteClasspath` + `WorkerLauncherSuite` (regression).
