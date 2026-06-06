@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "bootCount": 2,
+  "workers": [
+    {
+      "workerId": "w1",
+      "repo": "/repo",
+      "feature": "live-feature",
+      "status": "Refining",
+      "events": [
+        {
+          "tag": "alpha"
+        },
+        {
+          "tag": "beta"
+        }
+      ]
+    }
+  ]
+}

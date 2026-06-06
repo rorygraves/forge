@@ -1,0 +1,6 @@
+{"seq":0,"ts":"2026-06-06T08:24:12.796380Z","kind":"daemon.started","payload":{"pid":342}}
+{"seq":1,"ts":"2026-06-06T08:24:32.976870Z","kind":"worker.registered","payload":{"workerId":"w1","repo":"/repo","feature":"live-feature"}}
+{"seq":2,"ts":"2026-06-06T08:24:32.987583Z","kind":"worker.status","payload":{"workerId":"w1","status":"Refining"}}
+{"seq":3,"ts":"2026-06-06T08:24:32.994316Z","kind":"worker.event","payload":{"workerId":"w1","event":{"tag":"alpha"}}}
+{"seq":4,"ts":"2026-06-06T08:24:32.999970Z","kind":"worker.event","payload":{"workerId":"w1","event":{"tag":"beta"}}}
+{"seq":5,"ts":"2026-06-06T08:24:57.102694Z","kind":"daemon.started","payload":{"pid":1858}}

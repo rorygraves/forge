@@ -27,9 +27,13 @@
 > restart by rebuilding its whole view from the instance log** — the §6.4 contract
 > every later slice sits on.
 >
-> **Status:** 🚧 open — Tasks 4.1.1 (IPC spike), 4.1.2 (durability core), 4.1.3
-> (daemon supervisor), and 4.1.4 (worker subscribe) ✅ landed. Task 4.1.5
-> (crash-recovery + close-out) open.
+> **Status:** ✅ **closed 2026-06-06.** Tasks 4.1.1 (IPC spike), 4.1.2 (durability
+> core), 4.1.3 (daemon supervisor), 4.1.4 (worker subscribe), and 4.1.5
+> (crash-recovery + close-out) all landed. The §0 exit criterion was met **live
+> and measured** by dogfood #6 ([`dogfood/4.1-daemon.md`](dogfood/4.1-daemon.md)):
+> a real `forge daemon start` OS process driven by an external Unix-socket client,
+> `kill -9`'d with its state cache deleted, rebuilt the exact view (boot #2, worker
+> `w1` status `Refining`, both exported events) from the instance log alone.
 
 ---
 
@@ -137,7 +141,7 @@ a "worker" in 4.1 is an instance-store record + an exported event feed.
   from the rebuilt tail). For 4.1 the worker is a *driver harness* in the test (no
   container) that pushes a few synthetic events; the real worker process is 4.2.
 
-- [ ] **Task 4.1.5 — crash-recovery proof + close-out (exit criterion).** A test
+- [x] **Task 4.1.5 — crash-recovery proof + close-out (exit criterion).** A test
   (and a live `forge daemon` exercise) that registers a worker, pushes events,
   kills the daemon, restarts it, and asserts the `status` snapshot + the worker's
   event tail rebuild from the instance log alone. Reconcile any spec deltas into
@@ -254,6 +258,29 @@ a "worker" in 4.1 is an instance-store record + an exported event feed.
   subscribe streams the seeded tail then a live event, malformed register →
   InvalidParams). `forge-daemon` 6 → 10, full `sbt test` green, `scalafmtCheckAll`
   clean, smell sweep passes. Task 4.1.5 (crash-recovery + close-out) open.
+- **2026-06-06** — **Task 4.1.5 (crash-recovery + close-out) landed → Slice 4.1
+  ✅ CLOSED.** The §0 exit criterion proven two ways. (1) **Automated:**
+  `DaemonCrashRecoverySuite` (forge-daemon) boots a daemon, registers `w1` + sets
+  status + pushes two exported events over the socket, **crashes** it (cancels the
+  serve fiber with the shutdown `Deferred` left unset — no clean stop, no final
+  flush), deletes the derived state cache, reboots, and asserts the `status`
+  snapshot (`bootCount=2`, worker `w1`, `Refining`, `eventCount=2`) **and** the
+  `subscribe`d per-worker tail (`registered`/`status`/event `a`/event `b`) rebuild
+  from the instance log alone. (2) **Live (dogfood #6,
+  [`dogfood/4.1-daemon.md`](dogfood/4.1-daemon.md)):** a real `forge daemon start`
+  OS process (pid 342) on a throwaway `~/.forge` instance, driven by an **external**
+  Python Unix-socket JSON-RPC client (standing in for the 4.2 worker), `kill -9`'d
+  with `state/instance.json` deleted, then restarted (pid 1858) — `forge daemon
+  status` rebuilt `boot #2, w1 status=Refining events=2` and `subscribe` streamed
+  the full tail, all from the canonical `instance.jsonl` (evidence captured under
+  `dogfood/4.1-daemon/`). **No spec deltas** (§23): the exercise only stresses the
+  4.1.1–4.1.4 contracts; the live contract `forge-design-1.16.md` and the Phase-4
+  contract `forge-design-2.0.md` §6/§6.3/§6.4 are unchanged. `forge-daemon` 10 → 11,
+  full `sbt test` green, `scalafmtCheckAll` clean, smell sweep passes. Carry-forward
+  (§4) walked — every item (B2 budget protocol, real worker process + container,
+  credential broker, dedicated worker channel, multi-worker aggregation, `subscribe`
+  lifecycle polish) is durably parked against its named later slice (4.2/4.3/4.4)
+  and unchanged by 4.1.5. Roadmap §5 sub-slice 4.1 bullet flipped to closed.
 
 ---
 
