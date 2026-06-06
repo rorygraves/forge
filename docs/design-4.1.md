@@ -27,9 +27,9 @@
 > restart by rebuilding its whole view from the instance log** — the §6.4 contract
 > every later slice sits on.
 >
-> **Status:** 🚧 open — Tasks 4.1.1 (IPC spike), 4.1.2 (durability core), and 4.1.3
-> (daemon supervisor) ✅ landed. Tasks 4.1.4 (worker subscribe), 4.1.5 (crash-recovery
-> + close-out) open.
+> **Status:** 🚧 open — Tasks 4.1.1 (IPC spike), 4.1.2 (durability core), 4.1.3
+> (daemon supervisor), and 4.1.4 (worker subscribe) ✅ landed. Task 4.1.5
+> (crash-recovery + close-out) open.
 
 ---
 
@@ -128,7 +128,7 @@ a "worker" in 4.1 is an instance-store record + an exported event feed.
   `CommandClass`, resolving the instance the same way the 4.0 instance commands
   do (`--instance` / sole-instance fallback).
 
-- [ ] **Task 4.1.4 — status snapshot + event subscribe for one worker (B3 event
+- [x] **Task 4.1.4 — status snapshot + event subscribe for one worker (B3 event
   export subscription).** `register-worker` (a worker record: id, repo, feature,
   status) + a worker→daemon **event-export** RPC (`worker-event`, appending a
   `worker.event` to the instance log and updating the aggregate). A client
@@ -228,6 +228,32 @@ a "worker" in 4.1 is an instance-store record + an exported event feed.
   `CliParserSuite` daemon cases. `forge-daemon` 3 → 6, full `sbt test` green,
   `scalafmtCheckAll` clean, smell sweep passes. Tasks 4.1.4 (worker subscribe), 4.1.5
   (crash-recovery + close-out) open.
+- **2026-06-06** — **Task 4.1.4 (worker subscribe) landed.** The B3 worker register /
+  event-export / subscribe surface over the existing JSON-RPC transport.
+  `DaemonSocketServer.Handler` widened from `Request => IO[Response]` to
+  `Request => Stream[IO, Response]` (a unary method lifts via the new
+  `Handler.unary`; a streaming method returns its live feed directly), so a method
+  can emit a *line per element* on one connection — the per-connection loop swapped
+  `evalMap` → `flatMap`, keeping `status`/`shutdown` single-line while `subscribe`
+  stays open. `DaemonState` gained an `fs2.concurrent.Topic[IO, InstanceEvent]`:
+  `record` publishes each appended event (fire-and-forget, after the durable
+  commit), and a new `subscribe` seeds a fresh subscriber from the rebuilt
+  per-worker tail (registration → latest status → exported-feed events, replayed in
+  recorded order) then streams live events, registering the subscription via
+  `subscribeAwait` **before** snapshotting so seeding is loss-free (a possible
+  duplicate in the subscribe↔snapshot window is left to a 4.4 cockpit dedup). The
+  `daemon.started` boot marker is filtered out of the per-worker feed. `Daemon`
+  added the `register-worker` / `worker-status` / `worker-event` unary methods
+  (single-writer `DaemonState.record` appends; malformed params → `InvalidParams`,
+  never a torn-down connection) and the streaming `subscribe` (each event rendered
+  as the `{kind, payload}` wire shape via `InstanceEvent.kindOf`/`payloadOf`).
+  `DaemonClient.subscribe` opens a connection, sends the request once, and streams
+  the response lines. No new CLI surface — the worker is a test driver harness in
+  4.1 (the real worker process is 4.2). New `DaemonWorkerSubscribeSuite`
+  (register→status, status+event update snapshot **and** rebuild from the log alone,
+  subscribe streams the seeded tail then a live event, malformed register →
+  InvalidParams). `forge-daemon` 6 → 10, full `sbt test` green, `scalafmtCheckAll`
+  clean, smell sweep passes. Task 4.1.5 (crash-recovery + close-out) open.
 
 ---
 
@@ -253,3 +279,13 @@ a "worker" in 4.1 is an instance-store record + an exported event feed.
 - **Multi-worker / workstream aggregation + cadence scheduling** (§6.2) — the
   daemon throttling/scheduling poll cadence across M workers — is **4.2**. 4.1
   proves the single-worker subscribe path.
+- **`subscribe` lifecycle polish (4.4 cockpit).** Two deliberate 4.1.4
+  simplifications, recorded so they aren't mistaken for the ratified shape: (a) the
+  seed↔snapshot window can deliver a **duplicate** event to a fresh subscriber —
+  de-duplication (e.g. a per-worker `seq` watermark) belongs with the cockpit
+  consumer; (b) a subscriber that disconnects while the feed is **idle** keeps its
+  daemon-side `Topic` subscription until the next published event fails the write
+  and tears the connection down — fine for a single-worker proof and for the
+  whole-process teardown on daemon shutdown, but the persistent cockpit TUI (4.4)
+  wants prompt disconnect detection (e.g. a read-side heartbeat / half-close
+  watch).

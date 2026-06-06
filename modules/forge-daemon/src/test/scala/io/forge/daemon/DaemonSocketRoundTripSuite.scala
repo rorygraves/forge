@@ -23,7 +23,7 @@ class DaemonSocketRoundTripSuite extends CatsEffectSuite:
   /** Echo handler: `status` → `{status:"ok"}` (with the request id reflected so the test can assert id-echo), anything
     * else → MethodNotFound.
     */
-  private val handler: DaemonSocketServer.Handler = {
+  private val handler: DaemonSocketServer.Handler = DaemonSocketServer.Handler.unary {
     case req if req.method == "status" =>
       IO.pure(JsonRpc.Response.ok(req.id, ujson.Obj("status" -> "ok", "echoedId" -> ujson.Num(req.id.toDouble))))
     case req =>

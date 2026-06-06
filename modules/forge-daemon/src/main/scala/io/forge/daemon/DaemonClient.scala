@@ -54,3 +54,31 @@ object DaemonClient:
       if attempts <= 1 then IO.raiseError(err)
       else IO.sleep(delay) *> callWithRetry(socketPath, request, attempts - 1, delay, sockets)
     }
+
+  /** Open a connection, send a streaming `subscribe` request once, and emit each successive response line the daemon
+    * pushes back as a [[JsonRpc.Response]] (Task 4.1.4 — the aggregated per-worker feed). The stream ends when the
+    * daemon closes the connection (clean shutdown) or the consumer cancels (e.g. `.take(n)` / surrounding fiber
+    * cancellation), which releases the socket and, server-side, the daemon's feed subscription. A malformed response
+    * line is surfaced as a failure response carrying the request id rather than aborting the stream.
+    */
+  def subscribe(
+      socketPath: os.Path,
+      request: JsonRpc.Request,
+      sockets: UnixSockets[IO] = UnixSockets.forIO
+  ): Stream[IO, JsonRpc.Response] =
+    Stream.resource(sockets.client(UnixSocketAddress(socketPath.toString))).flatMap { socket =>
+      val send = Stream
+        .emit(JsonRpc.encodeRequest(request) + "\n")
+        .through(text.utf8.encode)
+        .through(socket.writes)
+      val receive = socket.reads
+        .through(text.utf8.decode)
+        .through(text.lines)
+        .filter(_.nonEmpty)
+        .map(line =>
+          JsonRpc.decodeResponse(line) match
+            case Right(resp) => resp
+            case Left(err) => JsonRpc.Response.fail(request.id, err)
+        )
+      send.drain ++ receive
+    }

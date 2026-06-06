@@ -2,14 +2,19 @@ package io.forge.daemon
 
 import cats.effect.IO
 import cats.effect.kernel.Deferred
+import fs2.Stream
+import io.forge.core.FeatureId
+import io.forge.instance.InstanceEvent
 
 import scala.concurrent.duration.*
 
-/** Phase-4 §6.1/§6.3 — the long-running daemon's serving loop (Slice 4.1, Task 4.1.3).
+/** Phase-4 §6.1/§6.3 — the long-running daemon's serving loop (Slice 4.1, Tasks 4.1.3 / 4.1.4).
   *
   * Pairs a [[DaemonState]] (the rebuilt-from-log snapshot, §6.4) with the [[DaemonSocketServer]] transport: [[handler]]
-  * answers the 4.1 control surface (`status` → the snapshot, `shutdown` → signal a clean stop) and
-  * [[serveUntilShutdown]] binds the instance socket until the shutdown signal fires.
+  * answers the 4.1 control + worker surface (`status` → the snapshot; `register-worker` / `worker-status` /
+  * `worker-event` → single-writer appends, B3 event export; `subscribe` → the live aggregated per-worker feed;
+  * `shutdown` → signal a clean stop) and [[serveUntilShutdown]] binds the instance socket until the shutdown signal
+  * fires.
   *
   * The supervisor *lifecycle* — acquiring the instance lock (the §13 [[io.forge.app.lock.FileProcessLock]] lives in
   * `forge-app`), resolving the instance, and the `forge daemon` CLI — composes in `forge-app` around this loop; this
@@ -24,18 +29,99 @@ object Daemon:
     */
   val ShutdownGrace: FiniteDuration = 250.millis
 
-  /** Build the RPC handler for the 4.1.3 control surface. `status` returns the live snapshot; `shutdown` acks then
-    * (after [[ShutdownGrace]], on a forked fiber) completes `shutdown`, which [[serveUntilShutdown]] watches.
+  /** Build the RPC handler for the 4.1.3/4.1.4 control + worker surface.
+    *
+    *   - `status` → the live snapshot (unary).
+    *   - `register-worker` (`{workerId, repo, feature}`) / `worker-status` (`{workerId, status}`) / `worker-event`
+    *     (`{workerId, event}`) → a single-writer [[DaemonState.record]] append (B3 event export), unary. Malformed
+    *     params answer with `InvalidParams` rather than tearing down the connection.
+    *   - `subscribe` → the live aggregated per-worker feed ([[DaemonState.subscribe]]), one response line per event,
+    *     seeded with the rebuilt exported-feed tail. Long-lived: the connection stays open until the client disconnects
+    *     or the daemon shuts down.
+    *   - `shutdown` → ack, then (after [[ShutdownGrace]], on a forked fiber) complete `shutdown`, which
+    *     [[serveUntilShutdown]] watches.
     */
   def handler(state: DaemonState, shutdown: Deferred[IO, Unit]): DaemonSocketServer.Handler = {
     case req if req.method == "status" =>
-      state.snapshot.map(s => JsonRpc.Response.ok(req.id, s.toStatusJson))
+      Stream.eval(state.snapshot.map(s => JsonRpc.Response.ok(req.id, s.toStatusJson)))
+    case req if req.method == "register-worker" =>
+      Stream.eval(registerWorker(state, req))
+    case req if req.method == "worker-status" =>
+      Stream.eval(workerStatus(state, req))
+    case req if req.method == "worker-event" =>
+      Stream.eval(workerEvent(state, req))
+    case req if req.method == "subscribe" =>
+      state.subscribe().map(event => JsonRpc.Response.ok(req.id, eventWire(event)))
     case req if req.method == "shutdown" =>
-      (IO.sleep(ShutdownGrace) *> shutdown.complete(()).void).start
-        .as(JsonRpc.Response.ok(req.id, ujson.Obj("stopped" -> ujson.Bool(true))))
+      Stream.eval(
+        (IO.sleep(ShutdownGrace) *> shutdown.complete(()).void).start
+          .as(JsonRpc.Response.ok(req.id, ujson.Obj("stopped" -> ujson.Bool(true))))
+      )
     case req =>
-      IO.pure(JsonRpc.Response.fail(req.id, JsonRpc.RpcError.methodNotFound(req.method)))
+      Stream.emit(JsonRpc.Response.fail(req.id, JsonRpc.RpcError.methodNotFound(req.method)))
   }
+
+  // --- worker control methods (single-writer appends to the instance log) ------
+
+  /** `register-worker` (`{workerId, repo, feature}`) → a `worker.registered` append seeding a fresh worker record. */
+  private def registerWorker(state: DaemonState, req: JsonRpc.Request): IO[JsonRpc.Response] =
+    val parsed =
+      for
+        workerId <- strField(req.params, "workerId")
+        repo <- strField(req.params, "repo")
+        featureRaw <- strField(req.params, "feature")
+        feature <- FeatureId.fromString(featureRaw).left.map(reason => s"invalid 'feature': $reason")
+      yield InstanceEvent.WorkerRegistered(workerId, repo, feature)
+    recordOrReject(state, req, parsed) {
+      case InstanceEvent.WorkerRegistered(workerId, _, _) =>
+        ujson.Obj("registered" -> ujson.Bool(true), "workerId" -> ujson.Str(workerId))
+      case _ => ujson.Obj("registered" -> ujson.Bool(true))
+    }
+
+  /** `worker-status` (`{workerId, status}`) → a `worker.status` append mirroring the worker's latest FSM-state name. */
+  private def workerStatus(state: DaemonState, req: JsonRpc.Request): IO[JsonRpc.Response] =
+    val parsed =
+      for
+        workerId <- strField(req.params, "workerId")
+        status <- strField(req.params, "status")
+      yield InstanceEvent.WorkerStatus(workerId, status)
+    recordOrReject(state, req, parsed)(_ => ujson.Obj("accepted" -> ujson.Bool(true)))
+
+  /** `worker-event` (`{workerId, event}`) → a `worker.event` append carrying one exported per-feature event verbatim.
+    */
+  private def workerEvent(state: DaemonState, req: JsonRpc.Request): IO[JsonRpc.Response] =
+    val parsed =
+      for
+        workerId <- strField(req.params, "workerId")
+        event <- field(req.params, "event")
+      yield InstanceEvent.WorkerEvent(workerId, event)
+    recordOrReject(state, req, parsed)(_ => ujson.Obj("accepted" -> ujson.Bool(true)))
+
+  /** Record a parsed event (single-writer append) and answer `ok(result(event))`, or answer `InvalidParams` when the
+    * params failed to parse — a malformed worker request must not crash the connection.
+    */
+  private def recordOrReject(state: DaemonState, req: JsonRpc.Request, parsed: Either[String, InstanceEvent])(
+      result: InstanceEvent => ujson.Value
+  ): IO[JsonRpc.Response] =
+    parsed match
+      case Left(detail) => IO.pure(JsonRpc.Response.fail(req.id, JsonRpc.RpcError.invalidParams(detail)))
+      case Right(event) => state.record(event).as(JsonRpc.Response.ok(req.id, result(event)))
+
+  /** The on-the-wire JSON for one streamed feed event: `{kind, payload}` (the same open-`kind` shape the instance log
+    * persists, via [[InstanceEvent.kindOf]] / [[InstanceEvent.payloadOf]]), so a subscriber decodes it the same way the
+    * log fold does.
+    */
+  private def eventWire(event: InstanceEvent): ujson.Value =
+    ujson.Obj("kind" -> ujson.Str(InstanceEvent.kindOf(event)), "payload" -> InstanceEvent.payloadOf(event))
+
+  /** Extract a required string field from a JSON-RPC `params` object, or a human reason for an `InvalidParams` error.
+    */
+  private def strField(params: ujson.Value, field: String): Either[String, String] =
+    params.objOpt.flatMap(_.get(field)).flatMap(_.strOpt).toRight(s"missing or non-string '$field'")
+
+  /** Extract a required (arbitrary-typed) field from a JSON-RPC `params` object, or a reason for `InvalidParams`. */
+  private def field(params: ujson.Value, name: String): Either[String, ujson.Value] =
+    params.objOpt.flatMap(_.get(name)).toRight(s"missing '$name'")
 
   /** Serve the instance socket until `shutdown` completes, then release it. Completes normally on shutdown; cancelling
     * the surrounding fiber (e.g. SIGINT under `IOApp`) also tears the socket down via the server resource's finalizer.
