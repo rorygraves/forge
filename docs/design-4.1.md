@@ -27,8 +27,9 @@
 > restart by rebuilding its whole view from the instance log** — the §6.4 contract
 > every later slice sits on.
 >
-> **Status:** 🚧 open — Task 4.1.1 (IPC spike) is landing first per CLAUDE.md "run
-> code earlier". Tasks 4.1.2–4.1.5 open.
+> **Status:** 🚧 open — Tasks 4.1.1 (IPC spike) and 4.1.2 (durability core) ✅
+> landed. Tasks 4.1.3 (supervisor), 4.1.4 (worker subscribe), 4.1.5 (crash-recovery
+> + close-out) open.
 
 ---
 
@@ -99,7 +100,7 @@ a "worker" in 4.1 is an instance-store record + an exported event feed.
   first — it is the transport every later daemon task sits on, and it is the
   riskiest new contract.*
 
-- [ ] **Task 4.1.2 — instance action log + rebuildable instance state cache (O8 /
+- [x] **Task 4.1.2 — instance action log + rebuildable instance state cache (O8 /
   §6.4 durability core).** An `InstanceEvent` ADT (the minimal 4.1 set —
   `worker.registered`, `worker.status`, `worker.event` for an exported
   per-feature event, plus `daemon.started`), persisted as instance-log records
@@ -174,6 +175,30 @@ a "worker" in 4.1 is an instance-store record + an exported event feed.
   unknown method returns a JSON-RPC `MethodNotFound`, and two requests share one
   connection. `forge-daemon` 3, `forge-instance` 15 (unchanged), full `sbt test`
   green, `scalafmtCheckAll` clean, smell sweep passes. Tasks 4.1.2–4.1.5 open.
+- **2026-06-06** — **Task 4.1.2 (durability core) landed.** The O8 source-of-truth,
+  all in `forge-instance` (instance-scoped durability; `forge-daemon dependsOn
+  forge-instance`). `InstanceEvent` — the sealed minimal-4.1 ADT (`daemon.started`,
+  `worker.registered`, `worker.status`, `worker.event`) with an open-`kind` codec
+  (`kindOf`/`payloadOf`/`toDraft`/`decode`) so unknown future `kind`s (`budget.*`,
+  4.3) decode to a fold no-op rather than a schema break. `InstanceLogRecord{seq,
+  @key("ts") at, kind, payload}` + `InstanceEventDraft` — the instance-scoped
+  `Action`/`ActionDraft` skeleton (no `feature`/`piece`/`actor`/`role`).
+  `FileInstanceLog` over `Instance.instanceLog` — append-only NDJSON,
+  `CREATE|APPEND|SYNC`, **one** `Mutex[IO]` + a single `nextSeq` `Ref` (single-writer
+  daemon, §6.3.1 — no per-feature fan-out), and the `FileActionLog` partial-trailing-
+  line repair contract (truncate to the last `\n`, append a `harness.error`
+  `log_truncated` marker the fold skips). `RebuildInstanceState.fold(records):
+  InstanceState` — the pure projection (boot count + per-worker
+  upsert/latest-status/exported-feed tail; status/event for an unregistered worker
+  dropped; a `toStatusJson` snapshot for 4.1.3). `FileInstanceStateCache` over
+  `Instance.instanceStateFile` — atomic temp + `ATOMIC_MOVE` + parent fsync (the
+  `FileStateCache` idiom), tolerant `load` (missing / malformed / stale-schema →
+  `None`, never authoritative per §6.4), `verifyAgainstLog` rebuilding from the
+  canonical log (`Consistent`/`Rewritten`). Three suites mirroring
+  `FileActionLogSuite` / `RebuildStateSuite` / `FileStateCacheSuite`: `forge-instance`
+  15 → 43, full `sbt test` green, `scalafmtCheckAll` clean, smell sweep passes. Tasks
+  4.1.3 (supervisor), 4.1.4 (worker subscribe), 4.1.5 (crash-recovery + close-out)
+  open.
 
 ---
 
