@@ -75,3 +75,21 @@ object InstanceName:
     fromString(s).fold(msg => throw IllegalArgumentException(msg), identity)
 
   extension (n: InstanceName) def value: String = n
+
+opaque type WorkstreamId = String
+object WorkstreamId:
+  /** Phase-4 §5 workstream id (`forge-design-2.0.md` §5). Same shape as [[InstanceName]] / [[FeatureId]] — a lowercase
+    * letter then up to 49 chars of `[a-z0-9-]` — so it is a safe path component (`workstreams/<id>/`) and a
+    * collision-resistant key in the instance log. The daemon allocates these (`ws-1`, `ws-2`, …) as the sole writer of
+    * the instance state; the pattern accepts any hand-given id of the same shape.
+    */
+  val Pattern: Regex = "^[a-z][a-z0-9-]{0,49}$".r
+
+  def fromString(s: String): Either[String, WorkstreamId] =
+    if Pattern.matches(s) then Right(s)
+    else Left(s"invalid WorkstreamId '$s' (must match ${Pattern.regex})")
+
+  def apply(s: String): WorkstreamId =
+    fromString(s).fold(msg => throw IllegalArgumentException(msg), identity)
+
+  extension (id: WorkstreamId) def value: String = id

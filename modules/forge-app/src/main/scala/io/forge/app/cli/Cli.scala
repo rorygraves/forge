@@ -51,6 +51,15 @@ enum CommandClass:
     */
   case Worker
 
+  /** `workstream new | workstream list | worker list` — Phase-4 §5 operator-facing workstream/worker **client**
+    * commands (Slice 4.2, Task 4.2.4). Instance-scoped like [[Daemon]] (no [[io.forge.app.config.ForgeConfig]], no
+    * connector, no per-checkout lock); each is a JSON-RPC client round-trip to a running daemon (`create-workstream` /
+    * `status`), since the daemon is the sole writer of the instance state (§6.3.1). `worker list` rides here (rather
+    * than under the hidden flag-driven [[Worker]] process command) because it is a sibling *read* of the same daemon
+    * instance state. Parsed via [[CliParser.parseWorkstream]] into a [[WorkstreamCommand]].
+    */
+  case Workstream
+
 /** Phase-1 parse result: enough to route resource setup, with per-command args deferred to [[CliParser.phase2]]. */
 final case class Invocation(
     repoRoot: Option[String],
@@ -106,6 +115,25 @@ final case class WorkerCommand(
     feature: FeatureId
 )
 
+/** Parsed Phase-4 operator workstream/worker client command ([[CommandClass.Workstream]], Task 4.2.4). Each carries an
+  * **optional** target instance (`Some` from `--instance <name>`, else the sole-instance fallback resolved by the
+  * handler), exactly like [[DaemonCommand]]. These are JSON-RPC client calls to a running daemon, not direct state
+  * mutations (the daemon is the instance log's single writer, §6.3.1).
+  */
+sealed trait WorkstreamCommand extends Product with Serializable:
+  def instance: Option[InstanceName]
+object WorkstreamCommand:
+  /** `forge workstream new --goal <text>` — create a `Planning` workstream (a `create-workstream` RPC). */
+  final case class New(instance: Option[InstanceName], goal: String) extends WorkstreamCommand
+
+  /** `forge workstream list` — list the instance's workstreams + their `attention` projection (a `status` RPC). */
+  final case class List(instance: Option[InstanceName]) extends WorkstreamCommand
+
+  /** `forge worker list` — list the instance's workers (a `status` RPC). Rides on this command family as a sibling read
+    * of the same daemon instance state.
+    */
+  final case class WorkerList(instance: Option[InstanceName]) extends WorkstreamCommand
+
 /** Argv parse failures. All map to `EX_USAGE` (exit 64) at the `Main` boundary. */
 sealed trait CliError extends Product with Serializable:
   def message: String
@@ -115,7 +143,7 @@ object CliError:
     def message: String =
       "no command given; expected one of: " +
         "new, spec, run, status, resume, reconcile, refresh-cache, abandon, profile, rebuild-state, unlock, tail, " +
-        "stats, tui, init-instance, add-repo, list-repos, daemon"
+        "stats, tui, init-instance, add-repo, list-repos, daemon, workstream, worker list"
 
   final case class UnknownCommand(name: String) extends CliError:
     def message: String = s"unknown command '$name'"
@@ -156,6 +184,15 @@ object CliError:
   final case class MissingWorkerFlag(flag: String) extends CliError:
     def message: String = s"'worker' requires the $flag flag"
 
+  case object MissingWorkstreamSubcommand extends CliError:
+    def message: String = "'workstream' requires a subcommand: new or list"
+
+  final case class UnknownWorkstreamSubcommand(name: String) extends CliError:
+    def message: String = s"unknown workstream subcommand '$name'; expected one of: new, list"
+
+  case object UnknownWorkerSubcommand extends CliError:
+    def message: String = "'worker' is daemon-internal; the only operator form is `forge worker list`"
+
 object CliParser:
 
   // --- phase 1 ---------------------------------------------------------------
@@ -165,7 +202,7 @@ object CliParser:
       remaining match
         case Nil => Left(CliError.NoCommand)
         case name :: rest =>
-          commandClassOf(name).map { (cls, needsConnector) =>
+          commandClassOf(name, rest).map { (cls, needsConnector) =>
             Invocation(repoRoot, name, cls, needsConnector, rest.toVector)
           }
     }
@@ -180,7 +217,7 @@ object CliParser:
       case "--repo-root" :: _ => Left(CliError.MissingFlagValue("--repo-root"))
       case other :: tail => extractRepoRoot(tail).map((rr, rest) => (rr, other :: rest))
 
-  private def commandClassOf(name: String): Either[CliError, (CommandClass, Boolean)] =
+  private def commandClassOf(name: String, rest: List[String]): Either[CliError, (CommandClass, Boolean)] =
     name match
       case "new" | "spec" | "run" | "resume" | "reconcile" => Right((CommandClass.StateChanging, true))
       case "profile" => Right((CommandClass.StateChanging, true))
@@ -189,8 +226,11 @@ object CliParser:
       case "unlock" => Right((CommandClass.UnlockForce, false))
       case "init-instance" | "add-repo" | "list-repos" => Right((CommandClass.Instance, false))
       case "daemon" => Right((CommandClass.Daemon, false))
-      // Hidden, daemon-internal (Task 4.2.1); needsConnector is false for the spike body (the real loop in 4.2.3 builds
-      // its own connector under the worker's re-rooted paths, not via the Main asset-install path).
+      case "workstream" => Right((CommandClass.Workstream, false))
+      // `worker list` is the operator client read (Task 4.2.4); the bare/flag form is the hidden daemon-spawned process
+      // (Task 4.2.1). needsConnector is false for both — the real loop builds its own connector under the worker's
+      // re-rooted paths (4.2.3), not via the Main asset-install path.
+      case "worker" if rest.find(t => !t.startsWith("--")).contains("list") => Right((CommandClass.Workstream, false))
       case "worker" => Right((CommandClass.Worker, false))
       case other => Left(CliError.UnknownCommand(other))
 
@@ -342,6 +382,27 @@ object CliParser:
       featureRaw <- requiredFlag(rest, "--feature")
       feature <- FeatureId.fromString(featureRaw).left.map(CliError.InvalidFeatureId(featureRaw, _))
     yield WorkerCommand(instance, workerId, repo, feature)
+
+  /** Parse a [[CommandClass.Workstream]] invocation into a [[WorkstreamCommand]] (Task 4.2.4). The sixth parse entry
+    * point. `name` is `"workstream"` (subcommands `new` / `list`) or `"worker"` (only `list` reaches here — the bare
+    * flag form routed to [[CommandClass.Worker]] in phase 1). `--instance` is pulled out wherever it appears; the
+    * leading positional names the subcommand. `workstream new` requires a `--goal <text>`. Usage errors surface as
+    * [[CliError]] → `EX_USAGE` (exit 64) at the `Main` boundary.
+    */
+  def parseWorkstream(name: String, rest: Vector[String]): Either[CliError, WorkstreamCommand] =
+    extractInstance(rest).flatMap { (instance, remaining) =>
+      name match
+        case "worker" =>
+          firstPositional(remaining) match
+            case Some("list") => Right(WorkstreamCommand.WorkerList(instance))
+            case _ => Left(CliError.UnknownWorkerSubcommand)
+        case _ =>
+          firstPositional(remaining) match
+            case None => Left(CliError.MissingWorkstreamSubcommand)
+            case Some("list") => Right(WorkstreamCommand.List(instance))
+            case Some("new") => flagValue(remaining, "--goal").map(WorkstreamCommand.New(instance, _))
+            case Some(other) => Left(CliError.UnknownWorkstreamSubcommand(other))
+    }
 
   /** A required `--flag <value>`: absent ⇒ [[CliError.MissingWorkerFlag]]; present-but-valueless (end of args or
     * another `--flag` next) ⇒ [[CliError.MissingFlagValue]].

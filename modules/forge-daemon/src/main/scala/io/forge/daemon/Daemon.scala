@@ -3,8 +3,8 @@ package io.forge.daemon
 import cats.effect.IO
 import cats.effect.kernel.Deferred
 import fs2.Stream
-import io.forge.core.FeatureId
-import io.forge.instance.InstanceEvent
+import io.forge.core.{FeatureId, WorkstreamId}
+import io.forge.instance.{InstanceEvent, InstanceState}
 
 import scala.concurrent.duration.*
 
@@ -35,6 +35,9 @@ object Daemon:
     *   - `register-worker` (`{workerId, repo, feature}`) / `worker-status` (`{workerId, status}`) / `worker-event`
     *     (`{workerId, event}`) → a single-writer [[DaemonState.record]] append (B3 event export), unary. Malformed
     *     params answer with `InvalidParams` rather than tearing down the connection.
+    *   - `create-workstream` (`{goal}`) → allocate a [[WorkstreamId]] and append a `workstream.created` (Task 4.2.4),
+    *     answering `{workstreamId, goal}`. The `status` snapshot then reflects the new workstream + its `attention`
+    *     projection; `forge workstream list` / `worker list` render it client-side.
     *   - `subscribe` → the live aggregated per-worker feed ([[DaemonState.subscribe]]), one response line per event,
     *     seeded with the rebuilt exported-feed tail. Long-lived: the connection stays open until the client disconnects
     *     or the daemon shuts down.
@@ -50,6 +53,8 @@ object Daemon:
       Stream.eval(workerStatus(state, req))
     case req if req.method == "worker-event" =>
       Stream.eval(workerEvent(state, req))
+    case req if req.method == "create-workstream" =>
+      Stream.eval(createWorkstream(state, req))
     case req if req.method == "subscribe" =>
       state.subscribe().map(event => JsonRpc.Response.ok(req.id, eventWire(event)))
     case req if req.method == "shutdown" =>
@@ -86,6 +91,36 @@ object Daemon:
         status <- strField(req.params, "status")
       yield InstanceEvent.WorkerStatus(workerId, status)
     recordOrReject(state, req, parsed)(_ => ujson.Obj("accepted" -> ujson.Bool(true)))
+
+  /** `create-workstream` (`{goal}`) → allocate the next [[WorkstreamId]] and append a `workstream.created` seeding a
+    * `Planning` workstream; answers `{workstreamId, goal}`. The id is allocated from the current snapshot
+    * ([[nextWorkstreamId]]); concurrency-hardening of allocation (the B2 reservation protocol's discipline) is 4.3 —
+    * workstream creation here is operator-driven and serialised in practice by the single-writer log.
+    */
+  private def createWorkstream(state: DaemonState, req: JsonRpc.Request): IO[JsonRpc.Response] =
+    strField(req.params, "goal") match
+      case Left(detail) => IO.pure(JsonRpc.Response.fail(req.id, JsonRpc.RpcError.invalidParams(detail)))
+      case Right(goal) =>
+        state.snapshot.flatMap { snap =>
+          val id = nextWorkstreamId(snap)
+          state
+            .record(InstanceEvent.WorkstreamCreated(id, goal))
+            .as(
+              JsonRpc.Response
+                .ok(req.id, ujson.Obj("workstreamId" -> ujson.Str(id.value), "goal" -> ujson.Str(goal)))
+            )
+        }
+
+  /** The next `ws-<n>` id: one past the largest numeric suffix already in use, or `ws-1` for the first. Max-suffix (not
+    * count) so an id is never reused even if a workstream is later abandoned.
+    */
+  private[daemon] def nextWorkstreamId(state: InstanceState): WorkstreamId =
+    val used = state.workstreams.flatMap { ws =>
+      ws.id.value match
+        case s"ws-$n" => n.toIntOption
+        case _ => None
+    }
+    WorkstreamId(s"ws-${(used.maxOption.getOrElse(0)) + 1}")
 
   /** `worker-event` (`{workerId, event}`) → a `worker.event` append carrying one exported per-feature event verbatim.
     */

@@ -153,7 +153,7 @@ credential broker (all 4.3).
   export is a read-side tail, not a second writer.) The daemon assigns the worker
   its clone + feature at spawn (4.2.5).
 
-- [ ] **Task 4.2.4 — workstream model + instance-log events + CLI.** The
+- [x] **Task 4.2.4 — workstream model + instance-log events + CLI.** The
   `Workstream` coordination object (§5): `id`, `goal`, scalar lifecycle
   `Planning → Active → Done/Abandoned`, an **ordering** over its workers, and a
   derived `attention` projection (which workers need a human + why — NHI / a
@@ -274,6 +274,35 @@ credential broker (all 4.3).
   absent instance, no daemon, parse). `forge-app` now 498 unit tests (+10 this task), full `sbt test` green,
   `forge-it` Test/compile green, `scalafmtCheckAll` clean, ForgePaths smell sweep passes.
   Tasks 4.2.4–4.2.6 open.
+- **2026-06-06** — **Task 4.2.4 (workstream model + instance-log events + CLI) landed.**
+  (1) **`WorkstreamId`** opaque type (forge-core `Ids` + `Json` codec, same lowercase-path-safe
+  shape as `InstanceName`). (2) **`Workstream` model** (forge-instance): the §5 coordination
+  object (`id`, `goal`, scalar `WorkstreamStatus` `Planning → Active → Done/Abandoned`, a
+  worker-id **ordering**) + the derived **`attention`** projection (`AttentionReason` =
+  NHI / driver-question / merge-gate, mapped from a worker's exported FSM-state name via
+  `AttentionReason.forStatus`, **never** a lifecycle state — §5). (3) **Four new `InstanceEvent`
+  variants** (`workstream.created`/`workstream.status`/`worker.spawned`/`worker.exited`) with
+  `kindOf`/`payloadOf`/`decode` (an unknown status name decodes to `None`, forward-compat skip);
+  `WorkerRecord` gained `workstreamId`/`checkoutRoot`/`pid`/`exitCode` (+ a `live` =
+  pid-and-no-exit helper) and `InstanceState` gained `workstreams`, both folded by
+  `RebuildInstanceState` (spawn upserts the worker + appends to the workstream ordering; a re-spawn
+  clears a prior exit; `toStatusJson` now carries workstreams + per-worker spawn fields + the
+  attention projection). Cache `schemaVersion` 1 → **2** (incompatible shape; a v1 cache fails the
+  version check and rebuilds from the forward-compatible log). (4) **Daemon RPC**
+  `create-workstream` (`{goal}` → daemon allocates `ws-<n>` = max-suffix+1, records
+  `workstream.created`, answers `{workstreamId, goal}`); the `status` snapshot now serves
+  workstreams + attention. (5) **CLI** `forge workstream new --goal | workstream list | worker
+  list` — a new `CommandClass.Workstream` (instance-scoped client RPCs, no config/lock); `worker
+  list` disambiguated from the hidden flag-driven daemon-spawned `worker` in phase 1 (positional
+  `list` ⇒ Workstream class), parsed via `parseWorkstream` into `WorkstreamCommand`, handled by
+  `WorkstreamCommands` over `DaemonClient` (degrades to exit 1 with a diagnostic when no daemon is
+  running, never a crash). The daemon-side **emission** of `worker.spawned`/`worker.exited` + the
+  workstream-activation lifecycle is the supervisor's job (Task 4.2.5); 4.2.4 lands the model,
+  events, fold, and the surface they ride on. Tests: `RebuildInstanceStateSuite` +11,
+  `CliParserSuite` +7, new `DaemonWorkstreamSuite` (4 — RPC allocation / InvalidParams / attention /
+  durable-rebuild) and `WorkstreamCommandsSuite` (4 — live-daemon new→list→worker-list + the
+  no-daemon / unknown-instance exit-1 degrades). Full `sbt test` green, `forge-it` compile green,
+  `scalafmtCheckAll` clean, ForgePaths smell sweep passes. Tasks 4.2.5–4.2.6 open.
 
 ---
 

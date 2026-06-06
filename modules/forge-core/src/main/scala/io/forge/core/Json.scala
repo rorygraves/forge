@@ -22,6 +22,7 @@ object Json:
   given ReadWriter[BranchName] = readwriter[String].bimap(_.value, BranchName(_))
   given ReadWriter[Sha] = readwriter[String].bimap(_.value, Sha(_))
   given ReadWriter[InstanceName] = readwriter[String].bimap(_.value, InstanceName(_))
+  given ReadWriter[WorkstreamId] = readwriter[String].bimap(_.value, WorkstreamId(_))
 
   /** uPickle's default `ReadWriter[BigDecimal]` uses JSON strings. Forge's config files (e.g. `prices.json`, §7.10(b))
     * write monetary values as unquoted numbers, matching every other config convention. Going via `Double` is exact for

@@ -13,7 +13,8 @@ import io.forge.app.command.{
   ReadOnlyContext,
   StateChangingContext,
   UnlockForceContext,
-  WorkerCommands
+  WorkerCommands,
+  WorkstreamCommands
 }
 import io.forge.app.config.{ConfigError, ForgeConfig, ForgeConfigLoader}
 import io.forge.app.lock.{FileProcessLock, LockAcquireResult, LockMetadata}
@@ -69,6 +70,7 @@ object Main extends IOApp:
       case CommandClass.Instance => runInstance(invocation, paths)
       case CommandClass.Daemon => runDaemon(invocation, paths)
       case CommandClass.Worker => runWorker(invocation, paths)
+      case CommandClass.Workstream => runWorkstream(invocation, paths)
 
   // --- step 2: repo-root ----------------------------------------------------
 
@@ -127,6 +129,17 @@ object Main extends IOApp:
     CliParser.parseWorker(invocation.rest) match
       case Left(err) => usageError(err)
       case Right(command) => WorkerCommands.run(paths.home, command)
+
+  // --- workstream: operator client commands (Task 4.2.4) --------------------
+
+  /** Phase-4 operator workstream/worker client commands (`workstream new | list`, `worker list`). Instance-scoped like
+    * the daemon commands at the routing layer — no config / assets / per-checkout lock; only `paths.home` matters,
+    * `repoRoot` is irrelevant. Each is a JSON-RPC client call to a running daemon ([[WorkstreamCommands]]).
+    */
+  private def runWorkstream(invocation: Invocation, paths: ForgePaths): IO[ExitCode] =
+    CliParser.parseWorkstream(invocation.name, invocation.rest) match
+      case Left(err) => usageError(err)
+      case Right(command) => WorkstreamCommands.run(paths.home, command)
 
   // --- read-only: config, no lock -------------------------------------------
 

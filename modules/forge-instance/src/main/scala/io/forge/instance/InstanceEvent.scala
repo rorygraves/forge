@@ -1,6 +1,6 @@
 package io.forge.instance
 
-import io.forge.core.FeatureId
+import io.forge.core.{FeatureId, WorkstreamId}
 import io.forge.core.Json.given
 
 import java.time.Instant
@@ -49,6 +49,36 @@ enum InstanceEvent:
     */
   case WorkerEvent(workerId: String, event: ujson.Value)
 
+  /** A workstream coordination object was created (`workstream.created`, §5, Task 4.2.4): its daemon-allocated id and
+    * its human `goal`. Seeds a fresh [[Workstream]] in `Planning` in the rebuilt state.
+    */
+  case WorkstreamCreated(workstreamId: WorkstreamId, goal: String)
+
+  /** A workstream's scalar lifecycle advanced (`workstream.status`, §5): `Planning → Active → Done/Abandoned`. Carried
+    * as a [[WorkstreamStatus]] (serialised by name); an unknown name decodes to `None` (skip), like an unknown `kind`.
+    */
+  case WorkstreamStatusChanged(workstreamId: WorkstreamId, status: WorkstreamStatus)
+
+  /** The daemon spawned a worker **process** into a workstream (`worker.spawned`, §6.2, Task 4.2.4 — emitted by the
+    * supervisor in 4.2.5). Unlike [[WorkerRegistered]] (the worker phoning home), this is the daemon-side record: it
+    * knows the worker's `workstreamId`, its isolated `checkoutRoot` (the clone, O10), and the child `pid` before the
+    * worker connects. Seeds/updates the [[WorkerRecord]] with those daemon-known fields and appends the worker to the
+    * workstream's ordering.
+    */
+  case WorkerSpawned(
+      workerId: String,
+      workstreamId: WorkstreamId,
+      repo: String,
+      feature: FeatureId,
+      checkoutRoot: String,
+      pid: Long
+  )
+
+  /** A spawned worker process exited (`worker.exited`, §6.2/§6.4): its `exitCode`. Clears the worker's liveness so the
+    * supervisor's restart reconciliation (4.2.5) treats it as terminated rather than re-probing its pid.
+    */
+  case WorkerExited(workerId: String, exitCode: Int)
+
 object InstanceEvent:
 
   // --- well-known `kind` discriminators (the open string the on-disk record carries) ---
@@ -56,6 +86,10 @@ object InstanceEvent:
   val WorkerRegisteredKind: String = "worker.registered"
   val WorkerStatusKind: String = "worker.status"
   val WorkerEventKind: String = "worker.event"
+  val WorkstreamCreatedKind: String = "workstream.created"
+  val WorkstreamStatusKind: String = "workstream.status"
+  val WorkerSpawnedKind: String = "worker.spawned"
+  val WorkerExitedKind: String = "worker.exited"
 
   /** The on-disk `kind` for an event. */
   def kindOf(e: InstanceEvent): String = e match
@@ -63,6 +97,10 @@ object InstanceEvent:
     case _: WorkerRegistered => WorkerRegisteredKind
     case _: WorkerStatus => WorkerStatusKind
     case _: WorkerEvent => WorkerEventKind
+    case _: WorkstreamCreated => WorkstreamCreatedKind
+    case _: WorkstreamStatusChanged => WorkstreamStatusKind
+    case _: WorkerSpawned => WorkerSpawnedKind
+    case _: WorkerExited => WorkerExitedKind
 
   /** The event-specific payload (the `payload` field of [[InstanceLogRecord]]). Mirrors how `Action.payload` carries
     * per-`kind` data as a raw JSON tree rather than a closed schema.
@@ -76,6 +114,21 @@ object InstanceEvent:
       ujson.Obj("workerId" -> ujson.Str(workerId), "status" -> ujson.Str(status))
     case WorkerEvent(workerId, event) =>
       ujson.Obj("workerId" -> ujson.Str(workerId), "event" -> event)
+    case WorkstreamCreated(workstreamId, goal) =>
+      ujson.Obj("workstreamId" -> ujson.Str(workstreamId.value), "goal" -> ujson.Str(goal))
+    case WorkstreamStatusChanged(workstreamId, status) =>
+      ujson.Obj("workstreamId" -> ujson.Str(workstreamId.value), "status" -> ujson.Str(WorkstreamStatus.name(status)))
+    case WorkerSpawned(workerId, workstreamId, repo, feature, checkoutRoot, pid) =>
+      ujson.Obj(
+        "workerId" -> ujson.Str(workerId),
+        "workstreamId" -> ujson.Str(workstreamId.value),
+        "repo" -> ujson.Str(repo),
+        "feature" -> ujson.Str(feature.value),
+        "checkoutRoot" -> ujson.Str(checkoutRoot),
+        "pid" -> ujson.Num(pid.toDouble)
+      )
+    case WorkerExited(workerId, exitCode) =>
+      ujson.Obj("workerId" -> ujson.Str(workerId), "exitCode" -> ujson.Num(exitCode.toDouble))
 
   /** This event as an unstamped [[InstanceEventDraft]] — the daemon hands a draft to `FileInstanceLog.append`, which
     * stamps it with the next `seq` and a write-time `at` into a durable [[InstanceLogRecord]].
@@ -91,6 +144,8 @@ object InstanceEvent:
   def decode(kind: String, payload: ujson.Value): Option[InstanceEvent] =
     val obj = payload.objOpt
     def str(field: String): Option[String] = obj.flatMap(_.get(field)).flatMap(_.strOpt)
+    def num(field: String): Option[Double] = obj.flatMap(_.get(field)).flatMap(_.numOpt)
+    def workstreamId(field: String): Option[WorkstreamId] = str(field).flatMap(WorkstreamId.fromString(_).toOption)
     kind match
       case DaemonStartedKind =>
         obj.flatMap(_.get("pid")).flatMap(_.numOpt).map(n => DaemonStarted(n.toLong))
@@ -110,6 +165,30 @@ object InstanceEvent:
           workerId <- str("workerId")
           event <- obj.flatMap(_.get("event"))
         yield WorkerEvent(workerId, event)
+      case WorkstreamCreatedKind =>
+        for
+          id <- workstreamId("workstreamId")
+          goal <- str("goal")
+        yield WorkstreamCreated(id, goal)
+      case WorkstreamStatusKind =>
+        for
+          id <- workstreamId("workstreamId")
+          status <- str("status").flatMap(WorkstreamStatus.fromString)
+        yield WorkstreamStatusChanged(id, status)
+      case WorkerSpawnedKind =>
+        for
+          workerId <- str("workerId")
+          id <- workstreamId("workstreamId")
+          repo <- str("repo")
+          feature <- str("feature").flatMap(FeatureId.fromString(_).toOption)
+          checkoutRoot <- str("checkoutRoot")
+          pid <- num("pid")
+        yield WorkerSpawned(workerId, id, repo, feature, checkoutRoot, pid.toLong)
+      case WorkerExitedKind =>
+        for
+          workerId <- str("workerId")
+          exitCode <- num("exitCode")
+        yield WorkerExited(workerId, exitCode.toInt)
       case _ => None
 
 /** §6.4 — one entry in the durable instance log. The instance-scoped analogue of `io.forge.core.log.Action`: the same

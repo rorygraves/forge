@@ -1,6 +1,6 @@
 package io.forge.app.cli
 
-import io.forge.app.cli.DaemonCommand
+import io.forge.app.cli.{DaemonCommand, WorkstreamCommand}
 import io.forge.core.{FeatureId, InstanceName, PieceId}
 import io.forge.git.branch.ForgeCommand
 import io.forge.git.branch.ForgeCommand.ReadOnlyKind
@@ -248,6 +248,67 @@ class CliParserSuite extends munit.FunSuite:
 
   test("parseDaemon rejects a valueless --instance flag") {
     assertEquals(CliParser.parseDaemon(Vector("start", "--instance")), Left(CliError.MissingFlagValue("--instance")))
+  }
+
+  // --- Task 4.2.4: workstream + worker-list commands ------------------------
+
+  test("phase1 classifies workstream and `worker list` as the connector-free Workstream class") {
+    val Right(ws) = CliParser.phase1(List("workstream", "new", "--goal", "g")): @unchecked
+    assertEquals(ws.commandClass, CommandClass.Workstream)
+    assert(!ws.needsConnector)
+    val Right(wl) = CliParser.phase1(List("worker", "list")): @unchecked
+    assertEquals(wl.commandClass, CommandClass.Workstream)
+    // `worker list --instance demo` (flag before the positional is found) still routes to Workstream.
+    val Right(wl2) = CliParser.phase1(List("worker", "list", "--instance", "demo")): @unchecked
+    assertEquals(wl2.commandClass, CommandClass.Workstream)
+  }
+
+  test("phase1 keeps the bare/flag worker form as the hidden Worker class") {
+    val Right(w) = CliParser.phase1(List("worker", "--instance", "demo", "--worker-id", "w1")): @unchecked
+    assertEquals(w.commandClass, CommandClass.Worker)
+  }
+
+  test("parseWorkstream builds new with a --goal, with and without --instance") {
+    assertEquals(
+      CliParser.parseWorkstream("workstream", Vector("new", "--goal", "add auth")),
+      Right(WorkstreamCommand.New(None, "add auth"))
+    )
+    assertEquals(
+      CliParser.parseWorkstream("workstream", Vector("new", "--goal", "add auth", "--instance", "demo")),
+      Right(WorkstreamCommand.New(Some(InstanceName("demo")), "add auth"))
+    )
+  }
+
+  test("parseWorkstream requires a --goal on new") {
+    assertEquals(
+      CliParser.parseWorkstream("workstream", Vector("new")),
+      Left(CliError.MissingFlagValue("--goal"))
+    )
+  }
+
+  test("parseWorkstream builds list, and worker list, with and without --instance") {
+    assertEquals(CliParser.parseWorkstream("workstream", Vector("list")), Right(WorkstreamCommand.List(None)))
+    assertEquals(
+      CliParser.parseWorkstream("workstream", Vector("list", "--instance", "demo")),
+      Right(WorkstreamCommand.List(Some(InstanceName("demo"))))
+    )
+    assertEquals(CliParser.parseWorkstream("worker", Vector("list")), Right(WorkstreamCommand.WorkerList(None)))
+    assertEquals(
+      CliParser.parseWorkstream("worker", Vector("list", "--instance", "demo")),
+      Right(WorkstreamCommand.WorkerList(Some(InstanceName("demo"))))
+    )
+  }
+
+  test("parseWorkstream rejects a missing or unknown workstream subcommand") {
+    assertEquals(CliParser.parseWorkstream("workstream", Vector.empty), Left(CliError.MissingWorkstreamSubcommand))
+    assertEquals(
+      CliParser.parseWorkstream("workstream", Vector("frobnicate")),
+      Left(CliError.UnknownWorkstreamSubcommand("frobnicate"))
+    )
+  }
+
+  test("parseWorkstream rejects a worker subcommand other than list") {
+    assertEquals(CliParser.parseWorkstream("worker", Vector("frob")), Left(CliError.UnknownWorkerSubcommand))
   }
 
   // --- Task 4.0.4: extractInstance on the feature-command path ----------------
