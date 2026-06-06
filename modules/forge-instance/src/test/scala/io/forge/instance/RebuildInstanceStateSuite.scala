@@ -142,7 +142,7 @@ class RebuildInstanceStateSuite extends munit.FunSuite:
     val state = RebuildInstanceState.fold(
       Vector(
         rec(0, InstanceEvent.WorkstreamCreated(ws1, "add auth")),
-        rec(1, InstanceEvent.WorkerSpawned("w1", ws1, "/repos/szork", feature, "/clone/w1", 4242L))
+        rec(1, InstanceEvent.WorkerSpawned("w1", ws1, "/repos/szork", feature, "/clone/w1", Some(4242L)))
       )
     )
     val w = state.worker("w1").getOrElse(fail("w1 should exist"))
@@ -161,7 +161,7 @@ class RebuildInstanceStateSuite extends munit.FunSuite:
     val state = RebuildInstanceState.fold(
       Vector(
         rec(0, InstanceEvent.WorkstreamCreated(ws1, "g")),
-        rec(1, InstanceEvent.WorkerSpawned("w1", ws1, "/repo", feature, "/clone/w1", 7L))
+        rec(1, InstanceEvent.WorkerSpawned("w1", ws1, "/repo", feature, "/clone/w1", Some(7L)))
       )
     )
     assertEquals(state.workstream(ws1).map(_.status), Some(WorkstreamStatus.Active))
@@ -172,7 +172,7 @@ class RebuildInstanceStateSuite extends munit.FunSuite:
       Vector(
         rec(0, InstanceEvent.WorkstreamCreated(ws1, "g")),
         rec(1, InstanceEvent.WorkstreamStatusChanged(ws1, WorkstreamStatus.Done)),
-        rec(2, InstanceEvent.WorkerSpawned("w1", ws1, "/repo", feature, "/clone/w1", 7L))
+        rec(2, InstanceEvent.WorkerSpawned("w1", ws1, "/repo", feature, "/clone/w1", Some(7L)))
       )
     )
     assertEquals(state.workstream(ws1).map(_.status), Some(WorkstreamStatus.Done))
@@ -181,7 +181,7 @@ class RebuildInstanceStateSuite extends munit.FunSuite:
     val state = RebuildInstanceState.fold(
       Vector(
         rec(0, InstanceEvent.WorkstreamCreated(ws1, "add auth")),
-        rec(1, InstanceEvent.WorkerSpawned("w1", ws1, "/repos/szork", feature, "/clone/w1", 4242L)),
+        rec(1, InstanceEvent.WorkerSpawned("w1", ws1, "/repos/szork", feature, "/clone/w1", Some(4242L))),
         rec(2, InstanceEvent.WorkerExited("w1", 0))
       )
     )
@@ -193,9 +193,9 @@ class RebuildInstanceStateSuite extends munit.FunSuite:
     val state = RebuildInstanceState.fold(
       Vector(
         rec(0, InstanceEvent.WorkstreamCreated(ws1, "add auth")),
-        rec(1, InstanceEvent.WorkerSpawned("w1", ws1, "/repos/szork", feature, "/clone/w1", 1L)),
+        rec(1, InstanceEvent.WorkerSpawned("w1", ws1, "/repos/szork", feature, "/clone/w1", Some(1L))),
         rec(2, InstanceEvent.WorkerExited("w1", 1)),
-        rec(3, InstanceEvent.WorkerSpawned("w1", ws1, "/repos/szork", feature, "/clone/w1", 2L))
+        rec(3, InstanceEvent.WorkerSpawned("w1", ws1, "/repos/szork", feature, "/clone/w1", Some(2L)))
       )
     )
     val w = state.worker("w1").getOrElse(fail("w1 should exist"))
@@ -208,9 +208,9 @@ class RebuildInstanceStateSuite extends munit.FunSuite:
     val state = RebuildInstanceState.fold(
       Vector(
         rec(0, InstanceEvent.WorkstreamCreated(ws1, "add auth")),
-        rec(1, InstanceEvent.WorkerSpawned("w1", ws1, "/repo", feature, "/clone/w1", 1L)),
-        rec(2, InstanceEvent.WorkerSpawned("w2", ws1, "/repo", FeatureId("other"), "/clone/w2", 2L)),
-        rec(3, InstanceEvent.WorkerSpawned("w3", ws1, "/repo", FeatureId("third"), "/clone/w3", 3L)),
+        rec(1, InstanceEvent.WorkerSpawned("w1", ws1, "/repo", feature, "/clone/w1", Some(1L))),
+        rec(2, InstanceEvent.WorkerSpawned("w2", ws1, "/repo", FeatureId("other"), "/clone/w2", Some(2L))),
+        rec(3, InstanceEvent.WorkerSpawned("w3", ws1, "/repo", FeatureId("third"), "/clone/w3", Some(3L))),
         rec(4, InstanceEvent.WorkerStatus("w1", "PieceImplementing")), // progressing — no attention
         rec(5, InstanceEvent.WorkerStatus("w2", "NeedsHumanIntervention")),
         rec(6, InstanceEvent.WorkerStatus("w3", "PieceAwaitingMerge"))
@@ -229,7 +229,7 @@ class RebuildInstanceStateSuite extends munit.FunSuite:
       Vector(
         rec(0, InstanceEvent.WorkstreamCreated(ws1, "add auth")),
         rec(1, InstanceEvent.WorkstreamStatusChanged(ws1, WorkstreamStatus.Active)),
-        rec(2, InstanceEvent.WorkerSpawned("w1", ws1, "/repo", feature, "/clone/w1", 7L)),
+        rec(2, InstanceEvent.WorkerSpawned("w1", ws1, "/repo", feature, "/clone/w1", Some(7L))),
         rec(3, InstanceEvent.WorkerStatus("w1", "DesignNeedsHumanInput"))
       )
     )
@@ -252,7 +252,7 @@ class RebuildInstanceStateSuite extends munit.FunSuite:
     val events: Vector[InstanceEvent] = Vector(
       InstanceEvent.WorkstreamCreated(ws1, "add auth"),
       InstanceEvent.WorkstreamStatusChanged(ws1, WorkstreamStatus.Active),
-      InstanceEvent.WorkerSpawned("w1", ws1, "/repos/szork", feature, "/clone/w1", 4242L),
+      InstanceEvent.WorkerSpawned("w1", ws1, "/repos/szork", feature, "/clone/w1", Some(4242L)),
       InstanceEvent.WorkerExited("w1", 0)
     )
     events.foreach { e =>

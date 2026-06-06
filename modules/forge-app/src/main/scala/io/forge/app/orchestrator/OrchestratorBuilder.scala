@@ -45,17 +45,28 @@ object OrchestratorBuilder:
 
   /** Build the orchestrator + its action log for `mode`. The action log is surfaced so the caller can reuse the same
     * instance for pre-loop bookkeeping (e.g. a `forge new` scaffold entry) without constructing a second handle.
+    *
+    * `credentialEnv` is an environment overlay applied to the `gh` CLI and the agent connectors (Slice 4.3, Task
+    * 4.3.4). Empty for a normal host run (the process inherits the host's `PATH`/`gh`/`claude` credentials); for a
+    * containerised worker it carries the short-lived, host-isolated credentials brokered over the control channel (O6)
+    * — a scoped `gh` token + any configured agent API keys — so a container with no host home mount still
+    * authenticates.
     */
-  def build(mode: Mode, paths: ForgePaths, config: ForgeConfig): IO[(Orchestrator, ActionLog)] =
+  def build(
+      mode: Mode,
+      paths: ForgePaths,
+      config: ForgeConfig,
+      credentialEnv: Map[String, String] = Map.empty
+  ): IO[(Orchestrator, ActionLog)] =
     val pairing = RolePairing.of(mode)
     for
-      connector <- ConnectorFactory.build(pairing.driver, paths, config)
+      connector <- ConnectorFactory.build(pairing.driver, paths, config, credentialEnv)
       protectionCache <- InMemoryBranchProtectionCache(ttl = config.github.branchProtectionTtlSec.seconds)
       log <- FileActionLog(paths)
       commitIdentity <- resolveCommitIdentity(paths, config)
     yield
       val git = new RealGitClient(paths.repoRoot)
-      val gh = new RealGhClient(paths.repoRoot)
+      val gh = new RealGhClient(paths.repoRoot, credentialEnv)
       val branchManager = new RealBranchManager(git, gh, protectionCache, Clock[IO])
       val watcher = new RealPRWatcher(gh, watcherConfig(config))
       val specStore = new FileSpecStore(paths)

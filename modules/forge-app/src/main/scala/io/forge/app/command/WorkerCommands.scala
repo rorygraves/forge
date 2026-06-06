@@ -30,41 +30,90 @@ import scala.util.control.NonFatal
 object WorkerCommands:
 
   def run(home: os.Path, command: WorkerCommand): IO[ExitCode] =
-    new FileInstanceStore(home).load(command.instance).flatMap {
-      case Left(InstanceError.NoSuchInstance(name)) =>
-        Console[IO]
-          .errorln(s"forge worker: no such instance '${name.value}' (the daemon should have created it).")
-          .as(ExitCode(1))
-      case Left(err) =>
-        Console[IO].errorln(s"forge worker: instance error: $err").as(ExitCode(1))
-      case Right(instance) => runOnClone(home, instance, command)
-    }
+    if command.container then runContainerised(home, command)
+    else
+      new FileInstanceStore(home).load(command.instance).flatMap {
+        case Left(InstanceError.NoSuchInstance(name)) =>
+          Console[IO]
+            .errorln(s"forge worker: no such instance '${name.value}' (the daemon should have created it).")
+            .as(ExitCode(1))
+        case Left(err) =>
+          Console[IO].errorln(s"forge worker: instance error: $err").as(ExitCode(1))
+        case Right(instance) => runOnClone(home, instance, command)
+      }
 
-  /** Resolve the worker's re-rooted clone [[ForgePaths]], load the clone's config, and drive the feature loop. A
-    * missing checkout (the supervisor should have provisioned it) or a malformed clone config degrades to a non-zero
-    * exit; an unreachable daemon / loop error degrades via [[WorkerLoop]]'s own handling below.
+  /** The 4.2 **host-process** path: resolve the worker's re-rooted clone paths + socket from the loaded [[Instance]]
+    * (the instance dir exists on the host), no credential brokering (the worker inherits the daemon's environment).
     */
   private def runOnClone(home: os.Path, instance: Instance, command: WorkerCommand): IO[ExitCode] =
-    val checkout = instance.workerCheckout(command.workerId)
+    drive(
+      home,
+      command,
+      checkout = instance.workerCheckout(command.workerId),
+      workerRoot = instance.workerRoot(command.workerId),
+      socket = instance.socketFile,
+      brokerCredentials = false
+    )
+
+  /** The 4.3 **containerised** path: the instance dir does not exist inside the container, so the daemon passes the
+    * in-container bind-mount paths explicitly (`--worker-root` + `--socket`); the worker brokers its credentials over
+    * that socket (O6) rather than inheriting host credentials. Both flags are required in container mode — a
+    * `--container` invocation missing them is a malformed spawn and degrades to a non-zero exit.
+    */
+  private def runContainerised(home: os.Path, command: WorkerCommand): IO[ExitCode] =
+    (command.workerRoot, command.socket) match
+      case (Some(rootRaw), Some(socketRaw)) =>
+        val workerRoot = os.Path(rootRaw)
+        drive(
+          home,
+          command,
+          checkout = workerRoot / "checkout",
+          workerRoot = workerRoot,
+          socket = os.Path(socketRaw),
+          brokerCredentials = true
+        )
+      case _ =>
+        Console[IO]
+          .errorln(
+            s"forge worker '${command.workerId}': --container requires both --worker-root and --socket " +
+              "(the daemon passes the in-container mount paths)."
+          )
+          .as(ExitCode(1))
+
+  /** Shared body for both topologies: build the re-rooted clone [[ForgePaths]], load the clone's config, hold the
+    * per-worker lock, and drive the feature loop (brokering credentials first when `brokerCredentials`). A missing
+    * checkout (the supervisor should have provisioned/mounted it) or a malformed clone config degrades to a non-zero
+    * exit; an unreachable daemon / loop error degrades via [[degrade]].
+    */
+  private def drive(
+      home: os.Path,
+      command: WorkerCommand,
+      checkout: os.Path,
+      workerRoot: os.Path,
+      socket: os.Path,
+      brokerCredentials: Boolean
+  ): IO[ExitCode] =
     IO.blocking(os.exists(checkout)).flatMap {
       case false =>
         Console[IO]
           .errorln(
             s"forge worker '${command.workerId}': no clone at $checkout " +
-              s"(the daemon should have provisioned it before spawn)."
+              s"(the daemon should have provisioned/mounted it before spawn)."
           )
           .as(ExitCode(1))
       case true =>
-        val paths = new ForgePaths(checkout, home, localRootOpt = Some(instance.workerRoot(command.workerId)))
+        val paths = new ForgePaths(checkout, home, localRootOpt = Some(workerRoot))
         ForgeConfigLoader.load(paths).flatMap {
           case Left(err) =>
             Console[IO].errorln(s"forge worker '${command.workerId}': ${configErrorMessage(err)}").as(ExitCode(78))
           case Right(config) =>
             underWorkerLock(paths, command) {
               WorkerReporter
-                .daemon(instance.socketFile, command.workerId)
-                .flatMap(reporter => WorkerLoop.run(paths, config, reporter, command.repo, command.feature))
-                .handleErrorWith(degrade(instance, command))
+                .daemon(socket, command.workerId)
+                .flatMap(reporter =>
+                  WorkerLoop.run(paths, config, reporter, command.repo, command.feature, brokerCredentials)
+                )
+                .handleErrorWith(degrade(command, socket))
             }
         }
     }
@@ -118,13 +167,14 @@ object WorkerCommands:
     case None => ""
 
   /** A loop error that escapes [[WorkerLoop]] — most often an unreachable daemon (the reporter's RPCs raise) — degrades
-    * to exit 1 with the daemon-down diagnostic, never a crash.
+    * to exit 1 with the daemon-down diagnostic, never a crash. `socket` is the control socket the worker phones home
+    * over (the instance socket for a host worker, the mounted in-container socket for a containerised one).
     */
-  private def degrade(instance: Instance, command: WorkerCommand)(error: Throwable): IO[ExitCode] =
+  private def degrade(command: WorkerCommand, socket: os.Path)(error: Throwable): IO[ExitCode] =
     Console[IO]
       .errorln(
         s"forge worker '${command.workerId}': could not complete (${error.getMessage}). " +
-          s"Is `forge daemon start --instance ${command.instance.value}` running at ${instance.socketFile}?"
+          s"Is `forge daemon start --instance ${command.instance.value}` running at $socket?"
       )
       .as(ExitCode(1))
 

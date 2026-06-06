@@ -35,19 +35,32 @@ object WorkerLoop:
 
   /** Run the worker loop for `feature` over the clone `paths`, exporting its feed to `reporter`. `repo` is the
     * registered repo label carried into the worker record at registration.
+    *
+    * When `brokerCredentials` (the Slice-4.3 containerised path), the worker requests its short-lived, host-isolated
+    * credentials over the control channel **after** registering (`broker-credentials`, O6) and threads them as an env
+    * overlay into the git/connector subprocesses — so a container with no host home mount and no ambient credentials
+    * still authenticates `gh`/`claude`/`codex`. A host-process worker (4.2) passes `false` and inherits the daemon's
+    * environment, so the overlay is empty.
     */
   def run(
       paths: ForgePaths,
       config: ForgeConfig,
       reporter: WorkerReporter,
       repo: String,
-      feature: FeatureId
+      feature: FeatureId,
+      brokerCredentials: Boolean = false
   ): IO[ExitCode] =
     reporter.register(repo, feature) *>
-      new FileManifestStore(paths).load(feature).flatMap {
-        case Left(failure) => noManifest(reporter, feature, failure)
-        case Right(manifest) => drive(paths, config, reporter, feature, manifest.mode)
+      brokeredEnv(reporter, repo, brokerCredentials).flatMap { credentialEnv =>
+        new FileManifestStore(paths).load(feature).flatMap {
+          case Left(failure) => noManifest(reporter, feature, failure)
+          case Right(manifest) => drive(paths, config, reporter, feature, manifest.mode, credentialEnv)
+        }
       }
+
+  /** Broker the worker's credentials over the control channel when in container mode, else an empty overlay. */
+  private def brokeredEnv(reporter: WorkerReporter, repo: String, broker: Boolean): IO[Map[String, String]] =
+    if broker then reporter.brokerCredentials(repo) else IO.pure(Map.empty)
 
   /** A clone with no designed feature: report the loop-terminal `Abandoned`-shaped status and exit 1. The worker has
     * nothing to drive (the supervisor assigned a feature that was never designed in this clone); surfacing it as a
@@ -73,10 +86,11 @@ object WorkerLoop:
       config: ForgeConfig,
       reporter: WorkerReporter,
       feature: FeatureId,
-      mode: io.forge.core.Mode
+      mode: io.forge.core.Mode,
+      credentialEnv: Map[String, String]
   ): IO[ExitCode] =
     installAssets(paths) *>
-      OrchestratorBuilder.build(mode, paths, config).flatMap { case (orch, _) =>
+      OrchestratorBuilder.build(mode, paths, config, credentialEnv).flatMap { case (orch, _) =>
         val logFile = paths.featureLog(feature)
         for
           watermark <- cats.effect.Ref.of[IO, Long](WorkerFeedExporter.InitialWatermark)

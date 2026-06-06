@@ -35,6 +35,21 @@ trait OciRuntime:
     */
   def run(spec: ContainerSpec): Resource[IO, ContainerHandle]
 
+  /** Reattach to an already-running container by id (Task 4.3.4) — the daemon-restart path (§6.4): a container the
+    * daemon started before its own restart survives (it is owned by the OCI daemon, not the forge daemon), so a fresh
+    * daemon rebuilds a [[ContainerHandle]] from the recorded id alone (no `run`) to `awaitExit` / `kill` it. Unlike
+    * [[run]], reattach is **not** `Resource`-scoped — the supervisor watches the container for the rest of the daemon's
+    * life and does not force-remove it on a watcher cancellation (the container must survive the next restart too).
+    */
+  def attach(containerId: String): ContainerHandle
+
+  /** Whether the container `containerId` is currently running (Task 4.3.4) — the cheap liveness probe the supervisor's
+    * reconcile + cadence sweep use for a containerised worker (the analogue of `ProcessHandle.of(pid).isAlive` for a
+    * host worker). A container that has stopped, been removed, or never existed reads as `false` (errors swallowed)
+    * rather than raising: a not-running container is exactly the not-live answer reconcile wants.
+    */
+  def running(containerId: String): IO[Boolean]
+
 /** A fully-resolved container launch spec (Task 4.3.1) — the container analogue of [[WorkerSpec]]. Constructed by the
   * supervisor (`forge-app`, 4.3.4); this module never spells the worker image, the clone mount, or the credential env.
   *
@@ -125,6 +140,17 @@ object DockerRuntime extends OciRuntime:
       id
     }
 
+  def attach(containerId: String): ContainerHandle = handle(containerId)
+
+  def running(containerId: String): IO[Boolean] =
+    IO.blocking {
+      // `docker inspect -f '{{.State.Running}}'` prints `true`/`false` for an existing container and exits non-zero for
+      // an unknown one. Treat anything but a clean `true` (a stopped, removed, or never-existed container, or a daemon
+      // error) as not-running — the not-live answer the reconcile/cadence probe wants.
+      val res = os.proc(inspectArgs(containerId)).call(check = false, stderr = os.Pipe, stdout = os.Pipe)
+      res.exitCode == 0 && res.out.text().trim == "true"
+    }
+
   private def handle(id: String): ContainerHandle = new ContainerHandle:
     def containerId: String = id
 
@@ -175,6 +201,12 @@ object DockerRuntime extends OciRuntime:
 
   private[daemon] def waitArgs(id: String): Vector[String] = Vector(Docker, "wait", id)
   private[daemon] def killArgs(id: String): Vector[String] = Vector(Docker, "kill", id)
+
+  /** `docker inspect -f '{{.State.Running}}' <id>` — the liveness probe behind [[running]]; prints `true`/`false` for a
+    * known container, exits non-zero for an unknown one.
+    */
+  private[daemon] def inspectArgs(id: String): Vector[String] =
+    Vector(Docker, "inspect", "-f", "{{.State.Running}}", id)
 
   /** Force-remove (kill if running, then remove) — the `Resource` finalizer cleanup. */
   private[daemon] def rmArgs(id: String): Vector[String] = Vector(Docker, "rm", "-f", id)

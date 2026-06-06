@@ -162,7 +162,7 @@ container runtime also exposes), so the supervisor is unchanged in shape.
   short-lived tokens) so host-wide credentials never enter the container. This is the
   crux of the G4 safety claim; designed + landed here, not deferred.
 
-- [ ] **Task 4.3.4 — containerised worker spawn end-to-end.** A `ContainerSpawner`
+- [x] **Task 4.3.4 — containerised worker spawn end-to-end.** A `ContainerSpawner`
   (forge-app) adapting `OciRuntime` (4.3.1) to the supervisor's spawn path: build the
   `ContainerSpec` (image from 4.3.2; mounts = the isolated clone + the daemon control
   socket so the worker reaches the daemon from inside; env = brokered creds from
@@ -288,6 +288,41 @@ container runtime also exposes), so the supervisor is unchanged in shape.
   smell sweep passes. The **no-host-home-mount** property + the worker *applying* the brokered env (and the actual
   container wiring) land with the `ContainerSpawner` in **4.3.4**; the broker existing (creds over the channel) is what
   *makes* the no-home-mount possible. Tasks 4.3.4–4.3.6 open.
+- **2026-06-06** — **Task 4.3.4 (containerised worker spawn end-to-end) landed.** The daemon now spawns a worker
+  **inside an isolated OCI container** behind the same supervisor spawn path the host process used, reconciling liveness
+  by **container id** across a daemon restart. (1) **Liveness identity generalised (schema v2 → v3).**
+  `InstanceEvent.WorkerSpawned.pid` became `Option[Long]` + a new `containerId: Option[String]`; `WorkerRecord` gained
+  `containerId`, and `live = exitCode.isEmpty && (pid.isDefined || containerId.isDefined)` — a host worker records a
+  `pid`, a containerised worker a `containerId` (the honest "one of two keys, by topology" model; `payloadOf`/`decode`
+  emit/read only the key that applies). (2) **`OciRuntime` reattach surface (forge-daemon)** — `attach(id):
+  ContainerHandle` (rebuild a handle from a recorded id, no `run`) + `running(id): IO[Boolean]` (`docker inspect -f
+  '{{.State.Running}}'`), the container analogue of `ProcessHandle.of(pid)` for the §6.4 restart probe. (3) **A
+  `WorkerRuntime` seam (forge-app)** unifying the two topologies behind `launch → LaunchedWorker{key, awaitExit, kill}`
+  with `LivenessKey = HostPid | ContainerId`: `HostProcessRuntime` wraps the 4.2 `WorkerSpawner`/`WorkerLauncher`;
+  `ContainerRuntime` resolves the worker image from the **clone's** `Forgefile` (O1, falling back to a default image),
+  builds the `ContainerSpec` (the worker root + the daemon control socket bind-mounted in at fixed in-container paths,
+  **no host home mount** — O6, no env secrets — `docker inspect`-safe), and runs `forge worker … --worker-root --socket
+  --container` inside it via the abstract seam. (4) **`RealSupervisor` refactored** onto `WorkerRuntime` + an injected
+  `OciRuntime`: the single-writer allocation gate / reservation table / idempotency are untouched; only the spawn
+  mechanism + the recorded key differ, and `reconcile`/cadence **dispatch on each record's key** (a host pid via
+  `ProcessHandle`, a container via `OciRuntime.running`/`attach`) so a daemon restarted in *either* mode reconciles
+  *both* topologies it finds in the log. (5) **Worker container mode** — `WorkerCommand` gained optional
+  `--worker-root`/`--socket` + `--container`; in container mode `WorkerCommands` skips the instance-store load (the
+  instance dir is not in the container), uses the explicit mounted paths, and `WorkerLoop` brokers its credentials over
+  the control channel (4.3.3) and threads them as an env overlay through `OrchestratorBuilder` → `RealGhClient.env` +
+  the connectors' `extraEnv` (no forge-agents change; both connectors already take a defaulted `extraEnv`). (6) **`forge
+  daemon start --container`** selects `ContainerRuntime` for new spawns; the default stays the frozen host-process path.
+  **Tests:** always-on `ContainerRuntimeSuite` (spec builder — mounts, no-home-mount, `forge worker` argv,
+  Forgefile-image-or-default) + `SupervisorContainerReconcileSuite` (reconcile dispatch on a stub `OciRuntime`) +
+  `WorkerLoopBrokerSuite` (brokers iff container mode); **opt-in `FORGE_IT_RUN_DOCKER=1`** real-container reattach
+  (busybox sleeper stand-in survives a simulated daemon crash, a fresh supervisor reconciles by container id from the
+  log alone, killing it records the exit) — **proven live** against the host's Docker 29.2.1 (the new `OciRuntime`
+  `attach`/`running` lifecycle + the supervisor crash/reconcile, no leaked containers). forge-app 543 → 553 (10 new, 1
+  opt-in-skipped by default), forge-daemon +2 opt-in, full `sbt test` green, `scalafmtCheckAll` clean, ForgePaths smell
+  sweep passes. **Spec deltas (§23) to fold into the live contract at 4.3.6 close-out:** the `worker.spawned`
+  pid→`containerId` generalisation + the `--container`/`--socket`/`--worker-root` worker contract + the
+  `forge-worker:latest` default image / forge-capable-image expectation. The full container-worker-reaches-the-daemon +
+  real feature loop tie-together (a built forge-capable image) is the Task 4.3.6 dogfood. Tasks 4.3.5–4.3.6 open.
 
 ---
 

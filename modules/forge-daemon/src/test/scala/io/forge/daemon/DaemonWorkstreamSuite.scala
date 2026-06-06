@@ -113,7 +113,7 @@ class DaemonWorkstreamSuite extends CatsEffectSuite:
                 "/repo",
                 io.forge.core.FeatureId("feat"),
                 "/clone/w1",
-                4242L
+                Some(4242L)
               )
           )
           _ <- DaemonClient.callWithRetry(

@@ -59,11 +59,18 @@ enum InstanceEvent:
     */
   case WorkstreamStatusChanged(workstreamId: WorkstreamId, status: WorkstreamStatus)
 
-  /** The daemon spawned a worker **process** into a workstream (`worker.spawned`, §6.2, Task 4.2.4 — emitted by the
-    * supervisor in 4.2.5). Unlike [[WorkerRegistered]] (the worker phoning home), this is the daemon-side record: it
-    * knows the worker's `workstreamId`, its isolated `checkoutRoot` (the clone, O10), and the child `pid` before the
-    * worker connects. Seeds/updates the [[WorkerRecord]] with those daemon-known fields and appends the worker to the
+  /** The daemon spawned a worker into a workstream (`worker.spawned`, §6.2, Task 4.2.4 — emitted by the supervisor in
+    * 4.2.5). Unlike [[WorkerRegistered]] (the worker phoning home), this is the daemon-side record: it knows the
+    * worker's `workstreamId`, its isolated `checkoutRoot` (the clone, O10), and its **liveness key** before the worker
+    * connects. Seeds/updates the [[WorkerRecord]] with those daemon-known fields and appends the worker to the
     * workstream's ordering.
+    *
+    * The liveness key is one of two, by topology (Slice 4.3, Task 4.3.4): a **host-process** worker (4.2) records its
+    * child `pid`; a **containerised** worker (4.3) records its OCI `containerId` instead (the daemon reattaches a
+    * container by id across its own restart, the container having survived — §6.4 — exactly as a host pid is
+    * re-probed). Both are `Option`: exactly one is `Some` for a real spawn (the other backend's key is `None`). Keeping
+    * `pid` optional rather than required is the honest model — a container has no host pid — and lets the §6.4
+    * reconcile dispatch on whichever key the record carries.
     */
   case WorkerSpawned(
       workerId: String,
@@ -71,7 +78,8 @@ enum InstanceEvent:
       repo: String,
       feature: FeatureId,
       checkoutRoot: String,
-      pid: Long
+      pid: Option[Long] = None,
+      containerId: Option[String] = None
   )
 
   /** A spawned worker process exited (`worker.exited`, §6.2/§6.4): its `exitCode`. Clears the worker's liveness so the
@@ -118,15 +126,19 @@ object InstanceEvent:
       ujson.Obj("workstreamId" -> ujson.Str(workstreamId.value), "goal" -> ujson.Str(goal))
     case WorkstreamStatusChanged(workstreamId, status) =>
       ujson.Obj("workstreamId" -> ujson.Str(workstreamId.value), "status" -> ujson.Str(WorkstreamStatus.name(status)))
-    case WorkerSpawned(workerId, workstreamId, repo, feature, checkoutRoot, pid) =>
-      ujson.Obj(
+    case WorkerSpawned(workerId, workstreamId, repo, feature, checkoutRoot, pid, containerId) =>
+      val obj = ujson.Obj(
         "workerId" -> ujson.Str(workerId),
         "workstreamId" -> ujson.Str(workstreamId.value),
         "repo" -> ujson.Str(repo),
         "feature" -> ujson.Str(feature.value),
-        "checkoutRoot" -> ujson.Str(checkoutRoot),
-        "pid" -> ujson.Num(pid.toDouble)
+        "checkoutRoot" -> ujson.Str(checkoutRoot)
       )
+      // Emit only the liveness key that applies (a host pid xor a container id), so the record is honest about the
+      // worker's topology and an absent key reads as `None` rather than a sentinel.
+      pid.foreach(p => obj("pid") = ujson.Num(p.toDouble))
+      containerId.foreach(id => obj("containerId") = ujson.Str(id))
+      obj
     case WorkerExited(workerId, exitCode) =>
       ujson.Obj("workerId" -> ujson.Str(workerId), "exitCode" -> ujson.Num(exitCode.toDouble))
 
@@ -176,14 +188,16 @@ object InstanceEvent:
           status <- str("status").flatMap(WorkstreamStatus.fromString)
         yield WorkstreamStatusChanged(id, status)
       case WorkerSpawnedKind =>
+        // `pid` / `containerId` are both optional (a host worker carries one, a containerised worker the other); a
+        // record with neither is a degenerate spawn the fold still seeds (the record is the worker authority) but which
+        // reconcile treats as not-live (see `WorkerRecord.live`).
         for
           workerId <- str("workerId")
           id <- workstreamId("workstreamId")
           repo <- str("repo")
           feature <- str("feature").flatMap(FeatureId.fromString(_).toOption)
           checkoutRoot <- str("checkoutRoot")
-          pid <- num("pid")
-        yield WorkerSpawned(workerId, id, repo, feature, checkoutRoot, pid.toLong)
+        yield WorkerSpawned(workerId, id, repo, feature, checkoutRoot, num("pid").map(_.toLong), str("containerId"))
       case WorkerExitedKind =>
         for
           workerId <- str("workerId")

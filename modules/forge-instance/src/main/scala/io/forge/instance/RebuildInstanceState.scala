@@ -19,10 +19,12 @@ object RebuildInstanceState:
     * forward-compatible via the open `kind` (see [[InstanceEvent]]); this version guards the *cache* file only.
     *
     * v2 (Task 4.2.4) — [[InstanceState]] gained `workstreams` and [[WorkerRecord]] gained
-    * `workstreamId`/`checkoutRoot`/`pid`/`exitCode`. A v1 cache fails the version check in [[FileInstanceStateCache]]
-    * and is rebuilt from the (forward-compatible) log.
+    * `workstreamId`/`checkoutRoot`/`pid`/`exitCode`. v3 (Task 4.3.4) — [[WorkerRecord]] gained `containerId` and `pid`
+    * became one of two optional liveness keys (a containerised worker carries `containerId`, not `pid`). A
+    * stale-version cache fails the version check in [[FileInstanceStateCache]] and is rebuilt from the
+    * (forward-compatible) log.
     */
-  val CurrentSchemaVersion: Int = 2
+  val CurrentSchemaVersion: Int = 3
 
   /** The empty state — no boots seen, no workers, no workstreams. The fold seed and the "fresh instance" value. */
   val empty: InstanceState =
@@ -77,7 +79,7 @@ object RebuildInstanceState:
         // inventing a record with no goal.
         state.updateRegisteredWorkstream(workstreamId)(_.copy(status = status))
 
-      case InstanceEvent.WorkerSpawned(workerId, workstreamId, repo, feature, checkoutRoot, pid) =>
+      case InstanceEvent.WorkerSpawned(workerId, workstreamId, repo, feature, checkoutRoot, pid, containerId) =>
         // The daemon-side seed: upsert the worker with its spawn fields (clearing any prior exitCode for a re-spawn),
         // append it to the owning workstream's ordering, AND activate the workstream (`Planning → Active`) in the same
         // step. Folding activation into `worker.spawned` keeps the spawn crash-atomic: there is no window where a
@@ -91,13 +93,19 @@ object RebuildInstanceState:
           .updateWorker(workerId)(
             ifAbsent = WorkerRecord
               .registered(workerId, repo, feature)
-              .copy(workstreamId = Some(workstreamId), checkoutRoot = Some(checkoutRoot), pid = Some(pid)),
+              .copy(
+                workstreamId = Some(workstreamId),
+                checkoutRoot = Some(checkoutRoot),
+                pid = pid,
+                containerId = containerId
+              ),
             ifPresent = _.copy(
               repo = repo,
               feature = feature,
               workstreamId = Some(workstreamId),
               checkoutRoot = Some(checkoutRoot),
-              pid = Some(pid),
+              pid = pid,
+              containerId = containerId,
               exitCode = None
             )
           )
@@ -119,8 +127,10 @@ object RebuildInstanceState:
   *   - `events` — the exported-feed tail (B3), carried verbatim as the raw per-feature `Action`-shaped JSON.
   *   - `workstreamId` — the owning [[Workstream]], `None` for a 4.1-style standalone-registered worker.
   *   - `checkoutRoot` — the worker's isolated clone path (O10), `None` until the daemon spawns it.
-  *   - `pid` — the spawned child process id (`None` until spawned); paired with `exitCode` it gives liveness.
-  *   - `exitCode` — `Some` once the process has exited (`worker.exited`); `None` while it may still be running.
+  *   - `pid` — the spawned **host-process** child's id (`None` for a containerised or unspawned worker).
+  *   - `containerId` — the spawned **container's** OCI id (`None` for a host-process or unspawned worker, Slice 4.3).
+  *     Exactly one of `pid`/`containerId` is `Some` for a real spawn — the worker's liveness key, by topology.
+  *   - `exitCode` — `Some` once the worker has exited (`worker.exited`); `None` while it may still be running.
   *
   * The new fields default so a hand-written fixture / partial JSON still decodes; a real cache is always rebuilt at the
   * current schema (see [[RebuildInstanceState.CurrentSchemaVersion]]).
@@ -134,14 +144,16 @@ final case class WorkerRecord(
     workstreamId: Option[WorkstreamId] = None,
     checkoutRoot: Option[String] = None,
     pid: Option[Long] = None,
+    containerId: Option[String] = None,
     exitCode: Option[Int] = None
 ) derives ReadWriter:
 
-  /** A spawned worker is **live** while it has a pid and has not reported an exit. The supervisor's restart
-    * reconciliation (4.2.5) probes the pid only for live workers; a record with no pid was never a real process (a
-    * 4.1-style registration), and one with an `exitCode` has terminated.
+  /** A spawned worker is **live** while it carries a liveness key (a host `pid` **or** a `containerId`) and has not
+    * reported an exit. The supervisor's restart reconciliation (4.2.5/4.3.4) probes that key only for live workers —
+    * the host pid via [[ProcessHandle]], the container id via the OCI runtime; a record with neither key was never a
+    * real spawn (a 4.1-style registration), and one with an `exitCode` has terminated.
     */
-  def live: Boolean = pid.isDefined && exitCode.isEmpty
+  def live: Boolean = (pid.isDefined || containerId.isDefined) && exitCode.isEmpty
 
 object WorkerRecord:
   /** The status a worker carries from `worker.registered` until its first `worker.status`. */
@@ -237,6 +249,7 @@ final case class InstanceState(
     w.workstreamId.foreach(id => base("workstreamId") = ujson.Str(id.value))
     w.checkoutRoot.foreach(root => base("checkoutRoot") = ujson.Str(root))
     w.pid.foreach(p => base("pid") = ujson.Num(p.toDouble))
+    w.containerId.foreach(id => base("containerId") = ujson.Str(id))
     w.exitCode.foreach(c => base("exitCode") = ujson.Num(c.toDouble))
     base
 

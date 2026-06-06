@@ -80,10 +80,11 @@ class OciRuntimeSuite extends CatsEffectSuite:
     assertEquals(DockerRuntime.mountArg(Mount(os.root / "a", "/b", readOnly = true)), "/a:/b:ro")
   }
 
-  test("wait/kill/rm argv shapes") {
+  test("wait/kill/rm/inspect argv shapes") {
     assertEquals(DockerRuntime.waitArgs("cid"), Vector("docker", "wait", "cid"))
     assertEquals(DockerRuntime.killArgs("cid"), Vector("docker", "kill", "cid"))
     assertEquals(DockerRuntime.rmArgs("cid"), Vector("docker", "rm", "-f", "cid"))
+    assertEquals(DockerRuntime.inspectArgs("cid"), Vector("docker", "inspect", "-f", "{{.State.Running}}", "cid"))
   }
 
   // --- real-container lifecycle (opt-in: FORGE_IT_RUN_DOCKER=1, needs a Docker daemon) ---
@@ -107,6 +108,26 @@ class OciRuntimeSuite extends CatsEffectSuite:
         // A killed container exits non-zero (SIGKILL → 137); we only assert it is not a clean 0.
         _ = assertNotEquals(code, 0)
         _ <- handle.kill // idempotent: killing an already-stopped container is a no-op
+      yield ()
+    }
+  }
+
+  test("running + attach reattach a live container by id (the §6.4 daemon-restart probe)") {
+    assume(dockerEnabled, "set FORGE_IT_RUN_DOCKER=1 (and have a running Docker daemon) to run the live container test")
+    // Start a sleeper detached, learn its id, then — *without* the original handle — probe liveness and reattach by id
+    // (exactly what the supervisor's reconcile does after a daemon restart), kill it, and confirm it reads not-running.
+    DockerRuntime.run(ContainerSpec(image = image, command = Seq("sleep", "120"))).use { spawned =>
+      val id = spawned.containerId
+      for
+        liveBefore <- DockerRuntime.running(id)
+        _ = assert(liveBefore, "a freshly-run container reads as running")
+        reattached = DockerRuntime.attach(id)
+        _ <- reattached.kill
+        _ <- reattached.awaitExit.timeout(15.seconds)
+        liveAfter <- DockerRuntime.running(id)
+        _ = assert(!liveAfter, "a killed container reads as not-running")
+        unknown <- DockerRuntime.running("does-not-exist")
+        _ = assert(!unknown, "an unknown container reads as not-running rather than raising")
       yield ()
     }
   }

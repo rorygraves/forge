@@ -94,8 +94,12 @@ object InstanceCommand:
 sealed trait DaemonCommand extends Product with Serializable:
   def instance: Option[InstanceName]
 object DaemonCommand:
-  /** `forge daemon start` — run the foreground supervisor (holds the instance lock for its lifetime). */
-  final case class Start(instance: Option[InstanceName]) extends DaemonCommand
+  /** `forge daemon start [--container]` — run the foreground supervisor (holds the instance lock for its lifetime).
+    * `container` (Slice 4.3, Task 4.3.4) selects the **containerised** worker runtime for new spawns (each `forge
+    * worker` runs inside an isolated OCI container, O7); the default `false` keeps the frozen 4.2 host-process runtime.
+    * The flag governs only *new* spawns — reconcile reattaches both topologies it finds in the log either way.
+    */
+  final case class Start(instance: Option[InstanceName], container: Boolean = false) extends DaemonCommand
 
   /** `forge daemon stop` — ask a running daemon to shut down (a `shutdown` JSON-RPC call). */
   final case class Stop(instance: Option[InstanceName]) extends DaemonCommand
@@ -103,16 +107,27 @@ object DaemonCommand:
   /** `forge daemon status` — render a running daemon's status snapshot (a `status` JSON-RPC call). */
   final case class Status(instance: Option[InstanceName]) extends DaemonCommand
 
-/** Parsed Phase-4 hidden worker command (Task 4.2.1) — the [[CommandClass.Worker]] payload. Unlike [[DaemonCommand]] /
-  * [[InstanceCommand]], the target `instance` is **required** (the daemon always names it explicitly when spawning the
-  * child, never a sole-instance fallback), as are the `workerId` it was assigned, the `repo` it drives, and the
-  * `feature`. All arrive as `--instance` / `--worker-id` / `--repo` / `--feature` flags on the spawned argv.
+/** Parsed Phase-4 hidden worker command (Task 4.2.1 / 4.3.4) — the [[CommandClass.Worker]] payload. The target
+  * `instance`, the `workerId` it was assigned, the `repo` it drives, and the `feature` are **required** (the daemon
+  * always names them explicitly when spawning, never a sole-instance fallback), arriving as `--instance` /
+  * `--worker-id` / `--repo` / `--feature` flags on the spawned argv.
+  *
+  * The optional fields are the Slice-4.3 **container-mode** overrides: a containerised worker (started inside an OCI
+  * container by the [[io.forge.app.command.ContainerRuntime]]) cannot derive its paths from the host `~/.forge` (which
+  * does not exist in the container), so the daemon passes the in-container bind-mount paths explicitly — `--worker-root
+  * <path>` (the worker root; `checkout = <root>/checkout`) and `--socket <path>` (the mounted control socket) — and the
+  * `--container` flag tells the worker to **broker its credentials** over that socket (O6) instead of relying on
+  * ambient host credentials. Absent for a 4.2 host-process worker (it derives paths from the instance and inherits the
+  * daemon's environment).
   */
 final case class WorkerCommand(
     instance: InstanceName,
     workerId: String,
     repo: String,
-    feature: FeatureId
+    feature: FeatureId,
+    workerRoot: Option[String] = None,
+    socket: Option[String] = None,
+    container: Boolean = false
 )
 
 /** Parsed Phase-4 operator workstream/worker client command ([[CommandClass.Workstream]], Task 4.2.4). Each carries an
@@ -379,7 +394,7 @@ object CliParser:
     extractInstance(rest).flatMap { (instance, remaining) =>
       firstPositional(remaining) match
         case None => Left(CliError.MissingDaemonSubcommand)
-        case Some("start") => Right(DaemonCommand.Start(instance))
+        case Some("start") => Right(DaemonCommand.Start(instance, container = remaining.contains("--container")))
         case Some("stop") => Right(DaemonCommand.Stop(instance))
         case Some("status") => Right(DaemonCommand.Status(instance))
         case Some(other) => Left(CliError.UnknownDaemonSubcommand(other))
@@ -398,7 +413,15 @@ object CliParser:
       repo <- requiredFlag(rest, "--repo")
       featureRaw <- requiredFlag(rest, "--feature")
       feature <- FeatureId.fromString(featureRaw).left.map(CliError.InvalidFeatureId(featureRaw, _))
-    yield WorkerCommand(instance, workerId, repo, feature)
+    yield WorkerCommand(
+      instance,
+      workerId,
+      repo,
+      feature,
+      workerRoot = optionalFlag(rest, "--worker-root"),
+      socket = optionalFlag(rest, "--socket"),
+      container = rest.contains("--container")
+    )
 
   /** Parse a [[CommandClass.Workstream]] invocation into a [[WorkstreamCommand]] (Task 4.2.4). The sixth parse entry
     * point. `name` is `"workstream"` (subcommands `new` / `list`) or `"worker"` (only `list` reaches here — the bare
@@ -453,6 +476,14 @@ object CliParser:
 
   /** First positional (non-`--`) token, if any. */
   private def firstPositional(rest: Vector[String]): Option[String] = rest.find(t => !t.startsWith("--"))
+
+  /** The value of an **optional** `--flag <value>` (a non-`--` token immediately after it), or `None` when the flag is
+    * absent or has no value. Unlike [[requiredFlag]]/[[flagValue]] a missing flag is not an error.
+    */
+  private def optionalFlag(rest: Vector[String], flag: String): Option[String] =
+    rest.indexOf(flag) match
+      case i if i >= 0 && i + 1 < rest.length && !rest(i + 1).startsWith("--") => Some(rest(i + 1))
+      case _ => None
 
   private def instanceName(raw: String): Either[CliError, InstanceName] =
     InstanceName.fromString(raw).left.map(CliError.InvalidInstanceName(raw, _))

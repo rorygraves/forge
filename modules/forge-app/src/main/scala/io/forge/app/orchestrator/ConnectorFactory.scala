@@ -27,14 +27,25 @@ import scala.concurrent.duration.*
   */
 object ConnectorFactory:
 
-  /** Build the connector for `cli`. Constructed once per run; the resulting `Connector` is shared (J3). */
-  def build(cli: Cli, paths: ForgePaths, config: ForgeConfig): IO[Connector] =
+  /** Build the connector for `cli`. Constructed once per run; the resulting `Connector` is shared (J3).
+    *
+    * `credentialEnv` is an environment overlay applied to the connector's CLI subprocesses (Slice 4.3, Task 4.3.4):
+    * empty for a host run (the connector inherits the process env, incl. any logged-in `claude`/`codex` session), and
+    * for a containerised worker the brokered agent API keys (O6) so the driver authenticates without a host home mount.
+    */
+  def build(
+      cli: Cli,
+      paths: ForgePaths,
+      config: ForgeConfig,
+      credentialEnv: Map[String, String] = Map.empty
+  ): IO[Connector] =
     val reviewerCap = config.reviewer.wallClockCapSec.seconds
     cli match
       case Cli.Claude =>
         IO.pure(
           new ClaudeConnector(
             cwd = Some(paths.repoRoot),
+            extraEnv = credentialEnv,
             reviewerAssets = Some(reviewerAssets(paths, "claude")),
             reviewerModel = Some(config.reviewer.claudeModel),
             reviewerTimeout = reviewerCap,
@@ -50,6 +61,7 @@ object ConnectorFactory:
             priceTable = priceTable,
             sessionSettings = CodexSessionSettings.driver(sandbox = config.codex.driverSandbox, approvalMode = "never"),
             cwd = Some(paths.repoRoot),
+            extraEnv = credentialEnv,
             reviewerAssets = Some(reviewerAssets(paths, "codex")),
             reviewerTimeout = reviewerCap
           )

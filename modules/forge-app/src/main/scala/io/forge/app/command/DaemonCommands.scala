@@ -31,13 +31,13 @@ object DaemonCommands:
   def run(home: os.Path, command: DaemonCommand): IO[ExitCode] =
     val store = new FileInstanceStore(home)
     command match
-      case DaemonCommand.Start(instance) => start(store, instance)
+      case DaemonCommand.Start(instance, container) => start(store, instance, container)
       case DaemonCommand.Stop(instance) => stop(store, instance)
       case DaemonCommand.Status(instance) => status(store, instance)
 
   // --- start (foreground supervisor, holds the instance lock) ----------------
 
-  private def start(store: InstanceStore, instance: Option[InstanceName]): IO[ExitCode] =
+  private def start(store: InstanceStore, instance: Option[InstanceName], container: Boolean): IO[ExitCode] =
     InstanceResolver.resolve(store, instance, "daemon start").flatMap {
       case Left(code) => IO.pure(code)
       case Right(resolved) =>
@@ -45,7 +45,7 @@ object DaemonCommands:
           new FileProcessLock(resolved.lockFile, resolved.lockMetadataFile)
             .acquire(metadata, acceptStale = true)
             .use {
-              case LockAcquireResult.Acquired => runForeground(resolved)
+              case LockAcquireResult.Acquired => runForeground(resolved, container)
               case LockAcquireResult.Held(holder) =>
                 Console[IO]
                   .errorln(
@@ -72,12 +72,16 @@ object DaemonCommands:
     * worker *processes* are intentionally **not** killed on stop — they survive the daemon's restart (see
     * [[RealSupervisor]]).
     */
-  private def runForeground(instance: Instance): IO[ExitCode] =
+  private def runForeground(instance: Instance, container: Boolean): IO[ExitCode] =
     for
-      _ <- Console[IO].println(s"forge daemon: starting supervisor for instance '${instance.name.value}'…")
+      _ <- Console[IO].println(
+        s"forge daemon: starting supervisor for instance '${instance.name.value}'" +
+          (if container then " (containerised workers)…" else "…")
+      )
       shutdown <- Deferred[IO, Unit]
       state <- DaemonState.boot(instance, ProcessHandle.current().pid())
-      supervisor <- RealSupervisor.build(instance, state)
+      supervisor <-
+        if container then RealSupervisor.buildContainer(instance, state) else RealSupervisor.build(instance, state)
       boots <- state.snapshot.map(_.bootCount)
       live <- state.snapshot.map(_.workers.count(_.live))
       _ <-

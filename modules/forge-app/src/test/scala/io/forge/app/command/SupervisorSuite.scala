@@ -207,7 +207,7 @@ class SupervisorSuite extends CatsEffectSuite:
         _ <- dead.awaitExit // ensure the pid is gone before reconcile probes it
         state <- DaemonState.boot(inst, pid = 1L)
         _ <- state.record(
-          InstanceEvent.WorkerSpawned("w-1", WorkstreamId("ws-1"), "/repo", FeatureId("feat"), "/clone", dead.pid)
+          InstanceEvent.WorkerSpawned("w-1", WorkstreamId("ws-1"), "/repo", FeatureId("feat"), "/clone", Some(dead.pid))
         )
         sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")))
         _ <- sup.reconcile
@@ -225,7 +225,14 @@ class SupervisorSuite extends CatsEffectSuite:
         for
           state <- DaemonState.boot(inst, pid = 1L)
           _ <- state.record(
-            InstanceEvent.WorkerSpawned("w-1", WorkstreamId("ws-1"), "/repo", FeatureId("feat"), "/clone", alive.pid)
+            InstanceEvent.WorkerSpawned(
+              "w-1",
+              WorkstreamId("ws-1"),
+              "/repo",
+              FeatureId("feat"),
+              "/clone",
+              Some(alive.pid)
+            )
           )
           sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")))
           _ <- sup.reconcile
@@ -245,7 +252,14 @@ class SupervisorSuite extends CatsEffectSuite:
         for
           state <- DaemonState.boot(inst, pid = 1L)
           _ <- state.record(
-            InstanceEvent.WorkerSpawned("w-1", WorkstreamId("ws-1"), "/repo", FeatureId("feat"), "/clone", alive.pid)
+            InstanceEvent.WorkerSpawned(
+              "w-1",
+              WorkstreamId("ws-1"),
+              "/repo",
+              FeatureId("feat"),
+              "/clone",
+              Some(alive.pid)
+            )
           )
           sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")))
           // Run only the cadence loop (no reconcile ⇒ no ProcessHandle watcher), so the exit is detected by the sweep.
