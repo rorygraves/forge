@@ -41,6 +41,16 @@ enum CommandClass:
     */
   case Daemon
 
+  /** `worker` — Phase-4 §5/§6 the **daemon-spawned worker process** (Slice 4.2, Task 4.2.1). *Hidden*: not part of the
+    * operator-facing §15 command set — the daemon supervisor spawns it as a child (4.2.5), passing the instance, worker
+    * id, repo, and feature on argv. Instance-scoped like [[Daemon]] (no [[io.forge.app.config.ForgeConfig]] at the
+    * routing layer, no per-checkout lock here — the worker takes its *own* re-rooted per-worker lock when it runs the
+    * real feature loop, 4.2.3). For the 4.2.1 spike its body phones home to the instance socket (register/status/event)
+    * and exits; the real `Orchestrator` body lands in 4.2.3. Parsed via [[CliParser.parseWorker]] into a
+    * [[WorkerCommand]].
+    */
+  case Worker
+
 /** Phase-1 parse result: enough to route resource setup, with per-command args deferred to [[CliParser.phase2]]. */
 final case class Invocation(
     repoRoot: Option[String],
@@ -83,6 +93,18 @@ object DaemonCommand:
 
   /** `forge daemon status` — render a running daemon's status snapshot (a `status` JSON-RPC call). */
   final case class Status(instance: Option[InstanceName]) extends DaemonCommand
+
+/** Parsed Phase-4 hidden worker command (Task 4.2.1) — the [[CommandClass.Worker]] payload. Unlike [[DaemonCommand]] /
+  * [[InstanceCommand]], the target `instance` is **required** (the daemon always names it explicitly when spawning the
+  * child, never a sole-instance fallback), as are the `workerId` it was assigned, the `repo` it drives, and the
+  * `feature`. All arrive as `--instance` / `--worker-id` / `--repo` / `--feature` flags on the spawned argv.
+  */
+final case class WorkerCommand(
+    instance: InstanceName,
+    workerId: String,
+    repo: String,
+    feature: FeatureId
+)
 
 /** Argv parse failures. All map to `EX_USAGE` (exit 64) at the `Main` boundary. */
 sealed trait CliError extends Product with Serializable:
@@ -131,6 +153,9 @@ object CliError:
   final case class UnknownDaemonSubcommand(name: String) extends CliError:
     def message: String = s"unknown daemon subcommand '$name'; expected one of: start, stop, status"
 
+  final case class MissingWorkerFlag(flag: String) extends CliError:
+    def message: String = s"'worker' requires the $flag flag"
+
 object CliParser:
 
   // --- phase 1 ---------------------------------------------------------------
@@ -164,6 +189,9 @@ object CliParser:
       case "unlock" => Right((CommandClass.UnlockForce, false))
       case "init-instance" | "add-repo" | "list-repos" => Right((CommandClass.Instance, false))
       case "daemon" => Right((CommandClass.Daemon, false))
+      // Hidden, daemon-internal (Task 4.2.1); needsConnector is false for the spike body (the real loop in 4.2.3 builds
+      // its own connector under the worker's re-rooted paths, not via the Main asset-install path).
+      case "worker" => Right((CommandClass.Worker, false))
       case other => Left(CliError.UnknownCommand(other))
 
   // --- phase 2 ---------------------------------------------------------------
@@ -299,6 +327,30 @@ object CliParser:
         case Some("status") => Right(DaemonCommand.Status(instance))
         case Some(other) => Left(CliError.UnknownDaemonSubcommand(other))
     }
+
+  /** Parse a [[CommandClass.Worker]] invocation (`worker --instance <name> --worker-id <id> --repo <path> --feature
+    * <id>`) into a [[WorkerCommand]] (Task 4.2.1). The fifth parse entry point — every field is a **required** flag
+    * (the daemon always passes them when spawning the child), so a missing flag is a [[CliError.MissingWorkerFlag]] and
+    * a present-but-valueless flag a [[CliError.MissingFlagValue]], both → `EX_USAGE` (exit 64) at the `Main` boundary.
+    */
+  def parseWorker(rest: Vector[String]): Either[CliError, WorkerCommand] =
+    for
+      instanceRaw <- requiredFlag(rest, "--instance")
+      instance <- instanceName(instanceRaw)
+      workerId <- requiredFlag(rest, "--worker-id")
+      repo <- requiredFlag(rest, "--repo")
+      featureRaw <- requiredFlag(rest, "--feature")
+      feature <- FeatureId.fromString(featureRaw).left.map(CliError.InvalidFeatureId(featureRaw, _))
+    yield WorkerCommand(instance, workerId, repo, feature)
+
+  /** A required `--flag <value>`: absent ⇒ [[CliError.MissingWorkerFlag]]; present-but-valueless (end of args or
+    * another `--flag` next) ⇒ [[CliError.MissingFlagValue]].
+    */
+  private def requiredFlag(rest: Vector[String], flag: String): Either[CliError, String] =
+    rest.indexOf(flag) match
+      case -1 => Left(CliError.MissingWorkerFlag(flag))
+      case i if i + 1 < rest.length && !rest(i + 1).startsWith("--") => Right(rest(i + 1))
+      case _ => Left(CliError.MissingFlagValue(flag))
 
   /** First positional (non-`--`) token, if any. */
   private def firstPositional(rest: Vector[String]): Option[String] = rest.find(t => !t.startsWith("--"))

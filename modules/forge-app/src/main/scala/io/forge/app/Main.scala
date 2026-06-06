@@ -12,7 +12,8 @@ import io.forge.app.command.{
   InstancePaths,
   ReadOnlyContext,
   StateChangingContext,
-  UnlockForceContext
+  UnlockForceContext,
+  WorkerCommands
 }
 import io.forge.app.config.{ConfigError, ForgeConfig, ForgeConfigLoader}
 import io.forge.app.lock.{FileProcessLock, LockAcquireResult, LockMetadata}
@@ -67,6 +68,7 @@ object Main extends IOApp:
       case CommandClass.StateChanging => runStateChanging(invocation, paths)
       case CommandClass.Instance => runInstance(invocation, paths)
       case CommandClass.Daemon => runDaemon(invocation, paths)
+      case CommandClass.Worker => runWorker(invocation, paths)
 
   // --- step 2: repo-root ----------------------------------------------------
 
@@ -112,6 +114,18 @@ object Main extends IOApp:
     CliParser.parseDaemon(invocation.rest) match
       case Left(err) => usageError(err)
       case Right(command) => DaemonCommands.run(paths.home, command)
+
+  // --- worker: hidden, daemon-spawned (Task 4.2.1) --------------------------
+
+  /** Phase-4 hidden worker entrypoint (`forge worker`, Slice 4.2). Instance-scoped like the daemon commands at the
+    * routing layer — no config / assets / per-checkout lock here (the real feature loop in 4.2.3 takes its own
+    * re-rooted per-worker lock); only `paths.home` matters. For the 4.2.1 spike the handler phones home to the instance
+    * socket and exits.
+    */
+  private def runWorker(invocation: Invocation, paths: ForgePaths): IO[ExitCode] =
+    CliParser.parseWorker(invocation.rest) match
+      case Left(err) => usageError(err)
+      case Right(command) => WorkerCommands.run(paths.home, command)
 
   // --- read-only: config, no lock -------------------------------------------
 
