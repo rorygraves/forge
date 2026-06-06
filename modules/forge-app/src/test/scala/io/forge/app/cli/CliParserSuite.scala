@@ -1,5 +1,6 @@
 package io.forge.app.cli
 
+import io.forge.app.cli.DaemonCommand
 import io.forge.core.{FeatureId, InstanceName, PieceId}
 import io.forge.git.branch.ForgeCommand
 import io.forge.git.branch.ForgeCommand.ReadOnlyKind
@@ -212,6 +213,41 @@ class CliParserSuite extends munit.FunSuite:
       CliParser.parseInstance("add-repo", Vector("/repo", "--instance")),
       Left(CliError.MissingFlagValue("--instance"))
     )
+  }
+
+  // --- Task 4.1.3: daemon commands ------------------------------------------
+
+  test("phase1 classifies daemon as the connector-free Daemon class") {
+    val Right(inv) = CliParser.phase1(List("daemon", "start")): @unchecked
+    assertEquals(inv.commandClass, CommandClass.Daemon)
+    assert(!inv.needsConnector)
+    assertEquals(inv.rest, Vector("start"))
+  }
+
+  test("parseDaemon builds each subcommand, with and without --instance, in either order") {
+    assertEquals(CliParser.parseDaemon(Vector("start")), Right(DaemonCommand.Start(None)))
+    assertEquals(CliParser.parseDaemon(Vector("stop")), Right(DaemonCommand.Stop(None)))
+    assertEquals(CliParser.parseDaemon(Vector("status")), Right(DaemonCommand.Status(None)))
+    assertEquals(
+      CliParser.parseDaemon(Vector("start", "--instance", "demo")),
+      Right(DaemonCommand.Start(Some(InstanceName("demo"))))
+    )
+    // --instance value must not be mistaken for the subcommand positional when the flag leads.
+    assertEquals(
+      CliParser.parseDaemon(Vector("--instance", "demo", "status")),
+      Right(DaemonCommand.Status(Some(InstanceName("demo"))))
+    )
+  }
+
+  test("parseDaemon rejects a missing or unknown subcommand") {
+    assertEquals(CliParser.parseDaemon(Vector.empty), Left(CliError.MissingDaemonSubcommand))
+    // Only --instance present → still no subcommand positional.
+    assertEquals(CliParser.parseDaemon(Vector("--instance", "demo")), Left(CliError.MissingDaemonSubcommand))
+    assertEquals(CliParser.parseDaemon(Vector("restart")), Left(CliError.UnknownDaemonSubcommand("restart")))
+  }
+
+  test("parseDaemon rejects a valueless --instance flag") {
+    assertEquals(CliParser.parseDaemon(Vector("start", "--instance")), Left(CliError.MissingFlagValue("--instance")))
   }
 
   // --- Task 4.0.4: extractInstance on the feature-command path ----------------

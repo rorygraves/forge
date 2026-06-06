@@ -7,6 +7,7 @@ import io.forge.app.cli.{CliError, CliParser, CommandClass, Invocation}
 import io.forge.app.command.{
   unlock,
   CommandRouter,
+  DaemonCommands,
   InstanceCommands,
   InstancePaths,
   ReadOnlyContext,
@@ -65,6 +66,7 @@ object Main extends IOApp:
       case CommandClass.ReadOnly => runReadOnly(invocation, paths)
       case CommandClass.StateChanging => runStateChanging(invocation, paths)
       case CommandClass.Instance => runInstance(invocation, paths)
+      case CommandClass.Daemon => runDaemon(invocation, paths)
 
   // --- step 2: repo-root ----------------------------------------------------
 
@@ -98,6 +100,18 @@ object Main extends IOApp:
     CliParser.parseInstance(invocation.name, invocation.rest) match
       case Left(err) => usageError(err)
       case Right(command) => InstanceCommands.run(paths.home, command)
+
+  // --- daemon: no config, no per-checkout lock ------------------------------
+
+  /** Phase-4 daemon supervisor commands (`daemon start | stop | status`, Task 4.1.3). Instance-scoped like the registry
+    * commands: no config, no assets, no per-checkout lock — `start` takes the *instance* lock inside
+    * [[DaemonCommands]]; `stop` / `status` are JSON-RPC client calls. Only `paths.home` matters; `repoRoot` is
+    * irrelevant.
+    */
+  private def runDaemon(invocation: Invocation, paths: ForgePaths): IO[ExitCode] =
+    CliParser.parseDaemon(invocation.rest) match
+      case Left(err) => usageError(err)
+      case Right(command) => DaemonCommands.run(paths.home, command)
 
   // --- read-only: config, no lock -------------------------------------------
 

@@ -27,8 +27,8 @@
 > restart by rebuilding its whole view from the instance log** — the §6.4 contract
 > every later slice sits on.
 >
-> **Status:** 🚧 open — Tasks 4.1.1 (IPC spike) and 4.1.2 (durability core) ✅
-> landed. Tasks 4.1.3 (supervisor), 4.1.4 (worker subscribe), 4.1.5 (crash-recovery
+> **Status:** 🚧 open — Tasks 4.1.1 (IPC spike), 4.1.2 (durability core), and 4.1.3
+> (daemon supervisor) ✅ landed. Tasks 4.1.4 (worker subscribe), 4.1.5 (crash-recovery
 > + close-out) open.
 
 ---
@@ -114,7 +114,7 @@ a "worker" in 4.1 is an instance-store record + an exported event feed.
   `FileStateCache` idiom) + `verifyAgainstLog`. Unit tests mirroring
   `FileActionLogSuite` / `FileStateCacheSuite` / `RebuildStateSuite`.
 
-- [ ] **Task 4.1.3 — daemon supervisor: instance lock + state store wiring +
+- [x] **Task 4.1.3 — daemon supervisor: instance lock + state store wiring +
   lifecycle.** A `Daemon` that, on `start`: acquires the instance lock
   (`FileProcessLock(Instance.lockFile, Instance.lockMetadataFile)`, refusing a
   live holder), rebuilds `InstanceState` from the log (Task 4.1.2), binds the
@@ -199,6 +199,35 @@ a "worker" in 4.1 is an instance-store record + an exported event feed.
   15 → 43, full `sbt test` green, `scalafmtCheckAll` clean, smell sweep passes. Tasks
   4.1.3 (supervisor), 4.1.4 (worker subscribe), 4.1.5 (crash-recovery + close-out)
   open.
+- **2026-06-06** — **Task 4.1.3 (daemon supervisor) landed.** The daemon mechanics
+  live in `forge-daemon` (the module's stated purpose — durable state + the JSON-RPC
+  control API), the supervisor *lifecycle* in `forge-app` (where the §13
+  `FileProcessLock` lives), resolving the **module-placement** question this task
+  forced: `forge-daemon dependsOn forge-instance` only, the lock sits in `forge-app`,
+  and `forge-app` now `dependsOn forge-daemon` — no package move, no cycle.
+  `DaemonState` (forge-daemon) wraps `FileInstanceLog` + `FileInstanceStateCache`
+  behind one in-memory `Ref[IO, InstanceState]` and enforces §6.3.1 single-writer
+  (`record` = append-to-log → fold-in-memory → save-cache); `DaemonState.boot`
+  rebuilds from the canonical log via `verifyAgainstLog` then appends this boot's
+  `daemon.started` (so `bootCount` = rebuilt + 1). `RebuildInstanceState.step`
+  exposes the incremental fold the single-writer path needs. `Daemon` (forge-daemon)
+  builds the `status` / `shutdown` handler and `serveUntilShutdown` (fs2
+  `interruptWhen` on a shutdown `Deferred`; `shutdown` acks then fires the stop on a
+  forked `ShutdownGrace`=250ms fiber so the ack flushes before the socket tears
+  down). `forge daemon start|stop|status` (forge-app `DaemonCommands`): `start`
+  foreground holding the instance lock (`acceptStale = true` → a crashed daemon's
+  stale lock is reclaimable on restart; a *live* second start → `Held` → exit 2),
+  `stop`/`status` are `DaemonClient` round-trips (connect failure → "no daemon
+  running", exit 1). New `CommandClass.Daemon` + `DaemonCommand` ADT + `parseDaemon`
+  (mirrors the 4.0.3 instance-command shape; `--instance` else sole-instance
+  fallback); wired into `Main`. Refactor: the sole-instance resolution + diagnostics
+  pulled into a shared `InstanceResolver` (`InstanceCommands` now delegates).
+  `DaemonLifecycleSuite` (forge-daemon: boot/bootCount, restart-rebuilds-from-log-
+  with-cache-deleted, status-round-trip + shutdown-stops-serve) + `DaemonCommandsSuite`
+  (forge-app: start→status→stop, second-start-refused, no-daemon, unknown-instance) +
+  `CliParserSuite` daemon cases. `forge-daemon` 3 → 6, full `sbt test` green,
+  `scalafmtCheckAll` clean, smell sweep passes. Tasks 4.1.4 (worker subscribe), 4.1.5
+  (crash-recovery + close-out) open.
 
 ---
 

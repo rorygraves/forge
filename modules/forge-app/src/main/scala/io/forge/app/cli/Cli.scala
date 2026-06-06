@@ -34,6 +34,13 @@ enum CommandClass:
     */
   case Instance
 
+  /** `daemon start | daemon stop | daemon status` — Phase-4 §6 daemon supervisor commands (Task 4.1.3). Instance-scoped
+    * like [[Instance]] (no [[io.forge.app.config.ForgeConfig]], no connector, no per-checkout lock). `start` runs the
+    * foreground supervisor holding the **instance** lock; `stop` / `status` are JSON-RPC client calls to a running
+    * daemon. Parsed via [[CliParser.parseDaemon]] into a [[DaemonCommand]].
+    */
+  case Daemon
+
 /** Phase-1 parse result: enough to route resource setup, with per-command args deferred to [[CliParser.phase2]]. */
 final case class Invocation(
     repoRoot: Option[String],
@@ -60,6 +67,23 @@ object InstanceCommand:
   final case class AddRepo(instance: Option[InstanceName], repoPath: String) extends InstanceCommand
   final case class ListRepos(instance: Option[InstanceName]) extends InstanceCommand
 
+/** Parsed Phase-4 daemon supervisor command (Task 4.1.3) — the [[CommandClass.Daemon]] analogue of [[InstanceCommand]].
+  * Each subcommand carries an **optional** target instance: `Some(name)` from an explicit `--instance <name>`, or
+  * `None` to let the handler resolve the default (the sole instance when exactly one exists), exactly as
+  * [[InstanceCommand]]'s `add-repo` / `list-repos` do.
+  */
+sealed trait DaemonCommand extends Product with Serializable:
+  def instance: Option[InstanceName]
+object DaemonCommand:
+  /** `forge daemon start` — run the foreground supervisor (holds the instance lock for its lifetime). */
+  final case class Start(instance: Option[InstanceName]) extends DaemonCommand
+
+  /** `forge daemon stop` — ask a running daemon to shut down (a `shutdown` JSON-RPC call). */
+  final case class Stop(instance: Option[InstanceName]) extends DaemonCommand
+
+  /** `forge daemon status` — render a running daemon's status snapshot (a `status` JSON-RPC call). */
+  final case class Status(instance: Option[InstanceName]) extends DaemonCommand
+
 /** Argv parse failures. All map to `EX_USAGE` (exit 64) at the `Main` boundary. */
 sealed trait CliError extends Product with Serializable:
   def message: String
@@ -69,7 +93,7 @@ object CliError:
     def message: String =
       "no command given; expected one of: " +
         "new, spec, run, status, resume, reconcile, refresh-cache, abandon, profile, rebuild-state, unlock, tail, " +
-        "stats, tui, init-instance, add-repo, list-repos"
+        "stats, tui, init-instance, add-repo, list-repos, daemon"
 
   final case class UnknownCommand(name: String) extends CliError:
     def message: String = s"unknown command '$name'"
@@ -100,6 +124,12 @@ object CliError:
 
   final case class MissingRepoPath(command: String) extends CliError:
     def message: String = s"'$command' requires a <path> argument"
+
+  case object MissingDaemonSubcommand extends CliError:
+    def message: String = "'daemon' requires a subcommand: start, stop, or status"
+
+  final case class UnknownDaemonSubcommand(name: String) extends CliError:
+    def message: String = s"unknown daemon subcommand '$name'; expected one of: start, stop, status"
 
 object CliParser:
 
@@ -133,6 +163,7 @@ object CliParser:
       case "status" | "tail" | "rebuild-state" | "stats" | "tui" => Right((CommandClass.ReadOnly, false))
       case "unlock" => Right((CommandClass.UnlockForce, false))
       case "init-instance" | "add-repo" | "list-repos" => Right((CommandClass.Instance, false))
+      case "daemon" => Right((CommandClass.Daemon, false))
       case other => Left(CliError.UnknownCommand(other))
 
   // --- phase 2 ---------------------------------------------------------------
@@ -252,6 +283,22 @@ object CliParser:
         extractInstance(rest).map((instance, _) => InstanceCommand.ListRepos(instance))
 
       case other => Left(CliError.UnknownCommand(other))
+
+  /** Parse a [[CommandClass.Daemon]] invocation (`daemon <subcommand> [--instance <name>]`) into a [[DaemonCommand]].
+    * The fourth parse entry point alongside [[phase2]] / [[parseInstance]]: like instance commands, daemon commands are
+    * CLI-layer-only and instance-scoped. `--instance` is pulled out wherever it appears (so it isn't mistaken for the
+    * subcommand positional); the leading positional names the subcommand. Usage errors surface as [[CliError]] →
+    * `EX_USAGE` (exit 64) at the `Main` boundary.
+    */
+  def parseDaemon(rest: Vector[String]): Either[CliError, DaemonCommand] =
+    extractInstance(rest).flatMap { (instance, remaining) =>
+      firstPositional(remaining) match
+        case None => Left(CliError.MissingDaemonSubcommand)
+        case Some("start") => Right(DaemonCommand.Start(instance))
+        case Some("stop") => Right(DaemonCommand.Stop(instance))
+        case Some("status") => Right(DaemonCommand.Status(instance))
+        case Some(other) => Left(CliError.UnknownDaemonSubcommand(other))
+    }
 
   /** First positional (non-`--`) token, if any. */
   private def firstPositional(rest: Vector[String]): Option[String] = rest.find(t => !t.startsWith("--"))

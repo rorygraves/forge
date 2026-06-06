@@ -5,7 +5,7 @@ import cats.effect.std.Console
 import io.forge.app.cli.InstanceCommand
 import io.forge.app.lock.{FileProcessLock, LockAcquireResult, LockMetadata}
 import io.forge.core.InstanceName
-import io.forge.instance.{FileInstanceStore, Instance, InstanceError, InstanceStore}
+import io.forge.instance.{FileInstanceStore, Instance, InstanceStore}
 
 import java.net.InetAddress
 import java.time.Instant
@@ -25,8 +25,8 @@ object InstanceCommands:
     val store = new FileInstanceStore(home)
     command match
       case InstanceCommand.InitInstance(name) => initInstance(home, store, name)
-      case InstanceCommand.AddRepo(instance, repoRaw) => addRepo(home, store, instance, repoRaw)
-      case InstanceCommand.ListRepos(instance) => listRepos(home, store, instance)
+      case InstanceCommand.AddRepo(instance, repoRaw) => addRepo(store, instance, repoRaw)
+      case InstanceCommand.ListRepos(instance) => listRepos(store, instance)
 
   // --- init-instance ---------------------------------------------------------
 
@@ -40,19 +40,20 @@ object InstanceCommands:
             .println(s"forge init-instance ${name.value}: created instance at ${created.dir}")
             .as(ExitCode.Success)
         case Left(err) =>
-          Console[IO].errorln(s"forge init-instance ${name.value}: ${render(err)}").as(ExitCode(1))
+          Console[IO]
+            .errorln(s"forge init-instance ${name.value}: ${InstanceResolver.renderError(err)}")
+            .as(ExitCode(1))
       }
     }
 
   // --- add-repo --------------------------------------------------------------
 
   private def addRepo(
-      home: os.Path,
       store: InstanceStore,
       instance: Option[InstanceName],
       repoRaw: String
   ): IO[ExitCode] =
-    resolveInstance(home, store, instance, "add-repo").flatMap {
+    resolveInstance(store, instance, "add-repo").flatMap {
       case Left(code) => IO.pure(code)
       case Right(resolved) =>
         // `repoRaw` is resolved against the caller's cwd at handler time (not at parse time), so a relative `add-repo .`
@@ -65,7 +66,7 @@ object InstanceCommands:
                   .println(s"forge add-repo: registered ${entry.path} with instance ${resolved.name.value}")
                   .as(ExitCode.Success)
               case Left(err) =>
-                Console[IO].errorln(s"forge add-repo: ${render(err)}").as(ExitCode(1))
+                Console[IO].errorln(s"forge add-repo: ${InstanceResolver.renderError(err)}").as(ExitCode(1))
             }
           }
         }
@@ -73,8 +74,8 @@ object InstanceCommands:
 
   // --- list-repos (read-only — no lock) --------------------------------------
 
-  private def listRepos(home: os.Path, store: InstanceStore, instance: Option[InstanceName]): IO[ExitCode] =
-    resolveInstance(home, store, instance, "list-repos").flatMap {
+  private def listRepos(store: InstanceStore, instance: Option[InstanceName]): IO[ExitCode] =
+    resolveInstance(store, instance, "list-repos").flatMap {
       case Left(code) => IO.pure(code)
       case Right(resolved) =>
         store.listRepos(resolved).flatMap {
@@ -85,47 +86,22 @@ object InstanceCommands:
           case Right(repos) =>
             Console[IO].println(repos.map(_.path).mkString("\n")).as(ExitCode.Success)
           case Left(err) =>
-            Console[IO].errorln(s"forge list-repos: ${render(err)}").as(ExitCode(1))
+            Console[IO].errorln(s"forge list-repos: ${InstanceResolver.renderError(err)}").as(ExitCode(1))
         }
     }
 
   // --- instance resolution ---------------------------------------------------
 
-  /** Resolve the instance an `add-repo` / `list-repos` targets: the `--instance <name>` value when given, else the sole
-    * instance when exactly one exists. Zero or many instances with no flag is a usage-class failure that tells the
-    * operator how to disambiguate. Returns `Left(exitCode)` having already printed the diagnostic.
+  /** Resolve the instance an `add-repo` / `list-repos` targets via the shared [[InstanceResolver]] (the sole-instance
+    * fallback + disambiguation diagnostics live there, reused by [[DaemonCommands]]). `home` is unused now that
+    * resolution is store-driven; kept off the signature.
     */
   private def resolveInstance(
-      home: os.Path,
       store: InstanceStore,
       instance: Option[InstanceName],
       label: String
   ): IO[Either[ExitCode, Instance]] =
-    instance match
-      case Some(name) =>
-        store.load(name).flatMap {
-          case Right(resolved) => IO.pure(Right(resolved))
-          case Left(err) => Console[IO].errorln(s"forge $label: ${render(err)}").as(Left(ExitCode(1)))
-        }
-      case None =>
-        store.list.flatMap {
-          case Vector(only) =>
-            store.load(only).flatMap {
-              case Right(resolved) => IO.pure(Right(resolved))
-              case Left(err) => Console[IO].errorln(s"forge $label: ${render(err)}").as(Left(ExitCode(1)))
-            }
-          case Vector() =>
-            Console[IO]
-              .errorln(s"forge $label: no instances exist. Create one with `forge init-instance <name>`.")
-              .as(Left(ExitCode(1)))
-          case many =>
-            Console[IO]
-              .errorln(
-                s"forge $label: multiple instances exist (${many.map(_.value).mkString(", ")}); " +
-                  "pick one with `--instance <name>`."
-              )
-              .as(Left(ExitCode(1)))
-        }
+    InstanceResolver.resolve(store, instance, label)
 
   // --- instance lock ---------------------------------------------------------
 
@@ -172,13 +148,3 @@ object InstanceCommands:
   private def holderSuffix(meta: Option[LockMetadata]): String = meta match
     case Some(m) => s" Holder: pid=${m.pid} host=${m.hostname} command='${m.command}' started=${m.startedAt}."
     case None => ""
-
-  private def render(err: InstanceError): String = err match
-    case InstanceError.NoSuchInstance(name) =>
-      s"no such instance '${name.value}' (create it with `forge init-instance ${name.value}`)"
-    case InstanceError.DuplicateInstance(name) => s"instance '${name.value}' already exists"
-    case InstanceError.RepoNotFound(path) => s"path does not exist or is not a directory: $path"
-    case InstanceError.NotAGitRepo(path) => s"not a git working tree (no .git entry): $path"
-    case InstanceError.DuplicateRepo(path) => s"repo already registered with this instance: $path"
-    case InstanceError.Malformed(file, cause) => s"malformed registry at $file: ${cause.getMessage}"
-    case InstanceError.IoFailure(file, cause) => s"I/O error at $file: ${cause.getMessage}"

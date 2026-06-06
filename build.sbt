@@ -73,11 +73,13 @@ lazy val `forge-instance` = (project in file("modules/forge-instance"))
     libraryDependencies ++= Seq(catsEffect, upickle, osLib)
   )
 
-// Phase-4 Slice 4.1 (Task 4.1.1): the long-running **daemon** supervisor. Owns the instance lock, the durable instance
-// state store (append-only instance action log + rebuildable cache — contract §6.4 / O8), and the JSON-RPC-2.0-over-
-// Unix-socket status/control API (O2) that the CLI/TUI clients speak. Depends on forge-instance (Instance model + lock
-// + socket path) and transitively forge-core. fs2-io supplies the `JdkUnixSockets` transport (JDK-21 native). No daemon
-// lifecycle / worker process / container yet beyond the skeleton — see docs/design-4.1.md.
+// Phase-4 Slice 4.1: the long-running **daemon** mechanics. Owns the durable instance state store (append-only instance
+// action log + rebuildable cache — contract §6.4 / O8) via forge-instance, plus the daemon's runtime snapshot
+// (`DaemonState`, Task 4.1.3) and the JSON-RPC-2.0-over-Unix-socket status/control API (O2) the CLI/TUI clients speak.
+// The supervisor *lifecycle* (instance-lock acquisition + the `forge daemon` CLI) composes in forge-app, where the §13
+// `FileProcessLock` lives. Depends on forge-instance (Instance model + socket path + durability core) and transitively
+// forge-core. fs2-io supplies the `JdkUnixSockets` transport (JDK-21 native). No worker process / container yet — see
+// docs/design-4.1.md.
 lazy val `forge-daemon` = (project in file("modules/forge-daemon"))
   .dependsOn(`forge-instance`)
   .settings(commonSettings)
@@ -125,7 +127,9 @@ lazy val `forge-tui` = (project in file("modules/forge-tui"))
 lazy val `forge-app` = (project in file("modules/forge-app"))
   // Phase-4 Slice 4.0 (Task 4.0.3): forge-instance supplies the instance registry store + Instance handle for the
   // `init-instance` / `add-repo` / `list-repos` CLI commands (and, in 4.0.4, the worker re-root paths).
-  .dependsOn(`forge-core`, `forge-agents`, `forge-git`, `forge-specs`, `forge-tui`, `forge-instance`)
+  // Slice 4.1 (Task 4.1.3): forge-daemon supplies the daemon mechanics (`DaemonState` / `Daemon` / `DaemonClient`) the
+  // `forge daemon start|stop|status` CLI composes around the §13 `FileProcessLock` that lives here.
+  .dependsOn(`forge-core`, `forge-agents`, `forge-git`, `forge-specs`, `forge-tui`, `forge-instance`, `forge-daemon`)
   .settings(commonSettings)
   .settings(
     libraryDependencies ++= Seq(catsEffect, fs2Core, osLib, catsEffectTestkit),

@@ -31,6 +31,12 @@ object RebuildInstanceState:
   def fold(records: Vector[InstanceLogRecord]): InstanceState =
     records.foldLeft(empty)((state, record) => record.event.fold(state)(applyEvent(state, _)))
 
+  /** Apply one already-decoded event to an existing state — the incremental fold step the daemon's single-writer path
+    * uses to fold a freshly appended event into its in-memory [[InstanceState]] without replaying the whole log (Task
+    * 4.1.3). `fold(records)` is exactly `records.flatMap(_.event).foldLeft(empty)(step)`.
+    */
+  def step(state: InstanceState, event: InstanceEvent): InstanceState = applyEvent(state, event)
+
   private def applyEvent(state: InstanceState, event: InstanceEvent): InstanceState =
     event match
       case InstanceEvent.DaemonStarted(_) =>
