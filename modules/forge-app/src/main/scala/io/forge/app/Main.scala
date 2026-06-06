@@ -118,9 +118,10 @@ object Main extends IOApp:
   // --- worker: hidden, daemon-spawned (Task 4.2.1) --------------------------
 
   /** Phase-4 hidden worker entrypoint (`forge worker`, Slice 4.2). Instance-scoped like the daemon commands at the
-    * routing layer — no config / assets / per-checkout lock here (the real feature loop in 4.2.3 takes its own
-    * re-rooted per-worker lock); only `paths.home` matters. For the 4.2.1 spike the handler phones home to the instance
-    * socket and exits.
+    * routing layer — no config / assets / per-checkout lock here; only `paths.home` (the `~/.forge` anchor) matters,
+    * `repoRoot` is irrelevant (the worker resolves its own re-rooted clone paths). The handler resolves the worker's
+    * isolated clone, loads the clone config + installs assets, and drives the v1 feature loop while exporting its feed
+    * to the daemon ([[WorkerCommands]] → `WorkerLoop` → `WorkerFeedExporter`, Task 4.2.3).
     */
   private def runWorker(invocation: Invocation, paths: ForgePaths): IO[ExitCode] =
     CliParser.parseWorker(invocation.rest) match

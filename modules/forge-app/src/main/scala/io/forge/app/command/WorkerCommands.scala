@@ -3,29 +3,26 @@ package io.forge.app.command
 import cats.effect.{ExitCode, IO}
 import cats.effect.std.Console
 import io.forge.app.cli.WorkerCommand
-import io.forge.daemon.{DaemonClient, JsonRpc}
+import io.forge.app.config.{ConfigError, ForgeConfigLoader}
+import io.forge.core.paths.ForgePaths
 import io.forge.instance.{FileInstanceStore, Instance, InstanceError}
 
-/** Task 4.2.1 — the hidden, daemon-spawned **worker** entrypoint (`forge worker`), the forge-app half of the B4
-  * worker-process boundary spike.
+/** The hidden, daemon-spawned **worker** entrypoint (`forge worker`), the forge-app half of the B4 worker-process
+  * boundary.
   *
   * The daemon supervisor (4.2.5) spawns this as a real child OS process via the `forge-daemon` `WorkerSpawner`, passing
-  * the instance, the worker id it was assigned, the repo, and the feature on argv. The worker then **phones home** to
-  * the instance's Unix-domain socket over the existing JSON-RPC transport: it registers itself, reports a status, and
-  * exports a couple of events (B3 event export). For the 4.2.1 spike that is the whole body — it proves a real
-  * forge-spawned process can reach the daemon and feed the instance log. The **real** `Orchestrator` feature loop
-  * (build over the isolated clone's re-rooted `ForgePaths`, export each appended `Action` as a `worker.event`) lands in
-  * Task 4.2.3; this scaffolds the connection so that drop-in has a proven channel.
+  * the instance, the worker id it was assigned, the repo, and the feature on argv. The worker resolves its **isolated
+  * clone** (`Instance.workerCheckout(workerId)`, provisioned by the supervisor via [[WorkerProvisioner]] before spawn —
+  * §4.3 / O10), re-roots its [[ForgePaths]] so the local-runtime family lives under the worker dir (B1), and runs the
+  * frozen v1 feature loop over it while exporting its action feed back to the daemon over the instance socket
+  * ([[WorkerLoop]] → [[WorkerFeedExporter]], B3).
   *
-  * Instance-scoped like [[DaemonCommands]]: `Main` routes here without config / assets / a per-checkout lock. The
-  * instance is resolved by its **explicit** name (the daemon never relies on the sole-instance fallback when spawning).
+  * Instance-scoped like [[DaemonCommands]]: `Main` routes here without config / assets / a per-checkout lock; the
+  * worker loads the clone's config and installs assets itself. The instance is resolved by its **explicit** name (the
+  * daemon never relies on the sole-instance fallback when spawning). Every reachable failure degrades to a non-zero
+  * exit with a diagnostic, never a crash, so a supervised worker's exit code is meaningful.
   */
 object WorkerCommands:
-
-  /** The status the spike reports after registering — a placeholder FSM-state name (the real loop reports the live
-    * `FsmState` name in 4.2.3).
-    */
-  private val SpikeStatus: String = "Refining"
 
   def run(home: os.Path, command: WorkerCommand): IO[ExitCode] =
     new FileInstanceStore(home).load(command.instance).flatMap {
@@ -35,76 +32,47 @@ object WorkerCommands:
           .as(ExitCode(1))
       case Left(err) =>
         Console[IO].errorln(s"forge worker: instance error: $err").as(ExitCode(1))
-      case Right(instance) => phoneHome(instance, command)
+      case Right(instance) => runOnClone(home, instance, command)
     }
 
-  /** Connect to the daemon socket and export the worker's lifecycle (register → status → a couple of events). Uses
-    * [[DaemonClient.callWithRetry]] for the register so a worker that out-races the daemon binding the socket retries
-    * briefly rather than failing; subsequent calls reuse the plain [[DaemonClient.call]] (the daemon is up by then). A
-    * connect failure means no daemon is listening (exit 1); a JSON-RPC failure response is surfaced (exit 1).
+  /** Resolve the worker's re-rooted clone [[ForgePaths]], load the clone's config, and drive the feature loop. A
+    * missing checkout (the supervisor should have provisioned it) or a malformed clone config degrades to a non-zero
+    * exit; an unreachable daemon / loop error degrades via [[WorkerLoop]]'s own handling below.
     */
-  private def phoneHome(instance: Instance, command: WorkerCommand): IO[ExitCode] =
-    val socket = instance.socketFile
-    val flow =
-      for
-        _ <- expectOk(
-          DaemonClient.callWithRetry(
-            socket,
-            JsonRpc.Request(
-              1L,
-              "register-worker",
-              ujson.Obj(
-                "workerId" -> command.workerId,
-                "repo" -> command.repo,
-                "feature" -> command.feature.value
-              )
-            )
-          ),
-          "register-worker"
-        )
-        _ <- expectOk(
-          DaemonClient.call(
-            socket,
-            JsonRpc.Request(2L, "worker-status", ujson.Obj("workerId" -> command.workerId, "status" -> SpikeStatus))
-          ),
-          "worker-status"
-        )
-        _ <- exportEvent(socket, 3L, command.workerId, "spawned")
-        _ <- exportEvent(socket, 4L, command.workerId, "heartbeat")
-        _ <- Console[IO].println(
-          s"forge worker '${command.workerId}': registered with daemon for instance " +
-            s"'${command.instance.value}' (feature ${command.feature.value})."
-        )
-      yield ExitCode.Success
-    flow.handleErrorWith { _ =>
-      Console[IO]
-        .errorln(
-          s"forge worker '${command.workerId}': could not reach the daemon at $socket " +
-            s"(is `forge daemon start --instance ${command.instance.value}` running?)."
-        )
-        .as(ExitCode(1))
+  private def runOnClone(home: os.Path, instance: Instance, command: WorkerCommand): IO[ExitCode] =
+    val checkout = instance.workerCheckout(command.workerId)
+    IO.blocking(os.exists(checkout)).flatMap {
+      case false =>
+        Console[IO]
+          .errorln(
+            s"forge worker '${command.workerId}': no clone at $checkout " +
+              s"(the daemon should have provisioned it before spawn)."
+          )
+          .as(ExitCode(1))
+      case true =>
+        val paths = new ForgePaths(checkout, home, localRootOpt = Some(instance.workerRoot(command.workerId)))
+        ForgeConfigLoader.load(paths).flatMap {
+          case Left(err) =>
+            Console[IO].errorln(s"forge worker '${command.workerId}': ${configErrorMessage(err)}").as(ExitCode(78))
+          case Right(config) =>
+            WorkerReporter
+              .daemon(instance.socketFile, command.workerId)
+              .flatMap(reporter => WorkerLoop.run(paths, config, reporter, command.repo, command.feature))
+              .handleErrorWith(degrade(instance, command))
+        }
     }
 
-  /** Export one synthetic per-feature event for the spike — a minimal `Action`-shaped object the daemon carries
-    * verbatim into the worker's exported-feed tail (the real loop exports the actual appended `Action` JSON in 4.2.3).
+  /** A loop error that escapes [[WorkerLoop]] — most often an unreachable daemon (the reporter's RPCs raise) — degrades
+    * to exit 1 with the daemon-down diagnostic, never a crash.
     */
-  private def exportEvent(socket: os.Path, id: Long, workerId: String, kind: String): IO[Unit] =
-    expectOk(
-      DaemonClient.call(
-        socket,
-        JsonRpc.Request(
-          id,
-          "worker-event",
-          ujson.Obj("workerId" -> workerId, "event" -> ujson.Obj("seq" -> ujson.Num((id - 3).toDouble), "kind" -> kind))
-        )
-      ),
-      "worker-event"
-    )
+  private def degrade(instance: Instance, command: WorkerCommand)(error: Throwable): IO[ExitCode] =
+    Console[IO]
+      .errorln(
+        s"forge worker '${command.workerId}': could not complete (${error.getMessage}). " +
+          s"Is `forge daemon start --instance ${command.instance.value}` running at ${instance.socketFile}?"
+      )
+      .as(ExitCode(1))
 
-  /** Raise on a JSON-RPC failure response so [[phoneHome]]'s `handleErrorWith` reports it; a success is discarded. */
-  private def expectOk(call: IO[JsonRpc.Response], method: String): IO[Unit] =
-    call.flatMap {
-      case _: JsonRpc.Response.Success => IO.unit
-      case JsonRpc.Response.Failure(_, err) =>
-        IO.raiseError(new RuntimeException(s"$method failed: ${err.message}"))
-    }
+  private def configErrorMessage(err: ConfigError): String = err match
+    case ConfigError.Malformed(path, cause) => s"malformed clone config at $path: ${cause.getMessage}"
+    case ConfigError.IoFailure(path, cause) => s"could not read clone config at $path: ${cause.getMessage}"

@@ -144,7 +144,7 @@ credential broker (all 4.3).
   minimal for 4.2. Proven against a throwaway local git repo (no network); smell
   sweep stays clean.
 
-- [ ] **Task 4.2.3 — worker runs the frozen v1 feature loop + exports its feed
+- [x] **Task 4.2.3 — worker runs the frozen v1 feature loop + exports its feed
   (B3).** Wire the `forge worker` entrypoint to `OrchestratorBuilder.build` over
   the 4.2.2 clone `ForgePaths` and `orch.run(featureId)`, with a feed exporter
   that tails the worker's own per-feature action log and pushes each new `Action`
@@ -243,6 +243,37 @@ credential broker (all 4.3).
   `Orchestrator` + picking the fetch source). `forge-app` +1 suite (6 tests), full `sbt
   test` green, `forge-it` Test/compile green, `scalafmtCheckAll` clean, ForgePaths smell
   sweep passes. Tasks 4.2.3–4.2.6 open.
+- **2026-06-06** — **Task 4.2.3 (worker runs the frozen v1 loop + exports its feed B3)
+  landed.** Three new forge-app pieces, the heavy `orch.run` tie-together deferred to the
+  4.2.6 live dogfood per "unit the seams, prove the real process live". (1)
+  **`WorkerReporter`** — the worker→daemon control seam (`register-worker` /
+  `worker-status` / `worker-event`), lifted out of the 4.2.1 spike's inlined `DaemonClient`
+  calls so the exporter + loop depend on a small interface; `WorkerReporter.daemon` phones
+  home over the instance socket (register via `callWithRetry`, the rest via `call`; a
+  JSON-RPC failure raises so the loop's degrade path reports it). (2)
+  **`WorkerFeedExporter`** — the **read-side** tail (§6.3.1): reads the per-feature log file
+  directly (`os.read.lines`, the `TailCommand` idiom — never the writer's `ActionLog`, so it
+  runs concurrently with the loop without touching the `seq` allocator), exporting each new
+  `Action` (`seq > watermark`, 0-based ⇒ `InitialWatermark = -1`) as a `worker-event` and an
+  `fsm.transition`'s `to` state name as a `worker-status`; the `to` name is read from the JSON
+  (`$type` last segment, or the bare-string singleton case) rather than decoding `FsmState`, so
+  a schema addition can't break the tail; a partially-flushed trailing line ends the read and is
+  picked up next tick. The watermark advances **per exported action** so a `follow`-cancel
+  boundary re-exports at most one action, never the batch. (3) **`WorkerLoop`** — register →
+  load manifest (a clone with no designed feature degrades to an `Abandoned` status + exit 1,
+  no connector needed) → install assets → build the real `Orchestrator` over the clone paths +
+  `orch.run` with the exporter tailing concurrently (`follow.background.use(_ => orch.run)`),
+  then a final `drainOnce` flush + an explicit terminal `worker-status`, rendered via
+  `TerminalReport`. **`WorkerCommands`** rewired: resolve the worker's re-rooted clone
+  `ForgePaths` (`Instance.workerCheckout`/`workerRoot`, B1), load the clone config, and drive —
+  every reachable failure (missing clone / malformed config / unreachable daemon) degrades to a
+  non-zero exit with a diagnostic, never a crash. **`WorkerFeedExporterSuite`** (5 tests) drives
+  the exporter end-to-end against a real in-process daemon (events + per-transition status +
+  watermark advance + idempotence + partial-line tolerance); **`WorkerCommandSuite`** updated to
+  the rewired entrypoint (clone-with-no-feature registers→Abandoned→exit 1, missing clone,
+  absent instance, no daemon, parse). `forge-app` now 498 unit tests (+10 this task), full `sbt test` green,
+  `forge-it` Test/compile green, `scalafmtCheckAll` clean, ForgePaths smell sweep passes.
+  Tasks 4.2.4–4.2.6 open.
 
 ---
 
