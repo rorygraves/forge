@@ -147,7 +147,7 @@ container runtime also exposes), so the supervisor is unchanged in shape.
     code earlier" (the full container-worker-reaches-the-daemon tie-together is the
     Task 4.3.6 dogfood).
 
-- [ ] **Task 4.3.2 — `Forgefile` tool pinning (O1).** A committed normative
+- [x] **Task 4.3.2 — `Forgefile` tool pinning (O1).** A committed normative
   `Forgefile` model (image + pinned tool versions; reuse a devcontainer/`Dockerfile`
   where present) + a parser, the source of truth for the image a worker's container
   runs. The Phase-3 `RepoProfile` validation hook (discovers defaults + validates
@@ -234,6 +234,32 @@ container runtime also exposes), so the supervisor is unchanged in shape.
   capture, kill, finalizer cleanup — no leaked containers). `forge-daemon` 29 → 32 (3 new
   always-on + 3 opt-in-skipped by default), full `sbt test` green, `scalafmtCheckAll` clean,
   ForgePaths smell sweep passes. Tasks 4.3.2–4.3.6 open.
+- **2026-06-06** — **Task 4.3.2 (`Forgefile` tool pinning, O1) landed.** The normative,
+  committed source of truth for a worker container's image + pinned tool versions, in
+  `forge-core` (the spine consumes it, the supervisor resolves the image — 4.3.4). (1)
+  **`Forgefile` model + parser (`io.forge.core.forgefile.Forgefile`)** — `Forgefile{image,
+  tools: Vector[ToolPin]}` over a minimal `Dockerfile`-flavoured directive grammar (`image
+  <ref>` exactly once; `tool <name> <version>` repeatable, duplicate name rejected; `#`/blank
+  lines ignored; full-line comments only, no inline). `parse` is fail-fast with a line-numbered
+  diagnostic (a committed source of truth that is malformed at all is one thing to fix). (2)
+  **The O1 discover-and-validate hook (`Forgefile.validate(forgefile, profile)`)** — perception,
+  **not** pinning: it cross-checks the perceived tool set (`RepoProfile.buildTool` + each gate
+  command's argv head) against the pinned set and returns non-fatal **warnings** (the Forgefile
+  wins; the profiler only flags drift so a container missing a needed tool is surfaced before a
+  worker runs blind). (3) **`ForgefileStore` seam** — `trait` + `none` + `FileForgefileStore`
+  over the new `ForgePaths.forgefile` (repo-root `Forgefile`, a peer to `Dockerfile`/devcontainer,
+  routed through `ForgePaths` so no call site spells the path). **Load-only** (human-authored,
+  never written) with the committed-source-of-truth read policy mirrored from `FileProfileStore`:
+  absent ⇒ `None`, present-but-malformed ⇒ the IO **fails loudly** (a typo'd pin must not degrade
+  silently to the default image). (4) **`ForgefileSuite`** — 15 always-on tests (no Docker,
+  `<60s`): parser happy-path + every error branch (line numbers, duplicates, arities, unknown
+  directive), `validate` (no-warning / unpinned-build-tool / dedup), and the `FileForgefileStore`
+  absent/valid/malformed read policy. `forge-core` 468 → 483, full `sbt test` green across all
+  modules, `scalafmtCheckAll` clean, ForgePaths smell sweep passes. Image resolution into the
+  `ContainerSpec` is wired by the supervisor in 4.3.4 (`forge-core` cannot depend on
+  `forge-daemon`'s `ContainerSpec`, so the resolution is just `forgefile.image` read there);
+  devcontainer/`Dockerfile` reuse where present is noted as a discovery refinement (carry-forward).
+  Tasks 4.3.3–4.3.6 open.
 
 ---
 
@@ -256,6 +282,14 @@ container runtime also exposes), so the supervisor is unchanged in shape.
   durable worker-side offsets + replay from the last-acked offset — is coupled to this
   slice's B2/O6 recovery handshake; revisit whether it lands here (with the reservation
   reconciliation) or stays a 4.5 hardening item once 4.3.4/4.3.5 land.
+- **Devcontainer / `Dockerfile` reuse where present** (O1) — Task 4.3.2 landed the
+  normative `Forgefile` (the source of truth for the image) but **not** the "reuse a
+  committed devcontainer/`Dockerfile` where present" fallback the §7 ruling allows. That
+  fallback means discovering such a file and `docker build`-ing an image from it (a build
+  step, not a pin), which is heavier than the parser this task scoped. Deferred: the
+  supervisor (4.3.4) resolves `Forgefile.image`, falling back to a default image when no
+  `Forgefile` is committed; devcontainer/`Dockerfile` discovery + build is added only if a
+  dogfood repo needs it.
 - **Non-Docker OCI runtimes** (Podman / colima, O7) — the seam is abstract and
   Docker-first; a second backend is added only if the host fleet needs it.
 - **Local bare/reference mirror clone cache** (O10) — carried from 4.2; still a

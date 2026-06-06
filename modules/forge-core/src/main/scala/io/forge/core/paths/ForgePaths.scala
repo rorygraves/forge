@@ -85,6 +85,14 @@ final class ForgePaths(val repoRoot: os.Path, val home: os.Path = os.home, local
     */
   val profileFile: os.Path = repoForgeDir / "profile.json"
 
+  /** `Forgefile` at the repo root — the committed normative tool-pinning descriptor (Phase-4 §7 / O1, Slice 4.3). A
+    * peer to a `Dockerfile`/devcontainer (top-level, human-authored), it is the source of truth for the image + pinned
+    * tool versions a worker's container runs ([[io.forge.core.forgefile.Forgefile]]). Anchored at [[repoRoot]] (the
+    * worker's clone under Phase-4 isolation), not under `.forge/`, because it sits alongside the repo's other build
+    * descriptors; routed through `ForgePaths` regardless so no call site hardcodes the path.
+    */
+  val forgefile: os.Path = repoRoot / "Forgefile"
+
   /** `.forge/overrides/` — per-key config override directory (§18 "per-repo overrides under `.forge/overrides/`"). */
   val overridesDir: os.Path = repoForgeDir / "overrides"
 
