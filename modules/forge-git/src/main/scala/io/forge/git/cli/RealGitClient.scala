@@ -172,6 +172,11 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
   override def branchExistsRemote(name: BranchName): IO[Either[GitError, Boolean]] =
     refExists(s"refs/remotes/origin/${name.value}")
 
+  override def clone(source: os.Path, dest: os.Path): IO[Either[GitError, Unit]] =
+    // Absolute source/dest, so `repoRoot` (the `run` cwd) is irrelevant beyond having to exist; the provisioner roots
+    // this client at the worker dir it just created. A non-empty `dest` makes git exit non-zero → GitError.Transient.
+    run(Vector("git", "clone", source.toString, dest.toString)).map(_.map(_ => ()))
+
   private def refExists(ref: String): IO[Either[GitError, Boolean]] =
     IO.blocking {
       val res = os

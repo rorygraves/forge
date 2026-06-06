@@ -28,8 +28,28 @@ final case class Instance(name: InstanceName, dir: os.Path):
   /** `instances/<name>/workers/<feature>/` — the B1 local-runtime re-root for a feature. Passed as
     * `ForgePaths(repoRoot, localRootOpt = Some(workerDir(feature)))` in Task 4.0.4, so the feature's log/state/lock
     * land under the instance dir while its committed specs stay in the repo checkout.
+    *
+    * This is the Slice-4.0 *feature-command* re-root path (`forge run --instance`, single-repo, no daemon, no clone),
+    * where a "worker" is only a directory and the checkout is the shared registered source. A daemon-spawned worker
+    * **process** (Slice 4.2) is keyed by its opaque `workerId` instead and owns an *isolated* clone — see
+    * [[workerRoot]] / [[workerCheckout]].
     */
   def workerDir(feature: FeatureId): os.Path = workersDir / feature.value
+
+  /** `instances/<name>/workers/<workerId>/` — the per-worker root for a **daemon-spawned worker process** (Slice 4.2,
+    * Task 4.2.2). This is the B1 `localRoot`: the worker's gitignored local-runtime family (action log, state cache +
+    * poll baselines, lock) lands here under `.forge/`, *outside* its checkout, while its committed `.forge/specs/` stay
+    * in the clone ([[workerCheckout]]). Keyed by the opaque worker id (a plain `String` for now — see
+    * [[InstanceEvent]]), not the feature, because a worker is a process the daemon supervises, not a feature directory.
+    */
+  def workerRoot(workerId: String): os.Path = workersDir / workerId
+
+  /** `instances/<name>/workers/<workerId>/checkout/` — the worker's **isolated working clone** of its registered repo
+    * (Phase-4 §10 O10 / §4.3, Task 4.2.2). The clone is the worker's `ForgePaths.repoRoot` (the committed family
+    * anchors here); the sibling [[workerRoot]] is its `localRoot`. One fresh full working clone per worker is the
+    * isolation invariant — never a shared checkout, never a mutable bare/reference mirror.
+    */
+  def workerCheckout(workerId: String): os.Path = workerRoot(workerId) / "checkout"
 
   /** `instances/<name>/.lock` — the instance-level OS lock file (Task 4.0.3). The `init-instance` / `add-repo` registry
     * commands serialize on this instead of the per-checkout `.forge/state/.lock`, since they mutate instance-scoped

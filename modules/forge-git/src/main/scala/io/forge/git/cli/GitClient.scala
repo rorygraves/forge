@@ -140,3 +140,14 @@ trait GitClient:
 
   /** `git show-ref --verify refs/remotes/origin/<name>` — exit 0 ⇒ exists. */
   def branchExistsRemote(name: BranchName): IO[Either[GitError, Boolean]]
+
+  /** `git clone <source> <dest>` — create a fresh isolated **working** clone of `source` at `dest` (Phase-4 O10: one
+    * isolated working clone per worker, Task 4.2.2). `source` and `dest` are absolute paths, so the result is
+    * independent of this client's `repoRoot` cwd (the cwd only needs to *exist*). `dest` must not already be a
+    * populated directory — `git clone` refuses to clone into a non-empty tree, surfaced as [[GitError.Transient]]; the
+    * worker provisioner guards the fresh-checkout invariant before calling. A local-path `source` clones via git's
+    * default object hardlinking (fast, and safe — the objects are immutable and the working trees independent), which
+    * *is* the O10 working clone; the optional bare/reference mirror cache is a deferred fetch-cost optimisation, never
+    * a mutable working tree.
+    */
+  def clone(source: os.Path, dest: os.Path): IO[Either[GitError, Unit]]

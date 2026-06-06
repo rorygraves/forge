@@ -26,7 +26,8 @@ final class FakeGitClient private (
     branchExistsRemoteFn: BranchName => IO[Either[GitError, Boolean]],
     stageFn: Vector[String] => IO[Either[GitError, Unit]],
     statusFn: Boolean => IO[Either[GitError, Vector[StatusEntry]]],
-    commitFn: String => IO[Either[GitError, CommitResult]]
+    commitFn: String => IO[Either[GitError, CommitResult]],
+    cloneFn: (os.Path, os.Path) => IO[Either[GitError, Unit]]
 ) extends GitClient:
 
   override def currentBranch: IO[Either[GitError, BranchName]] = currentBranchFn
@@ -50,6 +51,7 @@ final class FakeGitClient private (
   override def status(includeIgnored: Boolean): IO[Either[GitError, Vector[StatusEntry]]] = statusFn(includeIgnored)
   override def commit(message: String, author: Option[CommitIdentity]): IO[Either[GitError, CommitResult]] =
     commitFn(message)
+  override def clone(source: os.Path, dest: os.Path): IO[Either[GitError, Unit]] = cloneFn(source, dest)
 
 object FakeGitClient:
 
@@ -82,7 +84,9 @@ object FakeGitClient:
       private val stageFn: Vector[String] => IO[Either[GitError, Unit]] = (_: Vector[String]) => notConfigured("stage"),
       private val statusFn: Boolean => IO[Either[GitError, Vector[StatusEntry]]] = (_: Boolean) =>
         notConfigured("status"),
-      private val commitFn: String => IO[Either[GitError, CommitResult]] = (_: String) => notConfigured("commit")
+      private val commitFn: String => IO[Either[GitError, CommitResult]] = (_: String) => notConfigured("commit"),
+      private val cloneFn: (os.Path, os.Path) => IO[Either[GitError, Unit]] = (_: os.Path, _: os.Path) =>
+        notConfigured("clone")
   ):
     def currentBranch(response: Either[GitError, BranchName]): Builder = copy(currentBranchFn = IO.pure(response))
     def currentBranch(name: BranchName): Builder = currentBranch(Right(name))
@@ -154,6 +158,10 @@ object FakeGitClient:
     def commit(response: Either[GitError, CommitResult]): Builder = commit(_ => IO.pure(response))
     def commit(result: CommitResult): Builder = commit(Right(result))
 
+    def clone(fn: (os.Path, os.Path) => IO[Either[GitError, Unit]]): Builder = copy(cloneFn = fn)
+    def clone(response: Either[GitError, Unit]): Builder = clone((_, _) => IO.pure(response))
+    def cloneOk: Builder = clone(Right(()))
+
     def build: FakeGitClient = new FakeGitClient(
       currentBranchFn,
       currentShaFn,
@@ -171,7 +179,8 @@ object FakeGitClient:
       branchExistsRemoteFn,
       stageFn,
       statusFn,
-      commitFn
+      commitFn,
+      cloneFn
     )
 
   def builder: Builder = Builder()

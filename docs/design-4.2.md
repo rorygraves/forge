@@ -132,7 +132,7 @@ credential broker (all 4.3).
   unit-the-halves + live-prove-the-real-process discipline Slice 4.1 used (its
   Python-client stand-in becomes a real `forge worker` child here).
 
-- [ ] **Task 4.2.2 — isolated clone provisioning (O10) + per-worker `ForgePaths`
+- [x] **Task 4.2.2 — isolated clone provisioning (O10) + per-worker `ForgePaths`
   re-root (B1).** A `WorkerCheckout` / clone provisioner: given a `RegisteredRepo`
   source path + a worker dir, produce a fresh isolated **working** clone at
   `Instance.workerCheckout(worker)` (`workers/<worker>/checkout/`) and a
@@ -223,6 +223,26 @@ credential broker (all 4.3).
   cases). The real-`forge worker`-child-spawned-by-the-daemon tie-together is the
   Task 4.2.6 live dogfood. `forge-daemon` 11 → 14, `forge-app` +1 suite, full `sbt
   test` green, `scalafmtCheckAll` clean, smell sweep passes. Tasks 4.2.2–4.2.6 open.
+- **2026-06-06** — **Task 4.2.2 (isolated clone provisioning O10 + per-worker
+  `ForgePaths` re-root B1) landed.** (1) **`GitClient.clone(source, dest)`** added to
+  the one-shot git seam (`RealGitClient` shells `git clone`; cwd-independent — absolute
+  paths — so it runs from the just-created worker root; both `FakeGitClient`s grew the
+  method). (2) **`Instance.workerRoot(workerId)` / `workerCheckout(workerId)`** — the
+  daemon-spawned-worker path family (`workers/<workerId>/` + `…/checkout/`), keyed by
+  the opaque worker id (vs the Slice-4.0 feature-keyed `workerDir`, kept for the `forge
+  run --instance` v1-compat re-root). (3) **`WorkerProvisioner` (forge-app)** — creates
+  the worker root, `git clone`s the registered source into `…/checkout/`, and returns
+  `ForgePaths(repoRoot = checkout, localRootOpt = Some(workerRoot))` so the committed
+  family (`.forge/specs/`) anchors in the clone while log/state/lock re-root outside it;
+  `CheckoutExists` refuses a populated tree (no clobber — idempotent re-spawn is 4.2.5),
+  `CloneFailed` wraps a git error. `WorkerProvisionerSuite` proves it against a real
+  local seed repo (no network): the clone carries the committed manifest, the runtime
+  re-roots outside the clone, the source is left untouched, two workers get distinct
+  clones, plus the two refusal cases. Origin remapping (a local clone's `origin` points
+  at the source, not the GitHub remote) is deferred to 4.2.3/4.2.5 (wiring the real
+  `Orchestrator` + picking the fetch source). `forge-app` +1 suite (6 tests), full `sbt
+  test` green, `forge-it` Test/compile green, `scalafmtCheckAll` clean, ForgePaths smell
+  sweep passes. Tasks 4.2.3–4.2.6 open.
 
 ---
 
