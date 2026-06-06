@@ -38,13 +38,20 @@ object Daemon:
     *   - `create-workstream` (`{goal}`) → allocate a [[WorkstreamId]] and append a `workstream.created` (Task 4.2.4),
     *     answering `{workstreamId, goal}`. The `status` snapshot then reflects the new workstream + its `attention`
     *     projection; `forge workstream list` / `worker list` render it client-side.
+    *   - `spawn-worker` (`{workstreamId, repo, feature}`) → drive the [[Supervisor]] seam (Task 4.2.5): provision an
+    *     isolated clone, launch the `forge worker` child, record `worker.spawned`, and activate the workstream. Answers
+    *     `{workerId}`; a supervisor refusal is an `InternalError` carrying the reason.
     *   - `subscribe` → the live aggregated per-worker feed ([[DaemonState.subscribe]]), one response line per event,
     *     seeded with the rebuilt exported-feed tail. Long-lived: the connection stays open until the client disconnects
     *     or the daemon shuts down.
     *   - `shutdown` → ack, then (after [[ShutdownGrace]], on a forked fiber) complete `shutdown`, which
     *     [[serveUntilShutdown]] watches.
     */
-  def handler(state: DaemonState, shutdown: Deferred[IO, Unit]): DaemonSocketServer.Handler = {
+  def handler(
+      state: DaemonState,
+      shutdown: Deferred[IO, Unit],
+      supervisor: Supervisor = Supervisor.noop
+  ): DaemonSocketServer.Handler = {
     case req if req.method == "status" =>
       Stream.eval(state.snapshot.map(s => JsonRpc.Response.ok(req.id, s.toStatusJson)))
     case req if req.method == "register-worker" =>
@@ -55,6 +62,8 @@ object Daemon:
       Stream.eval(workerEvent(state, req))
     case req if req.method == "create-workstream" =>
       Stream.eval(createWorkstream(state, req))
+    case req if req.method == "spawn-worker" =>
+      Stream.eval(spawnWorker(supervisor, req))
     case req if req.method == "subscribe" =>
       state.subscribe().map(event => JsonRpc.Response.ok(req.id, eventWire(event)))
     case req if req.method == "shutdown" =>
@@ -132,6 +141,33 @@ object Daemon:
       yield InstanceEvent.WorkerEvent(workerId, event)
     recordOrReject(state, req, parsed)(_ => ujson.Obj("accepted" -> ujson.Bool(true)))
 
+  /** `spawn-worker` (`{workstreamId, repo, feature}`) → drive the [[Supervisor]] seam (Task 4.2.5): provision an
+    * isolated clone, launch the `forge worker` child, record `worker.spawned`, and activate the workstream. Answers
+    * `{workerId}` on success. A malformed param is `InvalidParams`; a supervisor refusal (unknown workstream, a
+    * clone/spawn failure, or a control-only daemon with no supervisor) is `InternalError` carrying the reason — the
+    * request was well-formed, the daemon could not satisfy it.
+    */
+  private def spawnWorker(supervisor: Supervisor, req: JsonRpc.Request): IO[JsonRpc.Response] =
+    val parsed =
+      for
+        workstreamRaw <- strField(req.params, "workstreamId")
+        workstreamId <- WorkstreamId.fromString(workstreamRaw).left.map(reason => s"invalid 'workstreamId': $reason")
+        repo <- strField(req.params, "repo")
+        featureRaw <- strField(req.params, "feature")
+        feature <- FeatureId.fromString(featureRaw).left.map(reason => s"invalid 'feature': $reason")
+      yield (workstreamId, repo, feature)
+    parsed match
+      case Left(detail) => IO.pure(JsonRpc.Response.fail(req.id, JsonRpc.RpcError.invalidParams(detail)))
+      case Right((workstreamId, repo, feature)) =>
+        supervisor.spawnWorker(workstreamId, repo, feature).map {
+          case Right(workerId) =>
+            JsonRpc.Response.ok(
+              req.id,
+              ujson.Obj("workerId" -> ujson.Str(workerId), "workstreamId" -> ujson.Str(workstreamId.value))
+            )
+          case Left(reason) => JsonRpc.Response.fail(req.id, JsonRpc.RpcError.internal(reason))
+        }
+
   /** Record a parsed event (single-writer append) and answer `ok(result(event))`, or answer `InvalidParams` when the
     * params failed to parse — a malformed worker request must not crash the connection.
     */
@@ -161,9 +197,14 @@ object Daemon:
   /** Serve the instance socket until `shutdown` completes, then release it. Completes normally on shutdown; cancelling
     * the surrounding fiber (e.g. SIGINT under `IOApp`) also tears the socket down via the server resource's finalizer.
     */
-  def serveUntilShutdown(socketPath: os.Path, state: DaemonState, shutdown: Deferred[IO, Unit]): IO[Unit] =
+  def serveUntilShutdown(
+      socketPath: os.Path,
+      state: DaemonState,
+      shutdown: Deferred[IO, Unit],
+      supervisor: Supervisor = Supervisor.noop
+  ): IO[Unit] =
     DaemonSocketServer
-      .serve(socketPath, handler(state, shutdown))
+      .serve(socketPath, handler(state, shutdown, supervisor))
       .interruptWhen(shutdown.get.attempt)
       .compile
       .drain

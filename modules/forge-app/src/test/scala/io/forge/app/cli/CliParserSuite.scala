@@ -1,7 +1,7 @@
 package io.forge.app.cli
 
 import io.forge.app.cli.{DaemonCommand, WorkstreamCommand}
-import io.forge.core.{FeatureId, InstanceName, PieceId}
+import io.forge.core.{FeatureId, InstanceName, PieceId, WorkstreamId}
 import io.forge.git.branch.ForgeCommand
 import io.forge.git.branch.ForgeCommand.ReadOnlyKind
 
@@ -309,6 +309,43 @@ class CliParserSuite extends munit.FunSuite:
 
   test("parseWorkstream rejects a worker subcommand other than list") {
     assertEquals(CliParser.parseWorkstream("worker", Vector("frob")), Left(CliError.UnknownWorkerSubcommand))
+  }
+
+  // --- Task 4.2.5: workstream spawn -----------------------------------------
+
+  test("parseWorkstream builds spawn with the ws-id positional + --repo/--feature, with and without --instance") {
+    assertEquals(
+      CliParser.parseWorkstream("workstream", Vector("spawn", "ws-1", "--repo", "/r", "--feature", "feat")),
+      Right(WorkstreamCommand.SpawnWorker(None, WorkstreamId("ws-1"), "/r", FeatureId("feat")))
+    )
+    assertEquals(
+      CliParser.parseWorkstream(
+        "workstream",
+        Vector("spawn", "ws-2", "--instance", "demo", "--repo", "/r", "--feature", "feat")
+      ),
+      Right(WorkstreamCommand.SpawnWorker(Some(InstanceName("demo")), WorkstreamId("ws-2"), "/r", FeatureId("feat")))
+    )
+  }
+
+  test("parseWorkstream spawn requires the ws-id positional, --repo, and --feature") {
+    assertEquals(
+      CliParser.parseWorkstream("workstream", Vector("spawn", "--repo", "/r", "--feature", "feat")),
+      Left(CliError.MissingWorkstreamId)
+    )
+    assertEquals(
+      CliParser.parseWorkstream("workstream", Vector("spawn", "ws-1", "--feature", "feat")),
+      Left(CliError.MissingFlagValue("--repo"))
+    )
+    assertEquals(
+      CliParser.parseWorkstream("workstream", Vector("spawn", "ws-1", "--repo", "/r")),
+      Left(CliError.MissingFlagValue("--feature"))
+    )
+  }
+
+  test("parseWorkstream spawn rejects an invalid feature id") {
+    CliParser.parseWorkstream("workstream", Vector("spawn", "ws-1", "--repo", "/r", "--feature", "Bad Id")) match
+      case Left(_: CliError.InvalidFeatureId) => ()
+      case other => fail(s"expected InvalidFeatureId, got $other")
   }
 
   // --- Task 4.0.4: extractInstance on the feature-command path ----------------

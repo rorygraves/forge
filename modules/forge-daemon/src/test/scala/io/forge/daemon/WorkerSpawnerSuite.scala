@@ -38,6 +38,21 @@ class WorkerSpawnerSuite extends CatsEffectSuite:
     }
   }
 
+  test("logFile redirects the child's stdout + stderr to a per-worker file (4.2.5)") {
+    val dir = os.temp.dir(prefix = "worker-log-")
+    val log = dir / "nested" / "worker.log" // nested dir proves start() creates the parent
+    RealWorkerSpawner
+      .spawn(WorkerSpec(List("sh", "-c", "echo to-out; echo to-err 1>&2"), cwd = os.pwd, logFile = Some(log)))
+      .use(_.awaitExit)
+      .flatMap { code =>
+        IO.blocking(os.read(log)).map { contents =>
+          assertEquals(code, 0)
+          assert(contents.contains("to-out"), s"stdout missing from $log: $contents")
+          assert(contents.contains("to-err"), s"stderr missing from $log: $contents")
+        }
+      }
+  }
+
   test("the Resource finalizer force-kills a child still alive at release") {
     for
       pidRef <- RealWorkerSpawner

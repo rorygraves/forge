@@ -3,7 +3,7 @@ package io.forge.app.command
 import cats.effect.{ExitCode, IO}
 import cats.effect.std.Console
 import io.forge.app.cli.WorkstreamCommand
-import io.forge.core.InstanceName
+import io.forge.core.{FeatureId, InstanceName, WorkstreamId}
 import io.forge.daemon.{DaemonClient, JsonRpc}
 import io.forge.instance.{FileInstanceStore, Instance, InstanceStore}
 
@@ -25,6 +25,8 @@ object WorkstreamCommands:
       case WorkstreamCommand.New(instance, goal) => newWorkstream(store, instance, goal)
       case WorkstreamCommand.List(instance) => listWorkstreams(store, instance)
       case WorkstreamCommand.WorkerList(instance) => listWorkers(store, instance)
+      case WorkstreamCommand.SpawnWorker(instance, ws, repo, feature) =>
+        spawnWorker(store, instance, ws, repo, feature)
 
   // --- workstream new --------------------------------------------------------
 
@@ -40,6 +42,42 @@ object WorkstreamCommands:
         case Right(JsonRpc.Response.Failure(_, err)) =>
           Console[IO].errorln(s"forge workstream new: ${err.message}").as(ExitCode(1))
         case Left(_) => notRunning("workstream new", resolved)
+      }
+    }
+
+  // --- workstream spawn (ask the daemon to spawn a worker) -------------------
+
+  /** `forge workstream spawn <ws> --repo <path> --feature <id>` — a `spawn-worker` RPC. The repo path is resolved
+    * against the operator's `os.pwd` to an absolute source path here (the daemon clones from it; its own cwd differs),
+    * then the daemon's supervisor provisions the clone + launches the `forge worker` child. A daemon-side refusal (an
+    * unknown/closed workstream, a clone/spawn failure) comes back as an error response → exit 1.
+    */
+  private def spawnWorker(
+      store: InstanceStore,
+      instance: Option[InstanceName],
+      ws: WorkstreamId,
+      repo: String,
+      feature: FeatureId
+  ): IO[ExitCode] =
+    withDaemon(store, instance, "workstream spawn") { resolved =>
+      val absRepo = os.Path(repo, os.pwd).toString
+      val req = JsonRpc.Request(
+        1L,
+        "spawn-worker",
+        ujson.Obj("workstreamId" -> ws.value, "repo" -> absRepo, "feature" -> feature.value)
+      )
+      DaemonClient.call(resolved.socketFile, req).attempt.flatMap {
+        case Right(JsonRpc.Response.Success(_, result)) =>
+          val id = result.objOpt.flatMap(_.get("workerId")).flatMap(_.strOpt).getOrElse("?")
+          Console[IO]
+            .println(
+              s"forge workstream spawn: spawned $id into ${ws.value} " +
+                s"(feature ${feature.value}, repo $absRepo) in instance '${resolved.name.value}'"
+            )
+            .as(ExitCode.Success)
+        case Right(JsonRpc.Response.Failure(_, err)) =>
+          Console[IO].errorln(s"forge workstream spawn: ${err.message}").as(ExitCode(1))
+        case Left(_) => notRunning("workstream spawn", resolved)
       }
     }
 

@@ -164,7 +164,7 @@ credential broker (all 4.3).
   liveness/pid field. CLI: `forge workstream new|list`, `forge worker list`
   (instance-scoped, client RPCs).
 
-- [ ] **Task 4.2.5 — multiplexed supervision + cadence + restart reconciliation.**
+- [x] **Task 4.2.5 — multiplexed supervision + cadence + restart reconciliation.**
   The daemon supervisor: on workstream activation, build each worker's
   `WorkerSpec` (resolving the `forge worker` launcher — the forge-specific half of
   4.2.1) + provision its clone (4.2.2) + spawn it (4.2.1) + record
@@ -303,6 +303,36 @@ credential broker (all 4.3).
   durable-rebuild) and `WorkstreamCommandsSuite` (4 — live-daemon new→list→worker-list + the
   no-daemon / unknown-instance exit-1 degrades). Full `sbt test` green, `forge-it` compile green,
   `scalafmtCheckAll` clean, ForgePaths smell sweep passes. Tasks 4.2.5–4.2.6 open.
+- **2026-06-06** — **Task 4.2.5 (multiplexed supervision + cadence + restart reconciliation) landed.** The §6.2/§6.4
+  supervisor, composing the 4.2.1–4.2.3 pieces. (1) **`Supervisor` seam (forge-daemon)** — a narrow trait
+  (`spawnWorker(workstreamId, repo, feature): IO[Either[String, String]]`) + `Supervisor.noop`, kept to forge-core types
+  so no forge-app type leaks down; `Daemon.handler`/`serveUntilShutdown` gained a `supervisor` param (default `noop`, so
+  the 4.1/4.2.4 in-process test daemons still compile) and a new **`spawn-worker` RPC** (`{workstreamId, repo, feature}`
+  → `{workerId}`; a refusal is an `InternalError` carrying the reason, a malformed param `InvalidParams`). (2)
+  **`WorkerSpec.logFile` (forge-daemon)** — per-worker stdout+stderr capture (`redirectErrorStream` + redirect to a
+  file, *not* the daemon's pipes) so a spawned worker survives the daemon cleanly across a crash+restart (the §6.4
+  premise). (3) **`WorkerLauncher` (forge-app)** — resolves the `forge worker` launch as `java -cp <java.class.path>
+  io.forge.app.Main worker --instance … --worker-id … --repo … --feature …`, robust in both the sbt run and the
+  assembled fat-jar; injectable for tests. (4) **`RealSupervisor` (forge-app)** — implements the seam: allocate `w-<n>`
+  (max-suffix+1), provision the isolated clone ([[WorkerProvisioner]]), launch the child, record `worker.spawned` (pid,
+  checkout, workstream), flip the workstream `Planning → Active`, and fork an **exit-watcher** recording `worker.exited`
+  with the real code. **No double-spawn** when a live worker already drives that workstream+feature. **`reconcile`**
+  (boot, §6.4) probes each still-`live` worker's pid: a dead one is surfaced as `worker.exited`, a live one is left
+  running and watched via its `ProcessHandle`. The **cadence** (§6.2) is a daemon-owned periodic supervision sweep
+  (`superviseLoop`, default 15s) that records `worker.exited` for any still-`live` worker whose pid has since died — the
+  backstop for an exit a watcher missed; it is *only* this liveness tick, the FSM-driving poll stays in the worker
+  (§9). Spawned children are intentionally **not** killed on daemon stop (launched via `Resource.allocated`, orphaned)
+  so they survive the restart. (5) **Wiring** — `DaemonCommands.runForeground` builds the `RealSupervisor`, runs
+  `reconcile` on boot, and backgrounds `superviseLoop` for the serving lifetime. (6) **CLI** — `forge workstream spawn
+  <ws-id> --repo <path> --feature <id>` (`WorkstreamCommand.SpawnWorker`, the repo resolved to an absolute source path
+  against the operator's `os.pwd` before the `spawn-worker` RPC). Tests: `WorkerSpawnerSuite` +1 (logFile redirect),
+  new `DaemonSpawnWorkerSuite` (4 — routing / refusal→InternalError / InvalidParams / no-supervisor), new
+  `SupervisorSuite` (7 — spawn+activate / exit-watch real code / idempotent / refusals / reconcile dead+alive /
+  cadence sweep, all over real `sh` children), `CliParserSuite` +3, `WorkstreamCommandsSuite` +2 (served-with-fake-
+  supervisor spawn→exit-0 + no-daemon exit-1). `forge-daemon` 38, `forge-app` 521 (+12 this task), full `sbt test`
+  green, `forge-it` Test/compile green, `scalafmtAll` clean, ForgePaths smell sweep passes. The real-`forge worker`-
+  child-spawned-by-a-real-daemon tie-together + the kill-9 reconciliation proof are the Task 4.2.6 live dogfood. Task
+  4.2.6 open.
 
 ---
 

@@ -1,9 +1,10 @@
 package io.forge.app.command
 
 import cats.effect.{ExitCode, IO, Resource}
+import cats.effect.kernel.Deferred
 import io.forge.app.cli.{DaemonCommand, WorkstreamCommand}
-import io.forge.core.InstanceName
-import io.forge.daemon.{DaemonClient, JsonRpc}
+import io.forge.core.{FeatureId, InstanceName, WorkstreamId}
+import io.forge.daemon.{Daemon, DaemonClient, DaemonState, JsonRpc, Supervisor}
 import io.forge.instance.{FileInstanceStore, Instance}
 import munit.CatsEffectSuite
 
@@ -50,6 +51,34 @@ class WorkstreamCommandsSuite extends CatsEffectSuite:
               assertEquals(body.obj("workstreams").arr.head.obj("workstreamId").str, "ws-1")
             case other => fail(s"expected status success, got $other")
       }
+    }
+  }
+
+  test("workstream spawn against a running daemon (fake supervisor) → exit 0 and the worker id is rendered") {
+    fixture.use { case (home, inst) =>
+      val fakeSupervisor: Supervisor = (_, _, _) => IO.pure(Right("w-7"))
+      for
+        state <- DaemonState.boot(inst, pid = 1L)
+        _ <- state.record(io.forge.instance.InstanceEvent.WorkstreamCreated(WorkstreamId("ws-1"), "g"))
+        shutdown <- Deferred[IO, Unit]
+        exit <- Daemon
+          .serveUntilShutdown(inst.socketFile, state, shutdown, fakeSupervisor)
+          .background
+          .use { _ =>
+            awaitReady(inst) *>
+              WorkstreamCommands
+                .run(home, WorkstreamCommand.SpawnWorker(Some(name), WorkstreamId("ws-1"), "/repo", FeatureId("feat")))
+                .guarantee(shutdown.complete(()).void)
+          }
+      yield assertEquals(exit, ExitCode.Success)
+    }
+  }
+
+  test("workstream spawn against no running daemon → exit 1, not a crash") {
+    fixture.use { case (home, _) =>
+      WorkstreamCommands
+        .run(home, WorkstreamCommand.SpawnWorker(Some(name), WorkstreamId("ws-1"), "/repo", FeatureId("feat")))
+        .map(assertEquals(_, ExitCode(1)))
     }
   }
 

@@ -1,6 +1,6 @@
 package io.forge.app.cli
 
-import io.forge.core.{FeatureId, InstanceName, PieceId}
+import io.forge.core.{FeatureId, InstanceName, PieceId, WorkstreamId}
 import io.forge.git.branch.ForgeCommand
 import io.forge.git.branch.ForgeCommand.ReadOnlyKind
 
@@ -134,6 +134,17 @@ object WorkstreamCommand:
     */
   final case class WorkerList(instance: Option[InstanceName]) extends WorkstreamCommand
 
+  /** `forge workstream spawn <ws-id> --repo <path> --feature <id>` — ask the daemon to spawn a worker into the
+    * workstream (a `spawn-worker` RPC, Task 4.2.5). The daemon's supervisor provisions an isolated clone, launches the
+    * `forge worker` child, records `worker.spawned`, and flips the workstream `Planning → Active`.
+    */
+  final case class SpawnWorker(
+      instance: Option[InstanceName],
+      workstreamId: WorkstreamId,
+      repo: String,
+      feature: FeatureId
+  ) extends WorkstreamCommand
+
 /** Argv parse failures. All map to `EX_USAGE` (exit 64) at the `Main` boundary. */
 sealed trait CliError extends Product with Serializable:
   def message: String
@@ -185,10 +196,16 @@ object CliError:
     def message: String = s"'worker' requires the $flag flag"
 
   case object MissingWorkstreamSubcommand extends CliError:
-    def message: String = "'workstream' requires a subcommand: new or list"
+    def message: String = "'workstream' requires a subcommand: new, list, or spawn"
 
   final case class UnknownWorkstreamSubcommand(name: String) extends CliError:
-    def message: String = s"unknown workstream subcommand '$name'; expected one of: new, list"
+    def message: String = s"unknown workstream subcommand '$name'; expected one of: new, list, spawn"
+
+  case object MissingWorkstreamId extends CliError:
+    def message: String = "'workstream spawn' requires a <workstream-id> argument"
+
+  final case class InvalidWorkstreamId(raw: String, reason: String) extends CliError:
+    def message: String = s"invalid workstream id '$raw': $reason"
 
   case object UnknownWorkerSubcommand extends CliError:
     def message: String = "'worker' is daemon-internal; the only operator form is `forge worker list`"
@@ -401,8 +418,29 @@ object CliParser:
             case None => Left(CliError.MissingWorkstreamSubcommand)
             case Some("list") => Right(WorkstreamCommand.List(instance))
             case Some("new") => flagValue(remaining, "--goal").map(WorkstreamCommand.New(instance, _))
+            case Some("spawn") => parseSpawn(instance, remaining)
             case Some(other) => Left(CliError.UnknownWorkstreamSubcommand(other))
     }
+
+  /** `workstream spawn <ws-id> --repo <path> --feature <id>` — the workstream id is the positional **immediately
+    * after** the `spawn` subcommand (the same "positional precedes the flags" convention `resume` uses); `--repo` /
+    * `--feature` are required flags. Reading the id positionally by its position after `spawn` (rather than a global
+    * positional scan) keeps a flag *value* like `--repo /r` from being mistaken for the id. The repo path stays a raw
+    * string (the [[io.forge.app.command.WorkstreamCommands]] handler resolves it against `os.pwd` before sending, so
+    * the daemon receives an absolute source path).
+    */
+  private def parseSpawn(
+      instance: Option[InstanceName],
+      remaining: Vector[String]
+  ): Either[CliError, WorkstreamCommand] =
+    val wsRawOpt = remaining.dropWhile(_ != "spawn").drop(1).headOption.filterNot(_.startsWith("--"))
+    for
+      wsRaw <- wsRawOpt.toRight(CliError.MissingWorkstreamId)
+      ws <- WorkstreamId.fromString(wsRaw).left.map(CliError.InvalidWorkstreamId(wsRaw, _))
+      repo <- flagValue(remaining, "--repo")
+      featureRaw <- flagValue(remaining, "--feature")
+      feature <- FeatureId.fromString(featureRaw).left.map(CliError.InvalidFeatureId(featureRaw, _))
+    yield WorkstreamCommand.SpawnWorker(instance, ws, repo, feature)
 
   /** A required `--flag <value>`: absent ⇒ [[CliError.MissingWorkerFlag]]; present-but-valueless (end of args or
     * another `--flag` next) ⇒ [[CliError.MissingFlagValue]].

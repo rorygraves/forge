@@ -33,11 +33,18 @@ trait WorkerSpawner:
 /** A fully-resolved child-process launch spec (Task 4.2.1). `command` is the argv (head = executable); `cwd` the
   * working directory; `env` extra environment entries layered over the inherited environment. Constructed by the
   * supervisor (`forge-app`, 4.2.5) — this module never spells the `forge` launcher.
+  *
+  * `logFile` (Task 4.2.5) optionally redirects the child's stdout **and** stderr to a per-worker file (truncating it on
+  * spawn) instead of inheriting the daemon's console. The supervisor sets it to a path under the worker dir so a
+  * spawned worker's output is captured *and* survives the daemon cleanly: a child inheriting the daemon's pipes would
+  * write into stale fds once the daemon dies, whereas a file fd stays valid across the §6.4 daemon crash + restart.
+  * When `None`, the child inherits the daemon's stdio (the 4.2.1 spike default, used by the spawner unit tests).
   */
 final case class WorkerSpec(
     command: Seq[String],
     cwd: os.Path,
-    env: Map[String, String] = Map.empty
+    env: Map[String, String] = Map.empty,
+    logFile: Option[os.Path] = None
 )
 
 /** A handle to a spawned worker process (Task 4.2.1) — the daemon-side view of a live child. `pid` is the OS process id
@@ -75,15 +82,24 @@ object RealWorkerSpawner extends WorkerSpawner:
 
   /** Start the child (blocking — process creation touches the OS). The child inherits the JVM's environment (so a
     * spawned `forge worker` sees the host's `PATH` / `gh` / `claude` credentials, as a 4.2 host-process worker must),
-    * `spec.env` layered on top; stdin/stdout/stderr inherit the daemon's for the spike (per-worker log redirection is a
-    * 4.2.5 observability concern).
+    * `spec.env` layered on top. Stdout + stderr go to `spec.logFile` when set (truncating it — the supervisor's
+    * per-worker capture, 4.2.5), else inherit the daemon's stdio (the 4.2.1 spike default); stdin always inherits.
     */
   private def start(spec: WorkerSpec): IO[java.lang.Process] =
     IO.blocking {
       val pb = new ProcessBuilder(spec.command.asJava)
       val _ = pb.directory(spec.cwd.toIO)
       spec.env.foreach { case (k, v) => val _ = pb.environment().put(k, v) }
-      val _ = pb.inheritIO()
+      spec.logFile match
+        case Some(file) =>
+          os.makeDir.all(file / os.up)
+          // Merge stderr into stdout and point both at the one file — two independent `Redirect.to(sameFile)` streams
+          // would clobber each other (each opens + truncates the path), so `redirectErrorStream` is the correct merge.
+          val _ = pb.redirectErrorStream(true)
+          val _ = pb.redirectOutput(ProcessBuilder.Redirect.to(file.toIO))
+          val _ = pb.redirectInput(ProcessBuilder.Redirect.INHERIT)
+        case None =>
+          val _ = pb.inheritIO()
       pb.start()
     }
 

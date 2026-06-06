@@ -65,18 +65,30 @@ object DaemonCommands:
         }
     }
 
-  /** Boot the daemon state from the durable log, then serve the socket until a `shutdown` RPC (or SIGINT) stops it. The
-    * instance lock is held by the caller's `Resource` bracket for the whole of this; on return (clean stop or cancel)
-    * the lock + socket are released.
+  /** Boot the daemon state from the durable log, build the worker supervisor, **reconcile** any workers that survived a
+    * prior crash (§6.4), then serve the socket until a `shutdown` RPC (or SIGINT) stops it — with the supervisor's §6.2
+    * cadence sweep running in the background for the serving lifetime. The instance lock is held by the caller's
+    * `Resource` bracket for the whole of this; on return (clean stop or cancel) the lock + socket are released. Spawned
+    * worker *processes* are intentionally **not** killed on stop — they survive the daemon's restart (see
+    * [[RealSupervisor]]).
     */
   private def runForeground(instance: Instance): IO[ExitCode] =
     for
       _ <- Console[IO].println(s"forge daemon: starting supervisor for instance '${instance.name.value}'…")
       shutdown <- Deferred[IO, Unit]
       state <- DaemonState.boot(instance, ProcessHandle.current().pid())
+      supervisor <- RealSupervisor.build(instance, state)
       boots <- state.snapshot.map(_.bootCount)
+      live <- state.snapshot.map(_.workers.count(_.live))
+      _ <-
+        if live > 0 then Console[IO].println(s"forge daemon: reconciling $live worker(s) from the instance log…")
+        else IO.unit
+      _ <- supervisor.reconcile
       _ <- Console[IO].println(s"forge daemon: listening on ${instance.socketFile} (boot #$boots).")
-      _ <- Daemon.serveUntilShutdown(instance.socketFile, state, shutdown)
+      _ <- supervisor
+        .superviseLoop(RealSupervisor.DefaultCadence)
+        .background
+        .use(_ => Daemon.serveUntilShutdown(instance.socketFile, state, shutdown, supervisor))
       _ <- Console[IO].println("forge daemon: stopped.")
     yield ExitCode.Success
 
