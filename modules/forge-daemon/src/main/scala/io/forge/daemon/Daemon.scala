@@ -41,6 +41,9 @@ object Daemon:
     *   - `spawn-worker` (`{workstreamId, repo, feature}`) → drive the [[Supervisor]] seam (Task 4.2.5): provision an
     *     isolated clone, launch the `forge worker` child, record `worker.spawned`, and activate the workstream. Answers
     *     `{workerId}`; a supervisor refusal is an `InternalError` carrying the reason.
+    *   - `broker-credentials` (`{workerId, repo}`) → drive the [[CredentialBroker]] seam (Task 4.3.3, O6): resolve the
+    *     short-lived host-isolated credentials a containerised worker needs and answer `{env, missing}`. A broker
+    *     refusal (no broker, or a required secret unconfigured) is an `InternalError` carrying the reason.
     *   - `subscribe` → the live aggregated per-worker feed ([[DaemonState.subscribe]]), one response line per event,
     *     seeded with the rebuilt exported-feed tail. Long-lived: the connection stays open until the client disconnects
     *     or the daemon shuts down.
@@ -50,7 +53,8 @@ object Daemon:
   def handler(
       state: DaemonState,
       shutdown: Deferred[IO, Unit],
-      supervisor: Supervisor = Supervisor.noop
+      supervisor: Supervisor = Supervisor.noop,
+      broker: CredentialBroker = CredentialBroker.noop
   ): DaemonSocketServer.Handler = {
     case req if req.method == "status" =>
       Stream.eval(state.snapshot.map(s => JsonRpc.Response.ok(req.id, s.toStatusJson)))
@@ -64,6 +68,8 @@ object Daemon:
       Stream.eval(createWorkstream(state, req))
     case req if req.method == "spawn-worker" =>
       Stream.eval(spawnWorker(supervisor, req))
+    case req if req.method == "broker-credentials" =>
+      Stream.eval(brokerCredentials(broker, req))
     case req if req.method == "subscribe" =>
       state.subscribe().map(event => JsonRpc.Response.ok(req.id, eventWire(event)))
     case req if req.method == "shutdown" =>
@@ -168,6 +174,38 @@ object Daemon:
           case Left(reason) => JsonRpc.Response.fail(req.id, JsonRpc.RpcError.internal(reason))
         }
 
+  /** `broker-credentials` (`{workerId, repo}`) → drive the [[CredentialBroker]] seam (Task 4.3.3, O6): resolve the
+    * short-lived, host-isolated credentials worker `workerId` needs for `repo` and answer `{env, missing}` — the env
+    * entries the worker sets in its own process environment (a scoped `gh` token + any configured agent auth) and the
+    * canonical names of optional credentials the host had not configured. A malformed param is `InvalidParams`; a
+    * broker refusal (no broker wired, or a required secret unconfigured — O6 refuses rather than falling back to the
+    * host-wide credential) is `InternalError` carrying the reason. The secret values cross only the (mounted,
+    * in-container) control socket — never the instance log, never the container spec.
+    */
+  private def brokerCredentials(broker: CredentialBroker, req: JsonRpc.Request): IO[JsonRpc.Response] =
+    val parsed =
+      for
+        workerId <- strField(req.params, "workerId")
+        repo <- strField(req.params, "repo")
+      yield (workerId, repo)
+    parsed match
+      case Left(detail) => IO.pure(JsonRpc.Response.fail(req.id, JsonRpc.RpcError.invalidParams(detail)))
+      case Right((workerId, repo)) =>
+        broker.brokerFor(workerId, repo).map {
+          case Right(creds) => JsonRpc.Response.ok(req.id, credentialsWire(creds))
+          case Left(err) => JsonRpc.Response.fail(req.id, JsonRpc.RpcError.internal(err.message))
+        }
+
+  /** The on-the-wire JSON for brokered credentials: `{env: {<key>: <secret>}, missing: [<key>]}`. The `env` map carries
+    * the secret values the worker injects into its environment; `missing` lists optional agent-auth keys the host had
+    * not configured (non-secret, for the worker's diagnostics).
+    */
+  private def credentialsWire(creds: BrokeredCredentials): ujson.Value =
+    ujson.Obj(
+      "env" -> ujson.Obj.from(creds.env.view.mapValues(ujson.Str(_)).toSeq),
+      "missing" -> ujson.Arr(creds.missing.map(ujson.Str(_))*)
+    )
+
   /** Record a parsed event (single-writer append) and answer `ok(result(event))`, or answer `InvalidParams` when the
     * params failed to parse — a malformed worker request must not crash the connection.
     */
@@ -201,10 +239,11 @@ object Daemon:
       socketPath: os.Path,
       state: DaemonState,
       shutdown: Deferred[IO, Unit],
-      supervisor: Supervisor = Supervisor.noop
+      supervisor: Supervisor = Supervisor.noop,
+      broker: CredentialBroker = CredentialBroker.noop
   ): IO[Unit] =
     DaemonSocketServer
-      .serve(socketPath, handler(state, shutdown, supervisor))
+      .serve(socketPath, handler(state, shutdown, supervisor, broker))
       .interruptWhen(shutdown.get.attempt)
       .compile
       .drain

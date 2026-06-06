@@ -88,7 +88,9 @@ object DaemonCommands:
       _ <- supervisor
         .superviseLoop(RealSupervisor.DefaultCadence)
         .background
-        .use(_ => Daemon.serveUntilShutdown(instance.socketFile, state, shutdown, supervisor))
+        .use(_ =>
+          Daemon.serveUntilShutdown(instance.socketFile, state, shutdown, supervisor, RealCredentialBroker.default)
+        )
       _ <- Console[IO].println("forge daemon: stopped.")
     yield ExitCode.Success
 

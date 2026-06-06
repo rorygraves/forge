@@ -154,7 +154,7 @@ container runtime also exposes), so the supervisor is unchanged in shape.
   the pinned set against what it perceives — perception, **not** normative pinning).
   Resolve the image into the `ContainerSpec` the supervisor builds (4.3.4).
 
-- [ ] **Task 4.3.3 — credential isolation broker (O6, the blocker).** The §7
+- [x] **Task 4.3.3 — credential isolation broker (O6, the blocker).** The §7
   minimum: **no host home mount** into the container; a **per-repo / per-worker
   scoped `gh` token** (not the host-wide credential — mint/scope a token the worker
   uses for its push/PR flow); a **broker / short-lived-secret injection** model for
@@ -260,6 +260,34 @@ container runtime also exposes), so the supervisor is unchanged in shape.
   `forge-daemon`'s `ContainerSpec`, so the resolution is just `forgefile.image` read there);
   devcontainer/`Dockerfile` reuse where present is noted as a discovery refinement (carry-forward).
   Tasks 4.3.3–4.3.6 open.
+- **2026-06-06** — **Task 4.3.3 (credential isolation broker, O6 — the blocker) landed.** The host-side broker +
+  control-channel RPC that lets a containerised worker obtain short-lived, host-isolated credentials so host-wide creds
+  never enter the container — the crux of the G4 safety claim. **Sourcing strategy ratified with the user**: a
+  *configured per-repo PAT* for `gh` + *configured API keys* for `claude`/`codex` (keychain-OAuth brokering + API-side
+  PAT minting deferred — carry-forward). (1) **`CredentialBroker` seam (forge-daemon)** — the O6 analogue of the
+  [[Supervisor]] split: `brokerFor(workerId, repo): IO[Either[BrokerError, BrokeredCredentials]]`, with
+  `BrokeredCredentials{env, missing}` (the secret env entries the worker injects into its *own* process env + the
+  canonical names of optional agent-auth keys the host had not configured) and the canonical env-key constants
+  (`GH_TOKEN`/`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`). The trait lives in forge-daemon so the handler can depend on it;
+  resolution lives in forge-app. `CredentialBroker.noop` mirrors `Supervisor.noop` (the pre-container daemon refuses).
+  The broker is **not** a `DaemonState` writer — a brokered secret is ephemeral and must never land in the instance log.
+  (2) **`broker-credentials` RPC (forge-daemon `Daemon.handler`)** — `{workerId, repo}` → `{env, missing}`, wired the
+  same way `spawn-worker` threads the supervisor (default `CredentialBroker.noop`); a refusal is an `InternalError`, a
+  malformed param `InvalidParams`. Secrets cross only the (mounted, in-container) control socket — never the container
+  spec (`docker inspect`-safe). (3) **`RealCredentialBroker` (forge-app)** — resolves a per-repo `gh` token from the env
+  var the `CredentialPolicy` names (`FORGE_GH_TOKEN` default + a per-repo override map, e.g. `→ GITHUB_LLM4S_PAT`) via a
+  `SecretSource` seam (default = process env; `SecretSource.fixed` for tests), plus best-effort agent keys. **Refuses
+  (`BrokerError.MissingRequiredSecret`) rather than falling back to the host-wide `gh` login** when the scoped token is
+  unset/empty — the O6 posture. A set-but-empty value reads as absent. (4) **`WorkerReporter.brokerCredentials(repo)`**
+  — the worker-side request over the control channel (real worker order: register, then broker), returning the env map
+  (a contract-violating wire body raises). Wired into `DaemonCommands.runForeground` via `RealCredentialBroker.default`.
+  (5) **Tests** — `DaemonBrokerCredentialsSuite` (4 daemon-routing tests, mirroring `DaemonSpawnWorkerSuite`) +
+  `CredentialBrokerSuite` (11: resolution incl. per-repo override / refuse-don't-fall-back / empty-as-absent,
+  `parseCredentials` wire decode, and an end-to-end reporter↔in-process-daemon round-trip). `forge-daemon` +1 suite,
+  `forge-app` +1 suite; full `sbt test` green (Total 543 forge-app + all modules), `scalafmtCheckAll` clean, ForgePaths
+  smell sweep passes. The **no-host-home-mount** property + the worker *applying* the brokered env (and the actual
+  container wiring) land with the `ContainerSpawner` in **4.3.4**; the broker existing (creds over the channel) is what
+  *makes* the no-home-mount possible. Tasks 4.3.4–4.3.6 open.
 
 ---
 
@@ -290,6 +318,27 @@ container runtime also exposes), so the supervisor is unchanged in shape.
   supervisor (4.3.4) resolves `Forgefile.image`, falling back to a default image when no
   `Forgefile` is committed; devcontainer/`Dockerfile` discovery + build is added only if a
   dogfood repo needs it.
+- **Credential broker — heavier sourcing strategies (O6, from Task 4.3.3).** 4.3.3
+  landed the broker seam + RPC with the user-ratified *pragmatic* sourcing: a
+  configured per-repo PAT env var for `gh` and configured API-key env vars for
+  `claude`/`codex`. Three follow-ups, none blocking the slice:
+  - **Fine-grained PAT minting via the GitHub API** — mint a short-lived, repo-scoped
+    token at broker time instead of reading a pre-provisioned PAT env var. Needs a
+    stored owner/admin token + API plumbing; the `SecretSource` seam is where it slots.
+  - **Keychain-OAuth brokering for `claude`/`codex`** — extract the host's logged-in
+    OAuth session (macOS keychain / `~/.claude.json` / `~/.codex`) and vend it as a
+    short-lived secret, so a containerised run does not require an API key to be set.
+    Host-specific + security-sensitive; deferred until a dogfood needs key-free runs.
+  - **`CredentialPolicy` persistence in instance config** — the policy (env-var *names*,
+    the per-repo override map — never secret values) is a constructed default today
+    (`RealCredentialBroker.default`); persist it in `instances/<name>/config.json` so the
+    per-repo PAT mapping is configurable without a code change. A clean §-bump to
+    `InstanceConfig` (currently identity-only).
+- **No-host-home-mount enforcement (O6) is wired in 4.3.4.** 4.3.3 makes the no-home-mount
+  *possible* (creds flow over the control channel, not a mount); the `ContainerSpawner`
+  (4.3.4) builds the `ContainerSpec` that omits any host-home mount and has the worker
+  *apply* the brokered env in-process, and 4.3.6 asserts it live (no `~`/home mount; gh
+  token scoped).
 - **Non-Docker OCI runtimes** (Podman / colima, O7) — the seam is abstract and
   Docker-first; a second backend is added only if the host fleet needs it.
 - **Local bare/reference mirror clone cache** (O10) — carried from 4.2; still a
