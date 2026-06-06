@@ -2,6 +2,8 @@ package io.forge.daemon
 
 import cats.effect.IO
 import cats.effect.kernel.Ref
+import cats.effect.std.Mutex
+import cats.syntax.all.*
 import fs2.Stream
 import fs2.concurrent.Topic
 import io.forge.instance.{
@@ -31,7 +33,8 @@ final class DaemonState private (
     log: FileInstanceLog,
     cache: FileInstanceStateCache,
     stateRef: Ref[IO, InstanceState],
-    feed: Topic[IO, InstanceEvent]
+    feed: Topic[IO, InstanceEvent],
+    writeGate: Mutex[IO]
 ):
 
   /** The current in-memory snapshot — a pure `Ref` read, no I/O (the daemon's `status` RPC source). */
@@ -39,17 +42,51 @@ final class DaemonState private (
 
   /** Single-writer mutation: append `event` to the canonical instance log, fold it into the in-memory snapshot, persist
     * the derived cache, then publish the event to the live [[feed]] (B3 fan-out). Returns the stamped
-    * [[InstanceLogRecord]]. The append is the durable commit point; the cache write is a best-effort convenience the
-    * next boot can rebuild without (§6.4); the publish is fire-and-forget — a subscriber that has fallen behind its
-    * bounded buffer drops, it never back-pressures the writer.
+    * [[InstanceLogRecord]]. Serialized through [[writeGate]] so the canonical append order, the in-memory fold, and the
+    * cache write move as one unit — and so a compound read-then-record decision ([[modify]] / [[exclusive]]) sees a
+    * snapshot no other writer can mutate underneath it (the §6.3.1 single-writer discipline made an *atomic* one). The
+    * append is the durable commit point; the cache write is a best-effort convenience the next boot can rebuild without
+    * (§6.4); the publish is fire-and-forget — a subscriber that has fallen behind its bounded buffer drops, it never
+    * back-pressures the writer.
     */
   def record(event: InstanceEvent): IO[InstanceLogRecord] =
+    writeGate.lock.surround(appendUnguarded(event))
+
+  /** The actual append+fold+cache+publish, run **inside** the [[writeGate]]. Callers either hold the gate already
+    * ([[modify]]) or take it ([[record]]); never call this directly off the gate.
+    */
+  private def appendUnguarded(event: InstanceEvent): IO[InstanceLogRecord] =
     for
       rec <- log.append(event)
       updated <- stateRef.updateAndGet(RebuildInstanceState.step(_, event))
       _ <- cache.save(updated)
       _ <- feed.publish1(event).void
     yield rec
+
+  /** Atomic read-decide-record: run `f` against the current snapshot **under the write gate**, append every event it
+    * returns (in order, as one uninterrupted unit), and yield its result. The whole `snapshot → decide → append`
+    * sequence is serialized against every other [[record]] / [[modify]] / [[exclusive]] caller, so a concurrent writer
+    * cannot slip a mutation between the read and the append — this is what closes the allocate-the-same-id race two
+    * concurrent RPC handlers would otherwise hit (the daemon serves connections with `parJoinUnbounded`).
+    *
+    * `f` must do only fast, in-memory work — it is run holding the single writer lock; never put slow I/O (a clone, a
+    * process spawn) inside it, or it serializes the whole fleet. Slow work belongs *outside* `modify`, with only the
+    * fast allocation/decision (and any volatile reservation bookkeeping) inside it.
+    */
+  def modify[A](f: InstanceState => IO[(Vector[InstanceEvent], A)]): IO[A] =
+    writeGate.lock.surround {
+      for
+        snap <- stateRef.get
+        (events, result) <- f(snap)
+        _ <- events.traverse_(appendUnguarded)
+      yield result
+    }
+
+  /** Run `action` under the write gate without recording anything — for volatile bookkeeping that must be consistent
+    * with the snapshot a concurrent [[modify]] reads (e.g. releasing an in-flight id reservation). `action` must not
+    * call back into [[record]] / [[modify]] / [[exclusive]] (the gate is not reentrant).
+    */
+  def exclusive[A](action: IO[A]): IO[A] = writeGate.lock.surround(action)
 
   /** Subscribe to the aggregated **per-worker** event feed (Task 4.1.4, B3 event export): the worker-scoped events
     * already in the rebuilt state (the exported-feed tail, replayed as
@@ -102,6 +139,7 @@ object DaemonState:
         case InstanceVerifyResult.Rewritten(s) => s
       ref <- Ref.of[IO, InstanceState](rebuilt)
       feed <- Topic[IO, InstanceEvent]
-      state = new DaemonState(log, cache, ref, feed)
+      writeGate <- Mutex[IO]
+      state = new DaemonState(log, cache, ref, feed, writeGate)
       _ <- state.record(InstanceEvent.DaemonStarted(pid))
     yield state

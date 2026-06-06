@@ -2,6 +2,7 @@ package io.forge.daemon
 
 import cats.effect.{IO, Resource}
 import cats.effect.kernel.Deferred
+import cats.syntax.all.*
 import io.forge.core.InstanceName
 import io.forge.instance.{FileInstanceLog, FileInstanceStore, Instance, RebuildInstanceState, WorkstreamStatus}
 import munit.CatsEffectSuite
@@ -53,6 +54,29 @@ class DaemonWorkstreamSuite extends CatsEffectSuite:
               assertEquals(ws.map(_.obj("workstreamId").str), Vector("ws-1", "ws-2"))
               assertEquals(ws.head.obj("status").str, "Planning")
               assertEquals(ws.head.obj("goal").str, "add auth")
+            case other => fail(s"expected a status success, got $other")
+      }
+    }
+  }
+
+  test("concurrent create-workstream calls allocate distinct ids (no allocate-the-same-id race)") {
+    instance.use { inst =>
+      served(inst) { _ =>
+        for
+          // Ten create-workstream RPCs fired at once over the parJoinUnbounded server. A non-atomic allocation would
+          // read the same snapshot from several handlers and hand out duplicate ws-N ids; the gated modify must not.
+          responses <- (1 to 10).toList.parTraverse(i =>
+            DaemonClient.callWithRetry(inst.socketFile, createReq(i.toLong, s"g$i"))
+          )
+          status <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(99L, "status"))
+        yield
+          val ids = responses.map(idOf)
+          assertEquals(ids.toSet.size, 10, s"all ten workstream ids must be distinct: $ids")
+          status match
+            case JsonRpc.Response.Success(_, body) =>
+              val recorded = body.obj("workstreams").arr.toVector.map(_.obj("workstreamId").str)
+              assertEquals(recorded.toSet, ids.toSet, "every allocated id must be recorded exactly once")
+              assertEquals(recorded.size, 10)
             case other => fail(s"expected a status success, got $other")
       }
     }

@@ -152,6 +152,30 @@ class RebuildInstanceStateSuite extends munit.FunSuite:
     assertEquals(w.status, WorkerRecord.RegisteredStatus)
     assert(w.live, "a spawned worker with a pid and no exit is live")
     assertEquals(state.workstream(ws1).map(_.workers), Some(Vector("w1")))
+    // worker.spawned also activates the workstream in the same fold step (crash-atomic spawn + activation).
+    assertEquals(state.workstream(ws1).map(_.status), Some(WorkstreamStatus.Active))
+
+  test("worker.spawned advances a Planning workstream to Active in one event (crash-atomic activation)"):
+    // A crash that left only `worker.spawned` (no separate `workstream.status`) must still rebuild a live worker on an
+    // Active workstream — the regression the F2 review finding guards against.
+    val state = RebuildInstanceState.fold(
+      Vector(
+        rec(0, InstanceEvent.WorkstreamCreated(ws1, "g")),
+        rec(1, InstanceEvent.WorkerSpawned("w1", ws1, "/repo", feature, "/clone/w1", 7L))
+      )
+    )
+    assertEquals(state.workstream(ws1).map(_.status), Some(WorkstreamStatus.Active))
+    assert(state.worker("w1").exists(_.live), "the rebuilt worker is live")
+
+  test("worker.spawned never resurrects a Done/Abandoned workstream"):
+    val state = RebuildInstanceState.fold(
+      Vector(
+        rec(0, InstanceEvent.WorkstreamCreated(ws1, "g")),
+        rec(1, InstanceEvent.WorkstreamStatusChanged(ws1, WorkstreamStatus.Done)),
+        rec(2, InstanceEvent.WorkerSpawned("w1", ws1, "/repo", feature, "/clone/w1", 7L))
+      )
+    )
+    assertEquals(state.workstream(ws1).map(_.status), Some(WorkstreamStatus.Done))
 
   test("worker.exited clears liveness but keeps the record"):
     val state = RebuildInstanceState.fold(

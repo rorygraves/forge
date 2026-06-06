@@ -27,7 +27,9 @@ final class FakeGitClient private (
     stageFn: Vector[String] => IO[Either[GitError, Unit]],
     statusFn: Boolean => IO[Either[GitError, Vector[StatusEntry]]],
     commitFn: String => IO[Either[GitError, CommitResult]],
-    cloneFn: (os.Path, os.Path) => IO[Either[GitError, Unit]]
+    cloneFn: (os.Path, os.Path) => IO[Either[GitError, Unit]],
+    remoteUrlFn: String => IO[Either[GitError, Option[String]]],
+    setRemoteUrlFn: (String, String) => IO[Either[GitError, Unit]]
 ) extends GitClient:
 
   override def currentBranch: IO[Either[GitError, BranchName]] = currentBranchFn
@@ -52,6 +54,8 @@ final class FakeGitClient private (
   override def commit(message: String, author: Option[CommitIdentity]): IO[Either[GitError, CommitResult]] =
     commitFn(message)
   override def clone(source: os.Path, dest: os.Path): IO[Either[GitError, Unit]] = cloneFn(source, dest)
+  override def remoteUrl(remote: String): IO[Either[GitError, Option[String]]] = remoteUrlFn(remote)
+  override def setRemoteUrl(remote: String, url: String): IO[Either[GitError, Unit]] = setRemoteUrlFn(remote, url)
 
 object FakeGitClient:
 
@@ -86,7 +90,11 @@ object FakeGitClient:
         notConfigured("status"),
       private val commitFn: String => IO[Either[GitError, CommitResult]] = (_: String) => notConfigured("commit"),
       private val cloneFn: (os.Path, os.Path) => IO[Either[GitError, Unit]] = (_: os.Path, _: os.Path) =>
-        notConfigured("clone")
+        notConfigured("clone"),
+      private val remoteUrlFn: String => IO[Either[GitError, Option[String]]] = (_: String) =>
+        notConfigured("remoteUrl"),
+      private val setRemoteUrlFn: (String, String) => IO[Either[GitError, Unit]] = (_: String, _: String) =>
+        notConfigured("setRemoteUrl")
   ):
     def currentBranch(response: Either[GitError, BranchName]): Builder = copy(currentBranchFn = IO.pure(response))
     def currentBranch(name: BranchName): Builder = currentBranch(Right(name))
@@ -162,6 +170,14 @@ object FakeGitClient:
     def clone(response: Either[GitError, Unit]): Builder = clone((_, _) => IO.pure(response))
     def cloneOk: Builder = clone(Right(()))
 
+    def remoteUrl(fn: String => IO[Either[GitError, Option[String]]]): Builder = copy(remoteUrlFn = fn)
+    def remoteUrl(response: Either[GitError, Option[String]]): Builder = remoteUrl(_ => IO.pure(response))
+    def remoteUrl(url: Option[String]): Builder = remoteUrl(Right(url))
+
+    def setRemoteUrl(fn: (String, String) => IO[Either[GitError, Unit]]): Builder = copy(setRemoteUrlFn = fn)
+    def setRemoteUrl(response: Either[GitError, Unit]): Builder = setRemoteUrl((_, _) => IO.pure(response))
+    def setRemoteUrlOk: Builder = setRemoteUrl(Right(()))
+
     def build: FakeGitClient = new FakeGitClient(
       currentBranchFn,
       currentShaFn,
@@ -180,7 +196,9 @@ object FakeGitClient:
       stageFn,
       statusFn,
       commitFn,
-      cloneFn
+      cloneFn,
+      remoteUrlFn,
+      setRemoteUrlFn
     )
 
   def builder: Builder = Builder()

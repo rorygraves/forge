@@ -102,23 +102,23 @@ object Daemon:
     recordOrReject(state, req, parsed)(_ => ujson.Obj("accepted" -> ujson.Bool(true)))
 
   /** `create-workstream` (`{goal}`) → allocate the next [[WorkstreamId]] and append a `workstream.created` seeding a
-    * `Planning` workstream; answers `{workstreamId, goal}`. The id is allocated from the current snapshot
-    * ([[nextWorkstreamId]]); concurrency-hardening of allocation (the B2 reservation protocol's discipline) is 4.3 —
-    * workstream creation here is operator-driven and serialised in practice by the single-writer log.
+    * `Planning` workstream; answers `{workstreamId, goal}`. Allocation + append run atomically under the single-writer
+    * gate ([[DaemonState.modify]]), so two concurrent `create-workstream` calls (the server multiplexes connections
+    * with `parJoinUnbounded`) can never read the same snapshot and both choose `ws-N` — the second sees the first's
+    * `workstream.created` already folded in and picks `ws-N+1`.
     */
   private def createWorkstream(state: DaemonState, req: JsonRpc.Request): IO[JsonRpc.Response] =
     strField(req.params, "goal") match
       case Left(detail) => IO.pure(JsonRpc.Response.fail(req.id, JsonRpc.RpcError.invalidParams(detail)))
       case Right(goal) =>
-        state.snapshot.flatMap { snap =>
-          val id = nextWorkstreamId(snap)
-          state
-            .record(InstanceEvent.WorkstreamCreated(id, goal))
-            .as(
-              JsonRpc.Response
-                .ok(req.id, ujson.Obj("workstreamId" -> ujson.Str(id.value), "goal" -> ujson.Str(goal)))
-            )
-        }
+        state
+          .modify { snap =>
+            val id = nextWorkstreamId(snap)
+            IO.pure((Vector(InstanceEvent.WorkstreamCreated(id, goal)), id))
+          }
+          .map(id =>
+            JsonRpc.Response.ok(req.id, ujson.Obj("workstreamId" -> ujson.Str(id.value), "goal" -> ujson.Str(goal)))
+          )
 
   /** The next `ws-<n>` id: one past the largest numeric suffix already in use, or `ws-1` for the first. Max-suffix (not
     * count) so an id is never reused even if a workstream is later abandoned.

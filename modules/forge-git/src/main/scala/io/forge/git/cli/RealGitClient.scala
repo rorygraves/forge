@@ -172,6 +172,22 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
   override def branchExistsRemote(name: BranchName): IO[Either[GitError, Boolean]] =
     refExists(s"refs/remotes/origin/${name.value}")
 
+  override def remoteUrl(remote: String): IO[Either[GitError, Option[String]]] =
+    IO.blocking {
+      val res = os.proc("git", "remote", "get-url", remote).call(cwd = repoRoot, check = false, stderr = os.Pipe)
+      if res.exitCode == 0 then
+        val url = res.out.text().trim
+        Right(if url.isEmpty then None else Some(url))
+      // `git remote get-url` exits non-zero with "No such remote 'X'" when the remote is unconfigured — a local-only
+      // repo with no `origin`, not an error: surface it as `Right(None)` so the provisioner can leave the clone's
+      // origin as the local source. Any other non-zero is a genuine git failure.
+      else if res.err.text().toLowerCase.contains("no such remote") then Right(None)
+      else Left(GitError.Transient(res.exitCode, res.err.text()))
+    }
+
+  override def setRemoteUrl(remote: String, url: String): IO[Either[GitError, Unit]] =
+    run(Vector("git", "remote", "set-url", remote, url)).map(_.map(_ => ()))
+
   override def clone(source: os.Path, dest: os.Path): IO[Either[GitError, Unit]] =
     // Absolute source/dest, so `repoRoot` (the `run` cwd) is irrelevant beyond having to exist; the provisioner roots
     // this client at the worker dir it just created. A non-empty `dest` makes git exit non-zero → GitError.Transient.

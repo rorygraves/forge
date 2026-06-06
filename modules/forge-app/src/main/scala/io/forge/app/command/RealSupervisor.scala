@@ -1,6 +1,6 @@
 package io.forge.app.command
 
-import cats.effect.{IO, Ref}
+import cats.effect.{Deferred, IO, Outcome, Ref}
 import cats.syntax.all.*
 import io.forge.core.paths.ForgePaths
 import io.forge.core.{FeatureId, WorkstreamId}
@@ -41,33 +41,88 @@ final class RealSupervisor private (
     spawner: WorkerSpawner,
     launcher: WorkerLauncher,
     provision: (String, os.Path) => IO[Either[String, ForgePaths]],
-    liveHandles: Ref[IO, Map[String, WorkerHandle]]
+    liveHandles: Ref[IO, Map[String, WorkerHandle]],
+    reserved: Ref[IO, Map[String, RealSupervisor.Reservation]]
 ) extends Supervisor:
 
-  import RealSupervisor.{nextWorkerId, ExternallyObservedExit}
+  import RealSupervisor.{nextWorkerId, Allocation, ExternallyObservedExit, Reservation}
 
+  /** Spawn (or, idempotently, return the existing) worker for `workstreamId` driving `feature`.
+    *
+    * Validation, idempotency, and worker-id allocation all happen in **one atomic step** ([[allocate]], under the
+    * single-writer gate), because the daemon serves connections with `parJoinUnbounded`: two concurrent `spawn-worker`
+    * calls that each read the snapshot independently could otherwise both pick `w-1` and race on the same checkout
+    * path. The slow work (clone + process launch) stays **outside** the gate so M workers still spawn concurrently.
+    *
+    * Three outcomes, so a duplicate request never gets a *false* success:
+    *   - [[Allocation.Existing]] — a worker is already durably recorded (`worker.spawned` landed); return its id.
+    *   - [[Allocation.InFlight]] — another caller is mid-`launch` for this same workstream+feature; **wait on its
+    *     result** ([[Reservation.result]]) and mirror it. So if the first launch ultimately fails, the duplicate sees
+    *     the *same failure*, not a `Right(workerId)` for a worker that was never recorded.
+    *   - [[Allocation.Fresh]] — we won the reservation; run `launch`, publish its result to any waiters, and drop the
+    *     reservation in a `guarantee` (so the id frees up on failure and a later retry can re-allocate).
+    */
   def spawnWorker(workstreamId: WorkstreamId, repo: String, feature: FeatureId): IO[Either[String, String]] =
-    state.snapshot.flatMap { snap =>
-      snap.workstream(workstreamId) match
-        case None => IO.pure(Left(s"no such workstream '${workstreamId.value}'"))
-        case Some(ws) if ws.status == WorkstreamStatus.Done || ws.status == WorkstreamStatus.Abandoned =>
-          IO.pure(Left(s"workstream '${workstreamId.value}' is ${WorkstreamStatus.name(ws.status)}"))
-        case Some(_) =>
-          // Idempotent against a re-issued request: a workstream that already has a live worker for this feature is not
-          // re-spawned (§6.4) — return the existing id rather than launching a duplicate clone + process.
-          existingLiveWorker(snap, workstreamId, feature) match
-            case Some(workerId) => IO.pure(Right(workerId))
-            case None => launch(snap, workstreamId, repo, feature)
+    allocate(workstreamId, feature).flatMap {
+      case Left(reason) => IO.pure(Left(reason))
+      case Right(Allocation.Existing(workerId)) => IO.pure(Right(workerId))
+      case Right(Allocation.InFlight(result)) => result.get
+      case Right(Allocation.Fresh(workerId, result)) =>
+        launch(workerId, workstreamId, repo, feature)
+          .guaranteeCase {
+            // Publish the launch's outcome to any duplicate caller waiting on `result`, in every termination case so a
+            // waiter can never hang: success/refusal carries through verbatim, a raised error or cancellation becomes a
+            // Left the waiter sees as a failure (it raises for the original caller as usual).
+            case Outcome.Succeeded(fa) => fa.flatMap(r => result.complete(r).void)
+            case Outcome.Errored(e) => result.complete(Left(s"worker launch failed: ${e.getMessage}")).void
+            case Outcome.Canceled() => result.complete(Left(s"worker '$workerId' launch was cancelled")).void
+          }
+          .guarantee(releaseReservation(workerId))
     }
 
-  /** Provision + launch a fresh worker, recording `worker.spawned` and activating the workstream. */
+  /** Atomically validate the workstream, apply the idempotency guard, and either return an existing/in-flight worker or
+    * reserve a fresh `w-<n>` id. Runs under [[DaemonState.modify]] (the single-writer gate) reading the live snapshot,
+    * and considers **both** already-recorded workers and the in-flight [[reserved]] table — so two concurrent calls can
+    * neither double-spawn the same workstream+feature nor allocate the same id. Records no event (allocation is a
+    * volatile reservation; the durable `worker.spawned` lands in [[launch]] once the pid is known).
+    */
+  private def allocate(workstreamId: WorkstreamId, feature: FeatureId): IO[Either[String, Allocation]] =
+    state.modify { snap =>
+      snap.workstream(workstreamId) match
+        case None => IO.pure((Vector.empty, Left(s"no such workstream '${workstreamId.value}'")))
+        case Some(ws) if ws.status == WorkstreamStatus.Done || ws.status == WorkstreamStatus.Abandoned =>
+          IO.pure((Vector.empty, Left(s"workstream '${workstreamId.value}' is ${WorkstreamStatus.name(ws.status)}")))
+        case Some(_) =>
+          reserved.get.flatMap { inFlight =>
+            // A durably-recorded live worker → true idempotent success. An in-flight reservation for the same
+            // workstream+feature → hand back its result Deferred so the duplicate waits on the original launch rather
+            // than being told a worker exists before `worker.spawned` is recorded.
+            recordedLiveWorker(snap, workstreamId, feature) match
+              case Some(workerId) => IO.pure((Vector.empty, Right(Allocation.Existing(workerId))))
+              case None =>
+                inFlight.collectFirst {
+                  case (_, r) if r.workstreamId == workstreamId && r.feature == feature => r
+                } match
+                  case Some(reservation) => IO.pure((Vector.empty, Right(Allocation.InFlight(reservation.result))))
+                  case None =>
+                    Deferred[IO, Either[String, String]].flatMap { result =>
+                      val workerId = nextWorkerId(snap, inFlight.keySet)
+                      reserved
+                        .update(_ + (workerId -> Reservation(workstreamId, feature, result)))
+                        .as((Vector.empty, Right(Allocation.Fresh(workerId, result))))
+                    }
+          }
+    }
+
+  /** Provision + launch the pre-allocated `workerId`, recording `worker.spawned` (which the fold also uses to flip the
+    * workstream `Planning → Active`, so spawn + activation are one crash-atomic event — see [[RebuildInstanceState]]).
+    */
   private def launch(
-      snap: InstanceState,
+      workerId: String,
       workstreamId: WorkstreamId,
       repo: String,
       feature: FeatureId
   ): IO[Either[String, String]] =
-    val workerId = nextWorkerId(snap)
     val source = os.Path(repo)
     provision(workerId, source).flatMap {
       case Left(reason) => IO.pure(Left(s"could not provision worker '$workerId': $reason"))
@@ -80,20 +135,19 @@ final class RealSupervisor private (
             _ <- state.record(
               InstanceEvent.WorkerSpawned(workerId, workstreamId, repo, feature, checkout.toString, handle.pid)
             )
-            _ <- activate(workstreamId)
             _ <- watchHandle(workerId, handle).start
           yield Right(workerId)
         }
     }
 
-  /** Flip a `Planning` workstream to `Active` on its first spawn; already-`Active` is a no-op. */
-  private def activate(workstreamId: WorkstreamId): IO[Unit] =
-    state.snapshot.flatMap { snap =>
-      snap.workstream(workstreamId) match
-        case Some(ws) if ws.status == WorkstreamStatus.Planning =>
-          state.record(InstanceEvent.WorkstreamStatusChanged(workstreamId, WorkstreamStatus.Active)).void
-        case _ => IO.unit
-    }
+  /** Drop `workerId`'s in-flight reservation, under the write gate so it is consistent with the snapshot a concurrent
+    * [[allocate]] reads. Safe to run after `worker.spawned` has landed: the id is then permanent in the snapshot
+    * (max-suffix allocation never reuses it), so a later allocation still skips it via the snapshot rather than the
+    * reservation. Safe after a *failed* launch too: the id was never recorded, so dropping the reservation frees it for
+    * a retry (and any duplicate caller has already been handed this reservation's now-completed result). Idempotent.
+    */
+  private def releaseReservation(workerId: String): IO[Unit] =
+    state.exclusive(reserved.update(_ - workerId))
 
   /** Watch a worker we spawned this session: when its [[WorkerHandle]] reports exit, record `worker.exited` with the
     * real exit code and drop the handle. Cancelled silently if the daemon shuts down first (the worker survives; a
@@ -152,8 +206,12 @@ final class RealSupervisor private (
       else IO.unit
     }
 
-  /** The id of a live worker in `workstreamId` already driving `feature`, if any (idempotency guard). */
-  private def existingLiveWorker(snap: InstanceState, workstreamId: WorkstreamId, feature: FeatureId): Option[String] =
+  /** The id of a **durably recorded** live worker in `workstreamId` already driving `feature` (the §6.4 idempotency
+    * guard against a re-issued request) — i.e. one whose `worker.spawned` has landed in the snapshot. The in-flight
+    * (reserved-but-not-yet-recorded) case is handled separately in [[allocate]] (it waits on the original launch's
+    * result rather than reporting a not-yet-real worker as success).
+    */
+  private def recordedLiveWorker(snap: InstanceState, workstreamId: WorkstreamId, feature: FeatureId): Option[String] =
     snap.workers
       .find(w => w.live && w.workstreamId.contains(workstreamId) && w.feature == feature)
       .map(_.workerId)
@@ -168,6 +226,26 @@ object RealSupervisor:
 
   /** The default §6.2 supervision cadence — the liveness-sweep interval, not the worker's FSM poll. */
   val DefaultCadence: FiniteDuration = 15.seconds
+
+  /** A volatile in-flight worker reservation: an allocated-but-not-yet-recorded `w-<n>` plus the [[Deferred]] the
+    * [[RealSupervisor.launch]] completes with its final result, so a concurrent duplicate request can wait on the real
+    * outcome instead of being told a worker exists prematurely.
+    */
+  private final case class Reservation(
+      workstreamId: WorkstreamId,
+      feature: FeatureId,
+      result: Deferred[IO, Either[String, String]]
+  )
+
+  /** The outcome of [[RealSupervisor.allocate]]:
+    *   - [[Existing]] — a durably-recorded live worker the request collapses onto (true idempotency, no spawn).
+    *   - [[InFlight]] — another caller is mid-launch for the same workstream+feature; wait on its `result`.
+    *   - [[Fresh]] — we reserved a new id; provision + launch it and publish the result to `result`.
+    */
+  private enum Allocation:
+    case Existing(workerId: String)
+    case InFlight(result: Deferred[IO, Either[String, String]])
+    case Fresh(workerId: String, result: Deferred[IO, Either[String, String]])
 
   /** Build a supervisor over the real spawner + launcher, with [[WorkerProvisioner]] backing clone provisioning. */
   def build(instance: Instance, state: DaemonState): IO[RealSupervisor] =
@@ -187,17 +265,19 @@ object RealSupervisor:
       launcher: WorkerLauncher,
       provision: (String, os.Path) => IO[Either[String, ForgePaths]]
   ): IO[RealSupervisor] =
-    Ref
-      .of[IO, Map[String, WorkerHandle]](Map.empty)
-      .map(new RealSupervisor(instance, state, spawner, launcher, provision, _))
+    for
+      liveHandles <- Ref.of[IO, Map[String, WorkerHandle]](Map.empty)
+      reserved <- Ref.of[IO, Map[String, Reservation]](Map.empty)
+    yield new RealSupervisor(instance, state, spawner, launcher, provision, liveHandles, reserved)
 
-  /** The next `w-<n>` id: one past the largest numeric suffix in use, or `w-1` for the first. Max-suffix (not count) so
-    * an id is never reused even after a worker exits — mirrors the daemon's `nextWorkstreamId`.
+  /** The next `w-<n>` id: one past the largest numeric suffix in use across **both** the recorded workers and the
+    * `inFlight` reservations, or `w-1` for the first. Max-suffix (not count) so an id is never reused even after a
+    * worker exits — mirrors the daemon's `nextWorkstreamId`. Including `inFlight` is what keeps two concurrent
+    * allocations from both picking the same id before either has recorded its `worker.spawned`.
     */
-  private[command] def nextWorkerId(state: InstanceState): String =
-    val used = state.workers.flatMap { w =>
-      w.workerId match
-        case s"w-$n" => n.toIntOption
-        case _ => None
+  private[command] def nextWorkerId(state: InstanceState, inFlight: Set[String] = Set.empty): String =
+    val used = (state.workers.map(_.workerId) ++ inFlight).flatMap {
+      case s"w-$n" => n.toIntOption
+      case _ => None
     }
     s"w-${used.maxOption.getOrElse(0) + 1}"

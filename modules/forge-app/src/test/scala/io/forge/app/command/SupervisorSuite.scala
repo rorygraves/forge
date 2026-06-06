@@ -1,6 +1,7 @@
 package io.forge.app.command
 
 import cats.effect.{IO, Resource}
+import cats.syntax.all.*
 import io.forge.core.paths.ForgePaths
 import io.forge.core.{FeatureId, InstanceName, WorkstreamId}
 import io.forge.daemon.{DaemonState, RealWorkerSpawner, WorkerHandle, WorkerSpawner, WorkerSpec}
@@ -38,6 +39,12 @@ class SupervisorSuite extends CatsEffectSuite:
   /** A provisioner that succeeds without cloning (the clone path is proven in WorkerProvisionerSuite / 4.2.6). */
   private val provisionOk: (String, os.Path) => IO[Either[String, ForgePaths]] =
     (_, _) => IO.pure(Right(new ForgePaths(os.pwd)))
+
+  /** A provisioner that sleeps before succeeding, widening the allocate→record window so a concurrent-spawn id race
+    * would actually manifest if allocation were not atomic.
+    */
+  private val provisionSlow: (String, os.Path) => IO[Either[String, ForgePaths]] =
+    (_, _) => IO.sleep(60.millis).as(Right(new ForgePaths(os.pwd)))
 
   /** Spawn a real child via the real spawner and hand back its (kept-alive) handle for the test to drive/kill. */
   private def childHandle(cmd: List[String]): IO[WorkerHandle] =
@@ -111,6 +118,63 @@ class SupervisorSuite extends CatsEffectSuite:
         assertEquals(first, Right("w-1"))
         assertEquals(second, Right("w-1"))
         assertEquals(snap.workers.size, 1)
+    }
+  }
+
+  test("concurrent spawns for distinct features allocate distinct ids (no allocate-the-same-id race)") {
+    instance.use { inst =>
+      for
+        state <- DaemonState.boot(inst, pid = 1L)
+        _ <- state.record(InstanceEvent.WorkstreamCreated(WorkstreamId("ws-1"), "g"))
+        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")), provision = provisionSlow)
+        // Fire five spawns at once, each a distinct feature so the idempotency guard doesn't collapse them. With a
+        // non-atomic allocation they would read the same snapshot and several would pick w-1; atomic allocation gives
+        // five distinct ids.
+        results <- (1 to 5).toList.parTraverse(i =>
+          sup.spawnWorker(WorkstreamId("ws-1"), "/repo", FeatureId(s"feat-$i"))
+        )
+        snap <- state.snapshot
+      yield
+        assert(results.forall(_.isRight), s"all spawns should succeed: $results")
+        val ids = results.collect { case Right(id) => id }
+        assertEquals(ids.toSet.size, 5, s"all five worker ids must be distinct: $ids")
+        assertEquals(snap.workers.map(_.workerId).toSet, ids.toSet, "every allocated worker must be recorded once")
+        assertEquals(snap.workstream(WorkstreamId("ws-1")).map(_.workers.size), Some(5))
+    }
+  }
+
+  test("concurrent identical spawns collapse to a single worker (in-flight idempotency)") {
+    instance.use { inst =>
+      for
+        state <- DaemonState.boot(inst, pid = 1L)
+        _ <- state.record(InstanceEvent.WorkstreamCreated(WorkstreamId("ws-1"), "g"))
+        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")), provision = provisionSlow)
+        // Same workstream + same feature, fired concurrently: the in-flight reservation must dedup them to one worker.
+        results <- (1 to 5).toList.parTraverse(_ => sup.spawnWorker(WorkstreamId("ws-1"), "/repo", FeatureId("feat")))
+        snap <- state.snapshot
+      yield
+        assert(results.forall(_.isRight), s"all spawns should succeed: $results")
+        assertEquals(results.collect { case Right(id) => id }.toSet, Set("w-1"), "all must collapse to one id")
+        assertEquals(snap.workers.size, 1, "exactly one worker must be spawned for identical concurrent requests")
+    }
+  }
+
+  test("concurrent identical spawns all observe the SAME launch failure (no false success for the duplicate)") {
+    instance.use { inst =>
+      for
+        state <- DaemonState.boot(inst, pid = 1L)
+        _ <- state.record(InstanceEvent.WorkstreamCreated(WorkstreamId("ws-1"), "g"))
+        // The winning spawn's launch fails (provision returns Left after a delay). The duplicates must wait on that
+        // launch and see the same failure — not a Right(workerId) for a worker that was never recorded.
+        failSlow = (_: String, _: os.Path) => IO.sleep(40.millis).as(Left("boom"))
+        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")), provision = failSlow)
+        results <- (1 to 5).toList.parTraverse(_ => sup.spawnWorker(WorkstreamId("ws-1"), "/repo", FeatureId("feat")))
+        snap <- state.snapshot
+      yield
+        assert(results.forall(_.isLeft), s"every caller must observe the failure, not a false success: $results")
+        assertEquals(results.toSet.size, 1, s"all callers must observe the identical failure result: $results")
+        assert(results.head.left.exists(_.contains("boom")), s"the failure must carry the launch reason: $results")
+        assertEquals(snap.workers, Vector.empty, "a failed launch records no worker")
     }
   }
 

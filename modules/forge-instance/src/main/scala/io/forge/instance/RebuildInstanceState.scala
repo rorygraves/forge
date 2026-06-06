@@ -79,8 +79,14 @@ object RebuildInstanceState:
 
       case InstanceEvent.WorkerSpawned(workerId, workstreamId, repo, feature, checkoutRoot, pid) =>
         // The daemon-side seed: upsert the worker with its spawn fields (clearing any prior exitCode for a re-spawn),
-        // and append it to the owning workstream's ordering. A spawn for an unknown workstream still seeds the worker
-        // (the record is the authority for the worker); the missing-workstream case is a truncation edge.
+        // append it to the owning workstream's ordering, AND activate the workstream (`Planning → Active`) in the same
+        // step. Folding activation into `worker.spawned` keeps the spawn crash-atomic: there is no window where a
+        // replay rebuilds a live worker attached to a still-`Planning` workstream (which a separate
+        // `workstream.status` append would open if the daemon died between the two records). Only `Planning` is
+        // advanced — an already-`Active` workstream is unchanged, and a `Done`/`Abandoned` one is never resurrected
+        // (the supervisor refuses to spawn into a terminal workstream; the fold is defensive on top of that). A spawn
+        // for an unknown workstream still seeds the worker (the record is the authority for the worker); the
+        // missing-workstream case is a truncation edge.
         state
           .updateWorker(workerId)(
             ifAbsent = WorkerRecord
@@ -95,7 +101,11 @@ object RebuildInstanceState:
               exitCode = None
             )
           )
-          .updateRegisteredWorkstream(workstreamId)(_.withWorker(workerId))
+          .updateRegisteredWorkstream(workstreamId) { ws =>
+            val joined = ws.withWorker(workerId)
+            if joined.status == WorkstreamStatus.Planning then joined.copy(status = WorkstreamStatus.Active)
+            else joined
+          }
 
       case InstanceEvent.WorkerExited(workerId, exitCode) =>
         state.updateRegisteredWorker(workerId)(_.copy(exitCode = Some(exitCode)))

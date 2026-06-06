@@ -4,8 +4,13 @@ import cats.effect.{ExitCode, IO}
 import cats.effect.std.Console
 import io.forge.app.cli.WorkerCommand
 import io.forge.app.config.{ConfigError, ForgeConfigLoader}
+import io.forge.app.lock.{FileProcessLock, LockAcquireResult, LockMetadata}
 import io.forge.core.paths.ForgePaths
 import io.forge.instance.{FileInstanceStore, Instance, InstanceError}
+
+import java.net.InetAddress
+import java.time.Instant
+import scala.util.control.NonFatal
 
 /** The hidden, daemon-spawned **worker** entrypoint (`forge worker`), the forge-app half of the B4 worker-process
   * boundary.
@@ -55,12 +60,62 @@ object WorkerCommands:
           case Left(err) =>
             Console[IO].errorln(s"forge worker '${command.workerId}': ${configErrorMessage(err)}").as(ExitCode(78))
           case Right(config) =>
-            WorkerReporter
-              .daemon(instance.socketFile, command.workerId)
-              .flatMap(reporter => WorkerLoop.run(paths, config, reporter, command.repo, command.feature))
-              .handleErrorWith(degrade(instance, command))
+            underWorkerLock(paths, command) {
+              WorkerReporter
+                .daemon(instance.socketFile, command.workerId)
+                .flatMap(reporter => WorkerLoop.run(paths, config, reporter, command.repo, command.feature))
+                .handleErrorWith(degrade(instance, command))
+            }
         }
     }
+
+  /** Hold the §13 per-worker process lock on the worker's re-rooted [[ForgePaths]] for the whole loop. The contract
+    * puts the per-worker lock on the **worker process** (not the daemon), so it guards the worker's re-rooted
+    * log/state/lock family against a duplicate `forge worker` for the same id — a manual invocation or a spawn that
+    * slipped past the supervisor's idempotency guard. Mirrors `Main.stateChangingUnderLock` (the lock the routing layer
+    * deliberately skips for the worker entrypoint, since the worker resolves its own re-rooted paths): `Acquired` runs
+    * the loop; `Held` / `Stale` refuse with a diagnostic and exit 2 (§13), never sharing the log with a second writer.
+    */
+  private def underWorkerLock(paths: ForgePaths, command: WorkerCommand)(loop: IO[ExitCode]): IO[ExitCode] =
+    lockMetadata(command).flatMap { metadata =>
+      new FileProcessLock(paths).acquire(metadata, acceptStale = false).use {
+        case LockAcquireResult.Acquired => loop
+        case LockAcquireResult.Held(holder) =>
+          Console[IO]
+            .errorln(
+              s"forge worker '${command.workerId}': another process holds the worker lock.${holderSuffix(holder)}"
+            )
+            .as(ExitCode(2))
+        case LockAcquireResult.Stale(holder) =>
+          Console[IO]
+            .errorln(
+              s"forge worker '${command.workerId}': a stale lock from a prior crashed worker is present." +
+                s"${holderSuffix(Some(holder))} Run `forge unlock --force` against the worker root to clear it."
+            )
+            .as(ExitCode(2))
+      }
+    }
+
+  /** Lock-holder metadata for the worker process (pid / host / start / command / feature) — the §13 "who holds it?"
+    * diagnostic, mirroring `Main.lockMetadata`.
+    */
+  private def lockMetadata(command: WorkerCommand): IO[LockMetadata] =
+    IO.blocking {
+      val hostname =
+        try InetAddress.getLocalHost.getHostName
+        catch case NonFatal(_) => "unknown"
+      LockMetadata(
+        pid = ProcessHandle.current().pid(),
+        hostname = hostname,
+        startedAt = Instant.now(),
+        command = s"forge worker ${command.workerId}",
+        feature = Some(command.feature)
+      )
+    }
+
+  private def holderSuffix(meta: Option[LockMetadata]): String = meta match
+    case Some(m) => s" Holder: pid=${m.pid} host=${m.hostname} command='${m.command}' started=${m.startedAt}."
+    case None => ""
 
   /** A loop error that escapes [[WorkerLoop]] — most often an unreachable daemon (the reporter's RPCs raise) — degrades
     * to exit 1 with the daemon-down diagnostic, never a crash.

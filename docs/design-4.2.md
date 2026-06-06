@@ -364,6 +364,52 @@ credential broker (all 4.3).
   delta required** (§6.4(d) already states the 4.3 target); recorded as a carry-forward + design-rationale note per §23.
   forge-app 525 unit tests (+2 suites / +4 tests this task), full `sbt test` green, `scalafmtCheckAll` clean,
   ForgePaths smell sweep passes. **Slice 4.2 ✅ closed.**
+- **2026-06-06** — **Post-close review round — four findings fixed (no roadmap change; slice stays closed).**
+  - **F1 (High) — concurrent worker/workstream spawns could allocate the same id.** The daemon serves connections with
+    `parJoinUnbounded`, but `RealSupervisor` and `Daemon.createWorkstream` each read a snapshot, computed `w-N`/`ws-N`,
+    then recorded — two simultaneous calls could both pick `-1` and (for workers) race on the same checkout path.
+    Added a single-writer **gate** to `DaemonState` (`Mutex`) with `modify` (atomic read-decide-append) + `exclusive`;
+    `createWorkstream` allocates under `modify`, and `RealSupervisor.allocate` validates + dedups + reserves the id
+    under the gate (against both recorded workers **and** an in-flight `reserved` table), with the slow clone/launch
+    left **outside** the gate so M workers still spawn concurrently. The reservation is dropped in a `guarantee`. New
+    tests: 10 concurrent `create-workstream` → 10 distinct ids; 5 concurrent distinct-feature spawns → 5 distinct ids;
+    5 concurrent identical spawns → one worker.
+  - **F2 (High) — `worker.spawned` + workstream activation were not crash-atomic.** The supervisor recorded
+    `worker.spawned` then a separate `workstream.status`(Active); a crash between them rebuilt a live worker on a still-
+    `Planning` workstream. The fold now advances `Planning → Active` **inside** the `worker.spawned` case (one event),
+    and the supervisor's separate `activate` append is dropped. `Done`/`Abandoned` is never resurrected. New fold tests
+    cover the one-event activation + the no-resurrect guard.
+  - **F3 (High) — worker clones did not preserve the GitHub remote.** `git clone <local-source>` left `origin` pointing
+    at the registered *local* checkout, so the v1 `push`/`gh` PR flow would target it (or fail) instead of GitHub.
+    Added `GitClient.remoteUrl`/`setRemoteUrl`; `WorkerProvisioner` now reads the source's real `origin` and re-points
+    the clone's `origin` at it after cloning (a local-only source with no `origin` is left as-is; a genuine git failure
+    surfaces as `OriginRemapFailed`). New provisioner tests cover the remap and the no-origin no-op.
+  - **F4 (Medium) — the worker path bypassed the per-worker process lock.** The §13 lock lived only in `Main`
+    (state-changing CLI); the daemon-spawned `WorkerLoop` ran the orchestrator directly, so a duplicate spawn or a
+    manual `forge worker` could share the same re-rooted log/state. `WorkerCommands` now acquires the `FileProcessLock`
+    on the worker's re-rooted paths for the whole loop (`Held`/`Stale` → exit 2, mirroring `Main`). New test: a held
+    worker lock refuses a duplicate worker.
+
+  Full `sbt test` green, `scalafmtCheckAll` clean, `forge-it` Test/compile green, ForgePaths smell sweep passes.
+- **2026-06-06** — **Post-close review round 2 — two follow-up findings on the round-1 fixes.**
+  - **F1-followup (High) — an in-flight duplicate spawn returned a false success.** Round 1's in-flight dedup returned
+    `Right(workerId)` for a reservation *before* `worker.spawned` was durably recorded; if the original `launch` then
+    failed and freed the reservation, the duplicate had been told a worker existed when none did. Fixed by giving each
+    reservation a `Deferred[IO, Either[String, String]]`: the winning caller's `launch` result (success **or** failure,
+    via `guaranteeCase` so a raised error / cancel also completes it) is published to it, and a duplicate
+    (`Allocation.InFlight`) **waits on that result and mirrors it** instead of being handed a premature id. Only a
+    *durably recorded* live worker (`recordedLiveWorker`) still returns immediate idempotent success. New test:
+    5 concurrent identical spawns whose launch fails → all observe the same failure, no worker recorded.
+  - **F3-followup (Medium) — an origin-remap failure left a checkout that broke retry.** The clone-then-remap order
+    left the checkout on disk if set-url failed, so the next retry for the same unrecorded id hit `CheckoutExists`.
+    Fixed by (a) reading the source origin **before** cloning (the only fallible post-clone step is now the set-url),
+    and (b) a `failAndCleanup` that removes the freshly-created checkout on **any** post-`makeDir` failure (clone or
+    remap), so a retry re-clones cleanly. An unreadable source origin (incl. a non-repo, still surfaced as
+    `CloneFailed` by the clone) yields no remap rather than a separate error. New test: a forced set-url failure
+    removes the checkout and a subsequent provision succeeds.
+
+  Full `sbt test` green (forge-app 532, forge-agents 242), `scalafmtCheckAll` clean, `forge-it` Test/compile green,
+  ForgePaths smell sweep passes.
 
 ---
 

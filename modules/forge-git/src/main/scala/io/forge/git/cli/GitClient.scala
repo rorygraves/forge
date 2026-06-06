@@ -141,6 +141,19 @@ trait GitClient:
   /** `git show-ref --verify refs/remotes/origin/<name>` — exit 0 ⇒ exists. */
   def branchExistsRemote(name: BranchName): IO[Either[GitError, Boolean]]
 
+  /** `git remote get-url <remote>` — the configured fetch URL of `remote`, or `None` when no such remote is configured
+    * (a local-only repo with no `origin`). Used by the worker provisioner (Task 4.2.2) to discover the registered
+    * source's real (GitHub) remote so a worker clone — which `git clone <local-path>` would otherwise point at the
+    * local source — can be re-pointed at it, so the v1 push / `gh` PR flow targets GitHub rather than the local
+    * checkout. A genuine git failure (not a missing remote) surfaces as [[GitError]].
+    */
+  def remoteUrl(remote: String = "origin"): IO[Either[GitError, Option[String]]]
+
+  /** `git remote set-url <remote> <url>` — re-point an existing `remote` at `url` (the remote must already exist, as it
+    * does on a fresh clone's `origin`). Pairs with [[remoteUrl]] for the worker-clone origin remap (Task 4.2.2).
+    */
+  def setRemoteUrl(remote: String, url: String): IO[Either[GitError, Unit]]
+
   /** `git clone <source> <dest>` — create a fresh isolated **working** clone of `source` at `dest` (Phase-4 O10: one
     * isolated working clone per worker, Task 4.2.2). `source` and `dest` are absolute paths, so the result is
     * independent of this client's `repoRoot` cwd (the cwd only needs to *exist*). `dest` must not already be a

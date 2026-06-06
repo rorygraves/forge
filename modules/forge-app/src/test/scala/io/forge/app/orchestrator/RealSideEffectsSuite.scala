@@ -496,6 +496,8 @@ class RealSideEffectsSuite extends munit.FunSuite:
     def branchExistsLocal(name: BranchName): IO[Either[GitError, Boolean]] = IO.pure(Right(true))
     def branchExistsRemote(name: BranchName): IO[Either[GitError, Boolean]] = IO.pure(Right(false))
     def clone(source: os.Path, dest: os.Path): IO[Either[GitError, Unit]] = IO.pure(Right(()))
+    def remoteUrl(remote: String): IO[Either[GitError, Option[String]]] = IO.pure(Right(None))
+    def setRemoteUrl(remote: String, url: String): IO[Either[GitError, Unit]] = IO.pure(Right(()))
 
   private final class FakeBranchManager(calls: ArrayBuffer[String], pr: PrNumber) extends BranchManager:
     def preflight(command: ForgeCommand, manifest: Option[Manifest]): IO[PreflightReport] =

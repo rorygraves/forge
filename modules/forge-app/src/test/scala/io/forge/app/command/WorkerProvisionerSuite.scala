@@ -1,7 +1,9 @@
 package io.forge.app.command
 
+import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import io.forge.core.{FeatureId, InstanceName}
+import io.forge.git.cli.{GitClient, GitError, RealGitClient}
 import io.forge.instance.{FileInstanceStore, Instance}
 
 /** Task 4.2.2 — [[WorkerProvisioner]] against a real `git` binary, in a throwaway local repo (no network).
@@ -107,6 +109,48 @@ class WorkerProvisionerSuite extends munit.FunSuite:
     assertEquals(result, Left(WorkerProvisioner.WorkerProvisionError.CheckoutExists(checkout)))
     assert(os.exists(checkout / "sentinel"), "the pre-existing checkout must be left untouched")
 
+  fixture.test("remaps the worker clone's origin to the registered source's real remote"): (home, source) =>
+    val instance = createInstance(home)
+    val ghUrl = "https://github.com/example/seed.git"
+    // The registered source has a real (GitHub) remote — the worker clone must push / open PRs against *this*, not the
+    // local source checkout that `git clone <local-path>` would otherwise leave as origin.
+    os.proc("git", "remote", "add", "origin", ghUrl).call(cwd = source, stderr = os.Pipe)
+    val paths = WorkerProvisioner.provision(instance, "w1", source, home = home).unsafeRunSync().toOption.get
+    val origin = os.proc("git", "remote", "get-url", "origin").call(cwd = paths.repoRoot).out.text().trim
+    assertEquals(
+      origin,
+      ghUrl,
+      "the worker clone's origin must point at the source's real remote, not the local source"
+    )
+
+  fixture.test("a local-only source (no origin) leaves the clone origin as the local source"): (home, source) =>
+    val instance = createInstance(home)
+    // The seed repo has no `origin` (no PR flow to target): the clone keeps git's default (the local source path),
+    // and provisioning still succeeds — the remap is a no-op, not a failure.
+    val paths = WorkerProvisioner.provision(instance, "w1", source, home = home).unsafeRunSync().toOption.get
+    val origin = os.proc("git", "remote", "get-url", "origin").call(cwd = paths.repoRoot).out.text().trim
+    assertEquals(os.Path(origin), source, "with no source origin, the clone keeps its default local-source origin")
+
+  fixture.test("a post-clone origin-remap failure removes the checkout so a retry can re-clone"): (home, source) =>
+    val instance = createInstance(home)
+    val checkout = instance.workerCheckout("w1")
+    // The clone succeeds (real git) but the post-clone origin set-url fails; the freshly-created checkout must be
+    // cleaned up so the next retry for the same (unrecorded) worker id doesn't trip CheckoutExists.
+    val result = WorkerProvisioner
+      .provision(instance, "w1", source, git = p => new RemapFailGit(RealGitClient(p)), home = home)
+      .unsafeRunSync()
+    assert(
+      result.swap.toOption.exists(_.isInstanceOf[WorkerProvisioner.WorkerProvisionError.OriginRemapFailed]),
+      s"expected OriginRemapFailed, got $result"
+    )
+    assert(
+      !os.exists(checkout),
+      "the freshly-created checkout must be removed on remap failure (no CheckoutExists trap)"
+    )
+    // The retry path is now clear: a normal provision over the same id succeeds (no CheckoutExists).
+    val retry = WorkerProvisioner.provision(instance, "w1", source, home = home).unsafeRunSync()
+    assert(retry.isRight, s"a retry after the cleaned-up remap failure must succeed, got $retry")
+
   fixture.test("a non-repo source surfaces CloneFailed"): (home, _) =>
     val instance = createInstance(home)
     val notARepo = os.temp.dir(prefix = "forge-worker-prov-notrepo-")
@@ -118,3 +162,33 @@ class WorkerProvisionerSuite extends munit.FunSuite:
         s"expected CloneFailed, got $result"
       )
     finally if os.exists(notARepo) then os.remove.all(notARepo)
+
+  /** A [[GitClient]] that clones for real but fails the post-clone origin set-url — exercises the
+    * cleanup-on-remap-failure path. Everything delegates to a real client except `remoteUrl` (reports a remote worth
+    * remapping) and `setRemoteUrl` (fails).
+    */
+  private final class RemapFailGit(real: GitClient) extends GitClient:
+    export real.{
+      branchExistsLocal,
+      branchExistsRemote,
+      checkout,
+      clone,
+      commit,
+      currentBranch,
+      currentSha,
+      deleteLocalTag,
+      deleteRemoteTag,
+      fastForwardBase,
+      fetch,
+      isWorktreeClean,
+      listTags,
+      push,
+      pushTag,
+      stage,
+      status,
+      tag
+    }
+    def remoteUrl(remote: String): IO[Either[GitError, Option[String]]] =
+      IO.pure(Right(Some("https://github.com/example/seed.git")))
+    def setRemoteUrl(remote: String, url: String): IO[Either[GitError, Unit]] =
+      IO.pure(Left(GitError.Transient(1, "set-url boom")))
