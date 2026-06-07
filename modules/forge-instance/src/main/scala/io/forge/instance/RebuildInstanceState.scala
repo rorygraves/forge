@@ -22,10 +22,13 @@ object RebuildInstanceState:
     * `workstreamId`/`checkoutRoot`/`pid`/`exitCode`. v3 (Task 4.3.4) — [[WorkerRecord]] gained `containerId` and `pid`
     * became one of two optional liveness keys (a containerised worker carries `containerId`, not `pid`). v4 (Task
     * 4.3.5, B2) — [[InstanceState]] gained the budget aggregates (`committedUsd` / `committedByWorkstream`) + the
-    * outstanding-reservation table (`reservations`). A stale-version cache fails the version check in
+    * outstanding-reservation table (`reservations`). v5 (Task 4.3.6) — [[WorkerRecord]] gained `lastExportedSeq`, the
+    * high-water mark of the worker's exported per-feature action `seq` folded so far, making the `worker.event` fan-in
+    * idempotent against the at-least-once feed export (a resumed worker re-exports its whole on-disk log from `seq 0`;
+    * see [[applyEvent]]'s `WorkerEvent` case). A stale-version cache fails the version check in
     * [[FileInstanceStateCache]] and is rebuilt from the (forward-compatible) log.
     */
-  val CurrentSchemaVersion: Int = 4
+  val CurrentSchemaVersion: Int = 5
 
   /** The empty state — no boots seen, no workers, no workstreams, no spend. The fold seed and the "fresh instance"
     * value.
@@ -71,10 +74,27 @@ object RebuildInstanceState:
         // USD delta into the committed-spend totals (the B2 fan-in backing both the authorization decision and the
         // cockpit spend view). The fan-in is the sole writer of committed spend; `budget.finalize` only releases the
         // outstanding reservation, so a turn's actual cost is never double-counted.
-        val appended = state.updateRegisteredWorker(workerId)(w => w.copy(events = w.events :+ exported))
-        InstanceEvent.costUpdateUsd(exported) match
-          case Some(usd) => appended.addCommitted(appended.worker(workerId).flatMap(_.workstreamId), usd)
-          case None => appended
+        //
+        // **Idempotency (Task 4.3.6).** The feed export is *at-least-once*: the [[WorkerFeedExporter]] advances its
+        // in-memory watermark only AFTER a successful daemon ack, and that watermark is re-seeded at `-1` on every
+        // worker process start — so a resumed (or re-registered) worker re-exports its entire on-disk action log from
+        // `seq 0`, and a crash between the daemon ack and the watermark set re-exports the in-flight action. Without a
+        // guard, each re-export would re-append the feed entry AND re-fan-in its `cost.update`, multiplying committed
+        // spend across restarts. We dedup on the exported per-feature action `seq` (carried in the Action JSON): an
+        // event whose `seq` is `<=` the worker's recorded high-water mark is a replay and is dropped whole (no append,
+        // no fan-in). An event with no numeric `seq` (a malformed/forward export) is applied but does not advance the
+        // mark, preserving the pre-4.3.6 behaviour for that degenerate shape.
+        if state.isExportedReplay(workerId, exported) then state
+        else
+          val appended = state.updateRegisteredWorker(workerId)(w =>
+            w.copy(
+              events = w.events :+ exported,
+              lastExportedSeq = InstanceEvent.exportedSeq(exported).orElse(w.lastExportedSeq)
+            )
+          )
+          InstanceEvent.costUpdateUsd(exported) match
+            case Some(usd) => appended.addCommitted(appended.worker(workerId).flatMap(_.workstreamId), usd)
+            case None => appended
 
       case InstanceEvent.WorkstreamCreated(workstreamId, goal) =>
         // Upsert: a fresh workstream seeds a Planning record; a duplicate create updates the goal but preserves the
@@ -164,6 +184,9 @@ object RebuildInstanceState:
   *   - `containerId` — the spawned **container's** OCI id (`None` for a host-process or unspawned worker, Slice 4.3).
   *     Exactly one of `pid`/`containerId` is `Some` for a real spawn — the worker's liveness key, by topology.
   *   - `exitCode` — `Some` once the worker has exited (`worker.exited`); `None` while it may still be running.
+  *   - `lastExportedSeq` — the high-water mark of the worker's exported per-feature action `seq` folded into `events`
+  *     (Task 4.3.6). `None` until the first `worker.event` lands. Makes the `worker.event` fan-in idempotent against
+  *     the at-least-once feed export: an exported event whose `seq` is `<=` this mark is a replay and is dropped whole.
   *
   * The new fields default so a hand-written fixture / partial JSON still decodes; a real cache is always rebuilt at the
   * current schema (see [[RebuildInstanceState.CurrentSchemaVersion]]).
@@ -178,7 +201,8 @@ final case class WorkerRecord(
     checkoutRoot: Option[String] = None,
     pid: Option[Long] = None,
     containerId: Option[String] = None,
-    exitCode: Option[Int] = None
+    exitCode: Option[Int] = None,
+    lastExportedSeq: Option[Long] = None
 ) derives ReadWriter:
 
   /** A spawned worker is **live** while it carries a liveness key (a host `pid` **or** a `containerId`) and has not
@@ -247,6 +271,19 @@ final case class InstanceState(
 
   /** Committed (finalized) spend for one workstream. */
   def committedUsdForWorkstream(ws: WorkstreamId): BigDecimal = committedByWorkstream.getOrElse(ws.value, BigDecimal(0))
+
+  /** Whether an exported `worker.event` is a **replay** already folded for `workerId` — its `seq` is `<=` the worker's
+    * recorded `lastExportedSeq` high-water mark. The at-least-once dedup predicate (Task 4.3.6), shared by the fold's
+    * `cost.update` fan-in (drop a replay so committed spend is not multiplied across worker resumes) and the daemon's
+    * `worker-event` finalize decision (skip the implicit `budget.finalize` so a replayed `cost.update` does not
+    * spuriously release a *later* reservation). A seqless export (degenerate shape) is never a replay.
+    */
+  def isExportedReplay(workerId: String, exported: ujson.Value): Boolean =
+    (for
+      s <- InstanceEvent.exportedSeq(exported)
+      w <- worker(workerId)
+      last <- w.lastExportedSeq
+    yield s <= last).getOrElse(false)
 
   /** Fan a per-turn `cost.update` USD delta into the committed totals (per-instance always; per-workstream when the
     * worker has an owning workstream). The fold's sole writer of committed spend.

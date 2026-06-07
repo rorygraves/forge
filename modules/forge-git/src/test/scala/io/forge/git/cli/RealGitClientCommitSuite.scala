@@ -113,6 +113,25 @@ class RealGitClientCommitSuite extends munit.FunSuite:
         assertEquals(client.push(BranchName("main")).unsafeRunSync(), Right(()))
       finally if os.exists(bare) then os.remove.all(bare)
 
+  fixture.test("the env overlay reaches the git subprocess (Slice 4.3 container-mode credential threading)"): work =>
+    // A containerised worker has no host home / ambient git credentials; its brokered secrets (notably GH_TOKEN, used
+    // by the image's `gh auth git-credential` helper) reach `git` ONLY through this `env` overlay — the Task 4.3.6 fix
+    // that lets the in-container `git push` over HTTPS authenticate. Prove the overlay actually reaches the subprocess
+    // by driving the author identity through git's own `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env vars (an overlay on top of
+    // the inherited environment) and observing it win over the fixture's ambient `t <t@example.com>` config.
+    val env = Map(
+      "GIT_AUTHOR_NAME" -> "Broker Bot",
+      "GIT_AUTHOR_EMAIL" -> "broker@forge.test",
+      "GIT_COMMITTER_NAME" -> "Broker Bot",
+      "GIT_COMMITTER_EMAIL" -> "broker@forge.test"
+    )
+    val client = RealGitClient(work, env)
+    os.write(work / "e.txt", "env\n")
+    assertEquals(client.stage(Vector("e.txt")).unsafeRunSync(), Right(()))
+    assertEquals(client.commit("authored via the env overlay").unsafeRunSync(), Right(CommitResult.Committed))
+    val who = os.proc("git", "log", "-1", "--format=%an|%ae|%cn|%ce").call(cwd = work).out.text().trim
+    assertEquals(who, "Broker Bot|broker@forge.test|Broker Bot|broker@forge.test")
+
   fixture.test("commit on a clean tree → NothingToCommit (not an error)"): work =>
     val client = RealGitClient(work)
     // The seed commit already captured everything; nothing is staged.

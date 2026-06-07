@@ -58,6 +58,21 @@ RUN set -eux; \
       "@openai/codex@${CODEX_VERSION}"; \
     npm cache clean --force
 
+# Git credential helper (O6, Slice 4.3): route HTTPS auth for GitHub through `gh auth
+# git-credential`, which reads the token from the `GH_TOKEN`/`GITHUB_TOKEN` env var. The
+# containerised worker has no host home mount and no ambient git credentials; its scoped
+# `gh` token is brokered over the control channel (Task 4.3.3) and threaded into the `git`
+# subprocess env (RealGitClient `env` overlay), so the in-container `git push` over HTTPS
+# authenticates via this helper without any credential ever touching the image or the
+# container spec. Written to the *system* gitconfig so it applies regardless of which UID
+# runs (the clone is bind-mounted; we run as root today — see the UID note below). This is
+# what `gh auth setup-git` writes, set directly so it needs no login at build time. The
+# leading empty `helper ''` resets any inherited helper list so only gh's runs.
+RUN git config --system credential."https://github.com".helper '' \
+ && git config --system --add credential."https://github.com".helper '!gh auth git-credential' \
+ && git config --system credential."https://gist.github.com".helper '' \
+ && git config --system --add credential."https://gist.github.com".helper '!gh auth git-credential'
+
 # The Forge launcher + assembled fat jar. forge.jar must be staged into this build
 # context first (see the header / build-forge-worker-image.sh).
 COPY forge.jar /opt/forge/forge.jar

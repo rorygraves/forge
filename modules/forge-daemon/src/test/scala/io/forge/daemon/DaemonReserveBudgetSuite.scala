@@ -41,6 +41,16 @@ class DaemonReserveBudgetSuite extends CatsEffectSuite:
   private def costUpdate(usd: Double): ujson.Value =
     ujson.Obj("kind" -> "cost.update", "payload" -> ujson.Obj("usd" -> usd))
 
+  private def costUpdateSeq(seq: Long, usd: Double): ujson.Value =
+    // `seq` as a JSON number — the real `writeJs[Action]` shape (a bare `Long` would render as a string here).
+    ujson.Obj("seq" -> ujson.Num(seq.toDouble), "kind" -> "cost.update", "payload" -> ujson.Obj("usd" -> usd))
+
+  private def workerEventReq(id: Long, workerId: String, event: ujson.Value): JsonRpc.Request =
+    JsonRpc.Request(id, "worker-event", ujson.Obj("workerId" -> workerId, "event" -> event))
+
+  private def registerReq(id: Long, workerId: String): JsonRpc.Request =
+    JsonRpc.Request(id, "register-worker", ujson.Obj("workerId" -> workerId, "repo" -> "/repo", "feature" -> "feat"))
+
   test("reserve-budget grants under the cap and returns a reservationId"):
     instance.use { inst =>
       served(inst, BudgetPolicy.default) {
@@ -112,5 +122,29 @@ class DaemonReserveBudgetSuite extends CatsEffectSuite:
           val after = afterStatus.asInstanceOf[JsonRpc.Response.Success].result.obj
           assertEquals(after("outstandingUsd").num, 0.0)
           assertEquals(after("committedUsd").num, 2.5)
+      }
+    }
+
+  test("a replayed cost.update neither double-commits nor finalizes a later reservation (at-least-once dedup)"):
+    instance.use { inst =>
+      served(inst, BudgetPolicy.default) {
+        for
+          _ <- DaemonClient.callWithRetry(inst.portFile, registerReq(1L, "w1"))
+          // session 1: reserve, then export a seq-stamped cost.update → commits 2.5, clears the reservation.
+          _ <- DaemonClient.callWithRetry(inst.portFile, reserveReq(2L, "w1", 8.0))
+          _ <- DaemonClient.callWithRetry(inst.portFile, workerEventReq(3L, "w1", costUpdateSeq(0, 2.5)))
+          // session 2: a fresh reservation (the worker drives its next piece).
+          _ <- DaemonClient.callWithRetry(inst.portFile, reserveReq(4L, "w1", 8.0))
+          // the worker resumes / re-exports its feed from seq 0: the session-1 cost.update arrives AGAIN (seq 0).
+          replay <- DaemonClient.callWithRetry(inst.portFile, workerEventReq(5L, "w1", costUpdateSeq(0, 2.5)))
+          finalStatus <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(6L, "status"))
+        yield
+          // the replay is still acked (so the worker's export watermark advances and it stops re-sending)
+          assert(replay.isInstanceOf[JsonRpc.Response.Success], s"expected the replay to be acked, got $replay")
+          val st = finalStatus.asInstanceOf[JsonRpc.Response.Success].result.obj
+          // committed stays at the single real spend (NOT 5.0) — the replay did not double-count
+          assertEquals(st("committedUsd").num, 2.5)
+          // the session-2 reservation is intact (NOT spuriously finalized by the replayed cost.update)
+          assertEquals(st("outstandingUsd").num, 8.0)
       }
     }

@@ -156,12 +156,11 @@ final class RealSupervisor private (
   /** Watch a worker we spawned this session: when its [[LaunchedWorker]] reports exit, record `worker.exited` with the
     * real exit code and drop the handle. Topology-agnostic (a host pid via `Process.onExit`, a container via `docker
     * wait`). Cancelled silently if the daemon shuts down first (the worker survives; a restart's [[reconcile]] picks it
-    * up).
+    * up). Routes through [[recordExitIfLive]] so the concurrent cadence sweep ([[superviseTick]]) cannot record a
+    * second `worker.exited` for the same worker.
     */
   private def watchLaunched(workerId: String, launched: LaunchedWorker): IO[Unit] =
-    launched.awaitExit.flatMap { code =>
-      liveHandles.update(_ - workerId) *> state.record(InstanceEvent.WorkerExited(workerId, code)).void
-    }
+    launched.awaitExit.flatMap(code => recordExitIfLive(workerId, code))
 
   /** §6.4 boot reconciliation: probe every still-`live` worker the rebuilt state carries, **dispatching on its recorded
     * liveness key** (independent of which runtime *this* daemon spawns with — a daemon restarted without `--container`
@@ -235,16 +234,27 @@ final class RealSupervisor private (
     w.containerId.map(LivenessKey.ContainerId(_)).orElse(w.pid.map(LivenessKey.HostPid(_)))
 
   /** Record an externally/independently-observed exit (a reconcile / cadence-observed death, or a container's real
-    * `docker wait` code), guarding against a race with a more precise [[watchLaunched]] exit by re-checking the worker
-    * is still `live` before recording.
+    * `docker wait` code). Delegates to [[recordExitIfLive]] — the atomic live-checked recorder.
     */
-  private def surfaceExit(workerId: String, code: Int): IO[Unit] =
-    state.snapshot.flatMap { snap =>
-      if snap.worker(workerId).exists(_.live) then
-        liveHandles.update(_ - workerId) *>
-          state.record(InstanceEvent.WorkerExited(workerId, code)).void
-      else IO.unit
-    }
+  private def surfaceExit(workerId: String, code: Int): IO[Unit] = recordExitIfLive(workerId, code)
+
+  /** Record `worker.exited` for `workerId` with `code` **iff the worker is still live**, atomically. The live-check and
+    * the append run under a single [[DaemonState.modify]] write-gate hold, so two independent exit observers — the
+    * precise [[watchLaunched]]/[[watchContainer]] `awaitExit` and the cadence/reconcile liveness sweep
+    * ([[superviseTick]]/[[reattach]]) — cannot both record. A double record would double-release the worker's
+    * reservation and, via the fold's last-write-wins on `exitCode`, let a cadence sentinel (`-1`) clobber a precise
+    * `docker wait` code (or vice versa). The first observer to reach the gate records; the rest see a not-`live` worker
+    * and no-op. The volatile handle is dropped only on the recording observer's pass.
+    */
+  private def recordExitIfLive(workerId: String, code: Int): IO[Unit] =
+    state
+      .modify { snap =>
+        val events =
+          if snap.worker(workerId).exists(_.live) then Vector(InstanceEvent.WorkerExited(workerId, code))
+          else Vector.empty
+        IO.pure((events, events.nonEmpty))
+      }
+      .flatMap(IO.whenA(_)(liveHandles.update(_ - workerId)))
 
   /** The id of a **durably recorded** live worker in `workstreamId` already driving `feature` (the §6.4 idempotency
     * guard against a re-issued request) — i.e. one whose `worker.spawned` has landed in the snapshot. The in-flight

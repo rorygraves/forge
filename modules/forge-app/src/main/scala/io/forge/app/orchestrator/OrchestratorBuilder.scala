@@ -46,11 +46,13 @@ object OrchestratorBuilder:
   /** Build the orchestrator + its action log for `mode`. The action log is surfaced so the caller can reuse the same
     * instance for pre-loop bookkeeping (e.g. a `forge new` scaffold entry) without constructing a second handle.
     *
-    * `credentialEnv` is an environment overlay applied to the `gh` CLI and the agent connectors (Slice 4.3, Task
-    * 4.3.4). Empty for a normal host run (the process inherits the host's `PATH`/`gh`/`claude` credentials); for a
-    * containerised worker it carries the short-lived, host-isolated credentials brokered over the control channel (O6)
-    * — a scoped `gh` token + any configured agent API keys — so a container with no host home mount still
-    * authenticates.
+    * `credentialEnv` is an environment overlay applied to the `git` CLI, the `gh` CLI, and the agent connectors (Slice
+    * 4.3, Task 4.3.4). Empty for a normal host run (the process inherits the host's `PATH`/`gh`/`claude` credentials);
+    * for a containerised worker it carries the short-lived, host-isolated credentials brokered over the control channel
+    * (O6) — a scoped `gh` token (`GH_TOKEN`) + any configured agent API keys — so a container with no host home mount
+    * still authenticates. The `git` overlay is what lets the in-container `git push` over HTTPS authenticate: the
+    * worker image configures `gh auth git-credential` as the credential helper, which reads `GH_TOKEN` from the git
+    * subprocess's environment (this overlay).
     *
     * `reserver` is the B2 aggregate budget seam (Task 4.3.5). `BudgetReserver.noop` (the default) for a non-daemon
     * `forge run` — no aggregate budget, the launch path is byte-identical to pre-4.3.5. A daemon-spawned worker passes
@@ -70,7 +72,7 @@ object OrchestratorBuilder:
       log <- FileActionLog(paths)
       commitIdentity <- resolveCommitIdentity(paths, config)
     yield
-      val git = new RealGitClient(paths.repoRoot)
+      val git = new RealGitClient(paths.repoRoot, credentialEnv)
       val gh = new RealGhClient(paths.repoRoot, credentialEnv)
       val branchManager = new RealBranchManager(git, gh, protectionCache, Clock[IO])
       val watcher = new RealPRWatcher(gh, watcherConfig(config))

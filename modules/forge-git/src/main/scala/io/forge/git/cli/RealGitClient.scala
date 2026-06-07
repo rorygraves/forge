@@ -16,8 +16,15 @@ import scala.util.matching.Regex
   *
   * @param repoRoot
   *   working directory for every `git` call. Almost always the repo root.
+  * @param env
+  *   environment overlay applied on top of the JVM's environment for every `git` call. Empty by default (pure
+  *   inheritance — the host-process path). A **containerised** worker (Slice 4.3, O6) passes the short-lived,
+  *   host-isolated credentials brokered over the control channel — notably `GH_TOKEN` — so the in-container `git push`
+  *   over HTTPS authenticates via the image's `gh auth git-credential` helper without a host home mount. Mirrors
+  *   [[RealGhClient]]'s `env` overlay (the two share the brokered credential set, threaded together by
+  *   [[io.forge.app.orchestrator.OrchestratorBuilder]]).
   */
-final class RealGitClient(repoRoot: os.Path) extends GitClient:
+final class RealGitClient(repoRoot: os.Path, env: Map[String, String] = Map.empty) extends GitClient:
 
   override def currentBranch: IO[Either[GitError, BranchName]] =
     run(Vector("git", "branch", "--show-current")).map(_.flatMap { stdout =>
@@ -44,7 +51,7 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
       IO.blocking {
         val res = os
           .proc("git", "merge-base", "--is-ancestor", local.value, remote.value)
-          .call(cwd = repoRoot, check = false, stderr = os.Pipe)
+          .call(cwd = repoRoot, env = env, check = false, stderr = os.Pipe)
         res.exitCode == 0
       }
 
@@ -112,7 +119,7 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
     // fix-up round (Phase-3 exit-run finding F2). Let CI be the gate; client hooks are a dev inner-loop concern.
     val argv = Vector("git", "push", "--no-verify", "origin", branch.value) ++ flags
     IO.blocking {
-      val res = os.proc(argv).call(cwd = repoRoot, check = false, stderr = os.Pipe)
+      val res = os.proc(argv).call(cwd = repoRoot, env = env, check = false, stderr = os.Pipe)
       RealGitClient.classifyPush(branch, res.exitCode, res.out.text(), res.err.text())
     }
 
@@ -162,7 +169,7 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
       author.toVector.flatMap(id => Vector("-c", s"user.name=${id.name}", "-c", s"user.email=${id.email}"))
     val argv = Vector("git") ++ identityArgs ++ Vector("commit", "--no-verify", "-m", message)
     IO.blocking {
-      val res = os.proc(argv).call(cwd = repoRoot, check = false, stderr = os.Pipe)
+      val res = os.proc(argv).call(cwd = repoRoot, env = env, check = false, stderr = os.Pipe)
       RealGitClient.classifyCommit(res.exitCode, res.out.text(), res.err.text())
     }
 
@@ -174,7 +181,8 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
 
   override def remoteUrl(remote: String): IO[Either[GitError, Option[String]]] =
     IO.blocking {
-      val res = os.proc("git", "remote", "get-url", remote).call(cwd = repoRoot, check = false, stderr = os.Pipe)
+      val res =
+        os.proc("git", "remote", "get-url", remote).call(cwd = repoRoot, env = env, check = false, stderr = os.Pipe)
       if res.exitCode == 0 then
         val url = res.out.text().trim
         Right(if url.isEmpty then None else Some(url))
@@ -197,7 +205,7 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
     IO.blocking {
       val res = os
         .proc("git", "show-ref", "--verify", "--quiet", ref)
-        .call(cwd = repoRoot, check = false, stderr = os.Pipe)
+        .call(cwd = repoRoot, env = env, check = false, stderr = os.Pipe)
       if res.exitCode == 0 then Right(true)
       else if res.exitCode == 1 then Right(false)
       else Left(GitError.Transient(res.exitCode, res.err.text()))
@@ -205,7 +213,7 @@ final class RealGitClient(repoRoot: os.Path) extends GitClient:
 
   private def run(argv: Vector[String]): IO[Either[GitError, String]] =
     IO.blocking {
-      val res = os.proc(argv).call(cwd = repoRoot, check = false, stderr = os.Pipe)
+      val res = os.proc(argv).call(cwd = repoRoot, env = env, check = false, stderr = os.Pipe)
       if res.exitCode == 0 then Right(res.out.text())
       else Left(GitError.Transient(res.exitCode, res.err.text()))
     }

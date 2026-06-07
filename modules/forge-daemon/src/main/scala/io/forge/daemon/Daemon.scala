@@ -165,13 +165,20 @@ object Daemon:
       case Right((workerId, exported)) =>
         state
           .modify { snap =>
-            val workerEvent = InstanceEvent.WorkerEvent(workerId, exported)
-            val finalize =
-              for
-                usd <- InstanceEvent.costUpdateUsd(exported)
-                reservation <- snap.reservations.get(workerId)
-              yield InstanceEvent.BudgetFinalize(workerId, reservation.reservationId, usd)
-            IO.pure((workerEvent +: finalize.toVector, ()))
+            // At-least-once dedup (Task 4.3.6): a resumed/crash-recovered worker re-exports already-folded actions
+            // (the feed-export watermark re-seeds at -1 on every worker start). A replay must append NOTHING — neither
+            // the worker.event (else the committed-spend fan-in double-counts and the live feed shows duplicates) nor a
+            // budget.finalize (else a replayed cost.update spuriously releases a *later* reservation). The `accepted`
+            // ack still advances the worker's export watermark so it stops re-sending.
+            if snap.isExportedReplay(workerId, exported) then IO.pure((Vector.empty, ()))
+            else
+              val workerEvent = InstanceEvent.WorkerEvent(workerId, exported)
+              val finalize =
+                for
+                  usd <- InstanceEvent.costUpdateUsd(exported)
+                  reservation <- snap.reservations.get(workerId)
+                yield InstanceEvent.BudgetFinalize(workerId, reservation.reservationId, usd)
+              IO.pure((workerEvent +: finalize.toVector, ()))
           }
           .as(JsonRpc.Response.ok(req.id, ujson.Obj("accepted" -> ujson.Bool(true))))
 

@@ -301,6 +301,21 @@ object InstanceEvent:
         yield BudgetFinalize(workerId, reservationId, BigDecimal(actualUsd))
       case _ => None
 
+  /** The exported per-feature action `seq` carried by a `worker.event` payload (the full §19 `Action` JSON carries a
+    * numeric `seq`), or `None` for a seqless / degenerate shape. Backs the at-least-once dedup
+    * ([[InstanceState.isExportedReplay]]) shared by [[RebuildInstanceState]]'s fan-in and the daemon's `worker-event`
+    * finalize decision (Task 4.3.6). Tolerates `seq` as a JSON number (the real `writeJs[Action]` shape) **or** a
+    * numeric string — upickle/ujson can render a `Long` either way depending on the construction path, so reading both
+    * keeps the dedup robust against that quirk rather than silently disabling it (a string `seq` would otherwise read
+    * as no-seq and never dedup).
+    */
+  def exportedSeq(exported: ujson.Value): Option[Long] =
+    exported.objOpt.flatMap(_.get("seq")).flatMap {
+      case ujson.Num(n) => Some(n.toLong)
+      case ujson.Str(s) => s.toLongOption
+      case _ => None
+    }
+
   /** The per-turn USD delta carried by an exported `cost.update` action (§19, [[CostUpdateKind]]), used by
     * [[RebuildInstanceState]]'s B3 committed-spend fan-in and the daemon's `budget.finalize` trigger. `None` when
     * `exported` is not a `cost.update` or lacks a numeric `payload.usd`.

@@ -402,6 +402,43 @@ container runtime also exposes), so the supervisor is unchanged in shape.
   ForgePaths smell sweep passes. Spec reconciled (`forge-design-2.0.md` §6.1/§6.3/§7 transport + O2/O9; PH4-3 flipped
   deferred→landed). **Task 4.3.6 stays open** pending the live dogfood #8 (now on **macOS**) + the whole-section close-out
   review.
+- **2026-06-07** — **Task 4.3.6 whole-section close-out review landed (the three RISK findings fixed); live dogfood #8 +
+  roadmap flip deferred (ratified with the user).** A whole-section review of the 4.3 surface (forge-core Forgefile /
+  forge-daemon+instance / forge-app, ~3.5k lines) found the Forgefile parser/store, the budget fold/policy/RPC, the OCI
+  runtime seam, and the TCP migration **clean** (NITs only), and three **RISK** findings — all fixed here with tests:
+  **(F1) container-mode `git push` had no auth.** `OrchestratorBuilder` threaded the brokered `GH_TOKEN` into
+  `RealGhClient` + the connectors but **not** `RealGitClient`, and the worker image never configured a git credential
+  helper — so an in-container `git push` over HTTPS (no host home mount) could not authenticate, silently blocking the
+  PR-push step of any containerised run. Fix: `RealGitClient` gained an `env` overlay (mirroring `RealGhClient`, applied
+  to every `git` `.call`), wired the brokered `credentialEnv` in `OrchestratorBuilder`, and the `forge-worker` Dockerfile
+  now writes `credential.https://github.com.helper = !gh auth git-credential` to the **system** gitconfig (what `gh auth
+  setup-git` writes, set directly so it needs no login at build) — the helper reads `GH_TOKEN` from the git subprocess
+  env (the overlay). This completes the O6/4.3.4 "worker applies brokered creds" story for `git` (it had only covered
+  `gh`/the connectors). New `RealGitClientCommitSuite` test proves the env overlay reaches the subprocess (author
+  identity driven through `GIT_AUTHOR_*`). **(F2) non-atomic double-exit-record.** `RealSupervisor.surfaceExit` did
+  `state.snapshot` then a separate `state.record`, and `watchLaunched` recorded unconditionally — so two exit observers
+  (the precise `awaitExit`/`docker wait` and the cadence/reconcile liveness sweep) could both record `worker.exited`,
+  double-releasing the reservation and clobbering the real exit code with the `-1` sentinel via the fold's
+  last-write-wins. Fix: one atomic `recordExitIfLive` helper (the live-check + append under a single `DaemonState.modify`
+  gate hold) used by **both** paths — first observer wins, the rest no-op. **(F3) `cost.update` at-least-once
+  double-count.** The feed exporter advances its watermark only after a daemon ack and re-seeds it at `-1` on every
+  worker process start, so a **resumed/re-registered worker re-exports its whole on-disk action log from `seq 0`** —
+  re-folding every prior `cost.update` and multiplying committed spend across restarts (and duplicating feed entries).
+  Fix: the fold dedups on the exported per-feature `seq` via a new `WorkerRecord.lastExportedSeq` high-water mark
+  (**cache schema v4 → v5**) + a shared `InstanceState.isExportedReplay` predicate; the daemon's `worker-event` handler
+  uses the **same** predicate to skip the whole append on a replay (else a replayed `cost.update` would spuriously
+  finalize a *later* reservation, an implication the fold fix alone would miss). `exportedSeq` tolerates `seq` as a JSON
+  number (the real `writeJs[Action]` shape) **or** a numeric string (an upickle `Long`-rendering quirk caught while
+  writing the test — the test fixture initially built a string-`seq` and silently disabled the dedup; pinned with a
+  `writeJs[Action]`-shape regression test). Tests: `BudgetReservationSuite` (+3: replay-dropped, real-`writeJs` pin,
+  seqless-degenerate), `DaemonReserveBudgetSuite` (+1: replay neither double-commits nor finalizes a later reservation),
+  `RealGitClientCommitSuite` (+1: env overlay). forge-instance 63→66, forge-daemon 48→49, full `sbt test` green,
+  `scalafmtCheckAll` clean, ForgePaths smell sweep passes. **§23 spec deltas to fold at the eventual flip:** the
+  `worker-event` at-least-once dedup (`lastExportedSeq` / `isExportedReplay`, cache schema v5) as a §6.3/§8 robustness
+  invariant; the container-mode `git` credential overlay + image credential-helper (O6). **Task 4.3.6 stays open** — per
+  the user (2026-06-07: "defer dogfood; close on fixes+proofs"), the **live dogfood #8** (real `forge daemon --container`
+  against a real repo, needs a scoped PAT + agent keys + real spend) and the **roadmap §5 sub-slice 4.3 flip** are the
+  only remaining items.
 
 ---
 
