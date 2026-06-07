@@ -29,3 +29,6 @@ Thumbs.db
 *.local.conf
 .env
 .env.*
+
+# Staged fat jar for the forge-worker Docker build context (Slice 4.3)
+docker/forge-worker/forge.jar

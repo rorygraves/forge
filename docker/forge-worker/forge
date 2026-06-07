@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+#
+# forge — in-container launcher for the Forge worker (Slice 4.3, O7).
+#
+# This is the `forge` entrypoint the containerised worker invokes
+# (`ContainerRuntime.WorkerEntrypoint`). Unlike the host launcher (`bin/forge`),
+# the jar location is fixed by the image at /opt/forge/forge.jar — there is no
+# ~/.forge install step inside the container.
+#
+# Knobs (rarely needed; the image sets sane defaults):
+#   - FORGE_JAR        path to the fat jar (default /opt/forge/forge.jar).
+#   - FORGE_JAVA       java binary (default: java on PATH).
+#   - FORGE_JAVA_OPTS  extra JVM options (e.g. -Xmx).
+#
+set -euo pipefail
+
+jar="${FORGE_JAR:-/opt/forge/forge.jar}"
+
+if [[ ! -f "$jar" ]]; then
+  echo "forge: launcher jar not found at: $jar (the image is misbuilt)" >&2
+  exit 70
+fi
+
+java_bin="${FORGE_JAVA:-java}"
+
+# shellcheck disable=SC2086
+exec "$java_bin" ${FORGE_JAVA_OPTS:-} -jar "$jar" "$@"

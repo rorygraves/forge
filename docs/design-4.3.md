@@ -363,11 +363,40 @@ container runtime also exposes), so the supervisor is unchanged in shape.
   convention; the implicit `cost.update`-drives-`finalize` fan-in; the coarse O11 estimate = per-piece cap; the status
   JSON `committedUsd`/`outstandingUsd` fields. The live container-worker budget-cycle tie-together is the Task 4.3.6
   dogfood. Task 4.3.6 open.
+- **2026-06-07** — **Task 4.3.6 prerequisites landed (proof-side; the live dogfood + close-out review remain).** The
+  build/test/doc deliverables that unblock the exit-criterion exercise: (1) **the default forge-worker image**
+  (`docker/forge-worker/Dockerfile` + `forge` launcher + `README`, built by `scripts/build-forge-worker-image.sh`) — a
+  `eclipse-temurin:21-jre` base bundling the assembled `forge.jar` + `git`/`gh`/`claude`/`codex` on PATH, the missing
+  `forge-worker:latest` fallback. **Built + verified live** against the host Docker 29.2.1 (git 2.53.0, gh 2.93.0, claude
+  2.1.150, codex-cli 0.133.0, `forge worker` argv recognized). (2) **`WorkerDaemonHandshakeSuite`** (forge-app,
+  always-on) — the worker-side tie-together through the real `WorkerReporter` + `ReportingBudgetReserver` in `WorkerLoop`'s
+  order over one served daemon: register → broker host-isolated creds → reserve→grant→proceed → `cost.update`→finalize
+  (outstanding cleared, actual committed), plus a tiny-cap **refuse → hold** (never proceeds, reports `BudgetHold`). (3)
+  **Spec reconciliation (§23)** of the 4.3.1–4.3.5 deltas into `forge-design-2.0.md` (the "Implemented (4.3)" notes in
+  §6.4/§7/§8, O11 resolved, a §13 status-log entry). (4) **Dogfood #8 runbook** ([`dogfood/4.3-container.md`](dogfood/4.3-container.md)).
+  **Key finding (→ 4.5, ratified with the user):** a container cannot reach a *host-created* Unix socket over a bind mount
+  on Docker Desktop for **macOS** (`Errno 95`; only a *shared-volume* socket between two in-VM containers crosses), so the
+  containerised worker↔daemon control channel runs only on a **Linux** host today — re-architecting it to **TCP** is
+  deferred to 4.5 and **dogfood #8 runs on Linux**. forge-app +1 always-on suite (2 tests); full `sbt test` green,
+  `scalafmtCheckAll` clean, ForgePaths smell sweep passes. **Task 4.3.6 stays open** pending the live Linux dogfood + the
+  whole-section close-out review (carry-forward walk + roadmap §5 sub-slice 4.3 flip).
 
 ---
 
 ## 4. Carry-forward / deferred
 
+- **Container control-channel transport on macOS → TCP (4.5).** Found in the 4.3.6
+  dogfood prep: a container **cannot** connect to a *host-created* Unix socket over a
+  bind mount on Docker Desktop for macOS (`Errno 95 Operation not supported` — the VM
+  boundary; only a socket on a *shared Docker volume* between two in-VM containers
+  crosses). The current `ContainerRuntime` bind-mounts the daemon's host Unix socket
+  into the worker container, which works on a **Linux** host but not on the macOS dev
+  host (contract §7 "host is macOS"). **Ratified with the user (2026-06-07):**
+  re-architect the worker control channel to **TCP** for the container topology (so it
+  crosses the macOS VM boundary cleanly) — **deferred to 4.5**; **dogfood #8 runs on a
+  Linux host** in the meantime. The host-process (4.2) topology is unaffected. See
+  [`design-rationale.md`](design-rationale.md) and the [`dogfood/4.3-container.md`](dogfood/4.3-container.md)
+  runbook's host-platform note.
 - **Cockpit TUI** (§6.3 — multi-worker panes, attach/detach, per-worker "needs a
   human" flags, container log/process inspection) is **4.4**. 4.3 exposes the
   containerised worker's status + the `attention` projection + the aggregate spend
