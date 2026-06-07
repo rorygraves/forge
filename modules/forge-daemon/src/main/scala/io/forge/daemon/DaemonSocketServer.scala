@@ -1,22 +1,27 @@
 package io.forge.daemon
 
 import cats.effect.IO
+import com.comcast.ip4s.{Host, IpAddress, Port, SocketAddress}
+import fs2.io.net.Network
 import fs2.{text, Stream}
-import fs2.io.net.unixsocket.{UnixSocketAddress, UnixSockets}
 
-/** The daemon's Unix-domain-socket JSON-RPC server (Phase-4 contract §6.1/§6.3, Slice-4.1 spike Task 4.1.1).
+/** The daemon's **TCP** JSON-RPC server (Phase-4 contract §6.1/§6.3, Slice-4.1 spike Task 4.1.1; moved off the
+  * Unix-domain socket in the Slice-4.3 TCP migration).
   *
-  * Binds the instance socket ([[io.forge.instance.Instance.socketFile]]) and serves newline-delimited JSON-RPC 2.0:
-  * each connection's inbound lines are decoded to [[JsonRpc.Request]]s, dispatched through a pluggable [[Handler]], and
-  * each [[JsonRpc.Response]] the handler emits is written back as one line. Most methods are **unary** (one request →
-  * one response, [[Handler.unary]]); a **streaming** method — `subscribe` (Task 4.1.4) — returns a long-lived stream
-  * whose successive elements become successive response lines on the same connection. Multiple requests per connection
-  * are supported (the line-oriented loop), and connections are served concurrently (`parJoinUnbounded`), so a
-  * long-lived `subscribe` client does not block a `status` client.
+  * Binds a TCP port and serves newline-delimited JSON-RPC 2.0: each connection's inbound lines are decoded to
+  * [[JsonRpc.Request]]s, dispatched through a pluggable [[Handler]], and each [[JsonRpc.Response]] the handler emits is
+  * written back as one line. Most methods are **unary** (one request → one response, [[Handler.unary]]); a
+  * **streaming** method — `subscribe` (Task 4.1.4) — returns a long-lived stream whose successive elements become
+  * successive response lines on the same connection. Multiple requests per connection are supported (the line-oriented
+  * loop), and connections are served concurrently (`parJoinUnbounded`), so a long-lived `subscribe` client does not
+  * block a `status` client.
   *
-  * The socket file is recreated on bind (`deleteIfExists = true`) — a leftover socket from a crashed daemon is not a
-  * live-holder signal; the **instance lock** (held by the supervisor, Task 4.1.3) is the liveness authority — and
-  * removed on a clean stop (`deleteOnClose = true`).
+  * TCP (rather than a Unix socket) is what lets a **containerised** worker (Slice 4.3) reach the daemon — it connects
+  * to `host.docker.internal:<port>` from inside its OCI container, where a bind-mounted host socket file is unreliable
+  * across the Docker Desktop VM boundary. The bind host defaults to loopback (`127.0.0.1`); the container path binds
+  * all interfaces (`0.0.0.0`) so the container can reach it. The port is normally **ephemeral** (`port 0`) — the bound
+  * address is emitted as the stream's first element so the caller can record it
+  * ([[io.forge.instance.Instance.portFile]]).
   */
 object DaemonSocketServer:
 
@@ -32,17 +37,31 @@ object DaemonSocketServer:
       */
     def unary(f: JsonRpc.Request => IO[JsonRpc.Response]): Handler = req => Stream.eval(f(req))
 
-  /** The server as a never-completing `Stream[IO, Nothing]`. Run it in the background (`.compile.drain.background`, or
-    * a supervised fiber) for the lifetime of the daemon; cancelling the stream releases the socket.
+  /** The running server as a `Stream[IO, SocketAddress[IpAddress]]` that **emits the bound address once** (the resolved
+    * ephemeral port, when `port` is `0`) and then serves forever, emitting nothing further until interrupted. Run it in
+    * the background (`.compile.drain.background`, or a supervised fiber) for the lifetime of the daemon; cancelling the
+    * stream releases the listen socket. The single emitted element lets the caller learn the ephemeral port (to write
+    * the discovery file / log it) via `.evalTap` before the serve loop blocks.
     */
+  /** Loopback bind host — the safe default (host clients only). The container path binds [[AllInterfaces]] instead. */
+  val Loopback: Host = Host.fromString("127.0.0.1").get
+
+  /** All-interfaces bind host — what the container path binds so a worker can reach the daemon via
+    * `host.docker.internal`.
+    */
+  val AllInterfaces: Host = Host.fromString("0.0.0.0").get
+
+  /** Ephemeral port (the OS assigns a free one at bind; the resolved port is emitted as the stream's first element). */
+  private val Ephemeral: Port = Port.fromInt(0).get
+
   def serve(
-      socketPath: os.Path,
       handler: Handler,
-      sockets: UnixSockets[IO] = UnixSockets.forIO
-  ): Stream[IO, Nothing] =
-    sockets
-      .server(UnixSocketAddress(socketPath.toString), deleteIfExists = true, deleteOnClose = true)
-      .map { client =>
+      host: Host = Loopback,
+      port: Port = Ephemeral,
+      network: Network[IO] = Network.forIO
+  ): Stream[IO, SocketAddress[IpAddress]] =
+    Stream.resource(network.serverResource(Some(host), Some(port))).flatMap { case (bound, clients) =>
+      val server = clients.map { client =>
         client.reads
           .through(text.utf8.decode)
           .through(text.lines)
@@ -50,8 +69,9 @@ object DaemonSocketServer:
           .flatMap(line => respond(line, handler))
           .through(text.utf8.encode)
           .through(client.writes)
-      }
-      .parJoinUnbounded
+      }.parJoinUnbounded
+      Stream.emit(bound) ++ server.drain
+    }
 
   /** The response line(s) for one inbound request line — a single line for a unary method, or a line per streamed
     * element for `subscribe`. `flatMap`-sequenced per connection, so a long-lived `subscribe` stream holds the

@@ -30,7 +30,7 @@ class DaemonReserveBudgetSuite extends CatsEffectSuite:
       state <- DaemonState.boot(inst, pid = 99L)
       shutdown <- Deferred[IO, Unit]
       result <- Daemon
-        .serveUntilShutdown(inst.socketFile, state, shutdown, Supervisor.noop, CredentialBroker.noop, budget)
+        .serveUntilShutdown(inst.portFile, state, shutdown, Supervisor.noop, CredentialBroker.noop, budget)
         .background
         .use(_ => body.guarantee(shutdown.complete(()).void))
     yield result
@@ -44,7 +44,7 @@ class DaemonReserveBudgetSuite extends CatsEffectSuite:
   test("reserve-budget grants under the cap and returns a reservationId"):
     instance.use { inst =>
       served(inst, BudgetPolicy.default) {
-        DaemonClient.callWithRetry(inst.socketFile, reserveReq(1L, "w1", 8.0)).map {
+        DaemonClient.callWithRetry(inst.portFile, reserveReq(1L, "w1", 8.0)).map {
           case JsonRpc.Response.Success(_, body) =>
             assertEquals(body.obj("granted").bool, true)
             assert(body.obj("reservationId").str.nonEmpty, "expected a non-empty reservationId")
@@ -58,8 +58,8 @@ class DaemonReserveBudgetSuite extends CatsEffectSuite:
       val tiny = BudgetPolicy(perWorkstreamCapUsd = BigDecimal(1), perInstanceCapUsd = BigDecimal(1))
       served(inst, tiny) {
         for
-          refused <- DaemonClient.callWithRetry(inst.socketFile, reserveReq(1L, "w1", 8.0))
-          ok <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(2L, "status"))
+          refused <- DaemonClient.callWithRetry(inst.portFile, reserveReq(1L, "w1", 8.0))
+          ok <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(2L, "status"))
         yield
           refused match
             case JsonRpc.Response.Success(_, body) =>
@@ -74,7 +74,7 @@ class DaemonReserveBudgetSuite extends CatsEffectSuite:
     instance.use { inst =>
       served(inst, BudgetPolicy.default) {
         DaemonClient
-          .callWithRetry(inst.socketFile, JsonRpc.Request(1L, "reserve-budget", ujson.Obj("workerId" -> "w1")))
+          .callWithRetry(inst.portFile, JsonRpc.Request(1L, "reserve-budget", ujson.Obj("workerId" -> "w1")))
           .map {
             case JsonRpc.Response.Failure(Some(1L), err) => assertEquals(err.code, JsonRpc.RpcError.InvalidParams)
             case other => fail(s"expected InvalidParams, got $other")
@@ -88,20 +88,20 @@ class DaemonReserveBudgetSuite extends CatsEffectSuite:
         for
           // register, grant a reservation, then export a cost.update for the worker
           _ <- DaemonClient.callWithRetry(
-            inst.socketFile,
+            inst.portFile,
             JsonRpc.Request(
               1L,
               "register-worker",
               ujson.Obj("workerId" -> "w1", "repo" -> "/repo", "feature" -> "feat")
             )
           )
-          grant <- DaemonClient.callWithRetry(inst.socketFile, reserveReq(2L, "w1", 8.0))
-          beforeStatus <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(3L, "status"))
+          grant <- DaemonClient.callWithRetry(inst.portFile, reserveReq(2L, "w1", 8.0))
+          beforeStatus <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(3L, "status"))
           _ <- DaemonClient.callWithRetry(
-            inst.socketFile,
+            inst.portFile,
             JsonRpc.Request(4L, "worker-event", ujson.Obj("workerId" -> "w1", "event" -> costUpdate(2.5)))
           )
-          afterStatus <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(5L, "status"))
+          afterStatus <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(5L, "status"))
         yield
           assert(grant.isInstanceOf[JsonRpc.Response.Success])
           // before the cost.update: the 8.0 estimate is outstanding, nothing committed

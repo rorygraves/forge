@@ -1,9 +1,10 @@
 # forge-worker — the default forge-capable worker container image (Slice 4.3, O1/O7).
 #
 # A containerised Forge worker runs `forge worker … --container` inside this image,
-# reaching the daemon over a bind-mounted control socket and driving the frozen v1
-# loop with its credentials brokered over that socket (Task 4.3.3 / O6 — no host
-# home mount). The image therefore bundles everything the worker boundary needs on
+# reaching the daemon over TCP at host.docker.internal:<port> (the daemon's
+# `--socket` address) and driving the frozen v1 loop with its credentials brokered
+# over that connection (Task 4.3.3 / O6 — no host home mount, no bind-mounted
+# socket). The image therefore bundles everything the worker boundary needs on
 # PATH: the `forge` launcher (the assembled fat jar), a JRE, git, the `gh` CLI, and
 # the `claude` / `codex` agent CLIs.
 #
@@ -63,9 +64,9 @@ COPY forge.jar /opt/forge/forge.jar
 COPY forge /usr/local/bin/forge
 RUN chmod +x /usr/local/bin/forge
 
-# The clone + socket are bind-mounted in at /forge/worker and /forge/daemon.sock
-# (ContainerRuntime.ContainerWorkerRoot / .ContainerSocket); the supervisor sets the
-# workdir to the checkout. We run as root: the bind-mounted clone is owned by the
+# The clone is bind-mounted in at /forge/worker (ContainerRuntime.ContainerWorkerRoot)
+# and the supervisor sets the workdir to the checkout; the daemon is reached over TCP
+# (host.docker.internal:<port>), not a mount. We run as root: the bind-mounted clone is owned by the
 # host user, so a non-root container UID would have to be reconciled with the host
 # UID to write the checkout — that UID-mapping hardening (defence-in-depth on top of
 # the O6 credential/home isolation this slice delivers) is a 4.5 carry-forward.

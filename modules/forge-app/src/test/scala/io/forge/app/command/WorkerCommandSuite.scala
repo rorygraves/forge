@@ -42,7 +42,7 @@ class WorkerCommandSuite extends CatsEffectSuite:
       state <- DaemonState.boot(inst, pid = 99L)
       shutdown <- Deferred[IO, Unit]
       result <- Daemon
-        .serveUntilShutdown(inst.socketFile, state, shutdown)
+        .serveUntilShutdown(inst.portFile, state, shutdown)
         .background
         .use(_ => body.guarantee(shutdown.complete(()).void))
     yield result
@@ -88,7 +88,7 @@ class WorkerCommandSuite extends CatsEffectSuite:
 
   test("forge worker when no daemon is listening exits 1, not a crash") {
     fixture.use { case (home, inst) =>
-      // Clone present but no daemon serving the socket: the register RPC retries briefly, then the loop degrades.
+      // Clone present but no daemon: the port file is absent, so the worker can't resolve the daemon and degrades.
       seedCheckout(inst) *> WorkerCommands.run(home, command).map(exit => assertEquals(exit, ExitCode(1)))
     }
   }

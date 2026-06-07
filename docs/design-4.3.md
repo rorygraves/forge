@@ -50,7 +50,8 @@ container*** (Docker-first, behind the abstract runtime seam) **on its own
 isolated clone, with its tooling pinned from a committed `Forgefile` and its
 credentials isolated from the host** (no host home mount; a per-worker scoped
 `gh` token; brokered short-lived `claude`/`codex` auth over the worker control
-channel) — the worker reaches the daemon over a mounted control socket, runs the
+channel) — the worker reaches the daemon over the **TCP** control channel
+(`host.docker.internal:<port>` from inside the container), runs the
 frozen v1 loop, and **before each agent spawn obtains a budget *reservation*** from
 the daemon (`reserve → grant/refuse → finalize-on-`cost.update``, durable in the
 instance log), the daemon refusing a spawn that would oversubscribe the
@@ -380,23 +381,47 @@ container runtime also exposes), so the supervisor is unchanged in shape.
   deferred to 4.5 and **dogfood #8 runs on Linux**. forge-app +1 always-on suite (2 tests); full `sbt test` green,
   `scalafmtCheckAll` clean, ForgePaths smell sweep passes. **Task 4.3.6 stays open** pending the live Linux dogfood + the
   whole-section close-out review (carry-forward walk + roadmap §5 sub-slice 4.3 flip).
+- **2026-06-07** — **TCP control-channel migration landed (pulled forward from 4.5 into 4.3, unblocking dogfood #8 on
+  macOS).** The 4.3.6 prep finding (PH4-3) was that a containerised worker cannot reach a *host-created* Unix socket over
+  a bind mount on Docker Desktop for macOS (`Errno 95`). Rather than restrict the container topology to a Linux host (the
+  original deferral), the worker↔daemon control channel was **re-architected to TCP** — **ratified with the user
+  (2026-06-07: "adopt the TCP work into 4.3 + finish")**. (1) **`DaemonAddress` (forge-daemon)** — `host:port` + the
+  port-discovery file (`Instance.socketFile` `daemon.sock` → `Instance.portFile` `daemon.port`): the daemon writes its
+  bound ephemeral port, host clients read it back and connect over loopback, a containerised worker is handed the full
+  `host.docker.internal:<port>` on argv (`--socket`). (2) **`DaemonSocketServer`/`DaemonClient` over fs2 `Network` TCP** —
+  `serve` binds `Loopback` (host) or `AllInterfaces` (`--container`) on an ephemeral port and **emits the bound address**
+  as the stream's first element; `call`/`callWithRetry`/`subscribe` gain port-file overloads that re-read the file each
+  attempt (so the first `register` rides out the start-up race). (3) **`Daemon.serveUntilShutdown`** writes/cleans the
+  port file (`evalTap` on bind + `guarantee` on stop) + a `bindHost`/`onBound` pair. (4) **`ContainerSpec.extraHosts` +
+  the `--add-host` argv (forge-daemon `OciRuntime`/`DockerRuntime`)** — the worker container always carries
+  `host.docker.internal:host-gateway`. (5) **`ContainerRuntime`** drops the daemon-socket mount (now **one** bind mount,
+  the worker root) and resolves the daemon address from the instance port file at launch; **`WorkerReporter`/`WorkerCommands`**
+  reach the daemon by port file (host) or parsed `--socket host:port` (container); **`DaemonCommands` `--container`** binds
+  `0.0.0.0` and logs the `host.docker.internal` reach address. All `Daemon*`/`Worker*`/`Workstream*` suites updated to the
+  port-file/TCP shape; full `sbt test` green (forge-daemon 48, forge-instance, forge-app 561), `scalafmtCheckAll` clean,
+  ForgePaths smell sweep passes. Spec reconciled (`forge-design-2.0.md` §6.1/§6.3/§7 transport + O2/O9; PH4-3 flipped
+  deferred→landed). **Task 4.3.6 stays open** pending the live dogfood #8 (now on **macOS**) + the whole-section close-out
+  review.
 
 ---
 
 ## 4. Carry-forward / deferred
 
-- **Container control-channel transport on macOS → TCP (4.5).** Found in the 4.3.6
-  dogfood prep: a container **cannot** connect to a *host-created* Unix socket over a
-  bind mount on Docker Desktop for macOS (`Errno 95 Operation not supported` — the VM
-  boundary; only a socket on a *shared Docker volume* between two in-VM containers
-  crosses). The current `ContainerRuntime` bind-mounts the daemon's host Unix socket
-  into the worker container, which works on a **Linux** host but not on the macOS dev
-  host (contract §7 "host is macOS"). **Ratified with the user (2026-06-07):**
-  re-architect the worker control channel to **TCP** for the container topology (so it
-  crosses the macOS VM boundary cleanly) — **deferred to 4.5**; **dogfood #8 runs on a
-  Linux host** in the meantime. The host-process (4.2) topology is unaffected. See
-  [`design-rationale.md`](design-rationale.md) and the [`dogfood/4.3-container.md`](dogfood/4.3-container.md)
-  runbook's host-platform note.
+- **Container control-channel transport → TCP (landed in 4.3, not deferred).** Found
+  in the 4.3.6 dogfood prep: a container **cannot** connect to a *host-created* Unix
+  socket over a bind mount on Docker Desktop for macOS (`Errno 95 Operation not
+  supported` — the VM boundary; only a socket on a *shared Docker volume* between two
+  in-VM containers crosses). Originally pencilled to defer to 4.5 (run dogfood #8 on
+  Linux), but **ratified with the user (2026-06-07: "adopt the TCP work into 4.3 +
+  finish")** to **re-architect the control channel to TCP within 4.3** so the container
+  topology — and dogfood #8 — works on the macOS dev host (contract §7). Landed (see the
+  2026-06-07 TCP status-log entry above): `DaemonAddress` + a port-discovery file, the
+  fs2 `Network` TCP server/client, `host.docker.internal:<port>` + `--add-host` for the
+  container, no daemon-socket mount. The host-process (4.2) topology uses the same TCP
+  transport over loopback. See [`design-rationale.md`](design-rationale.md) **PH4-3** and
+  the [`dogfood/4.3-container.md`](dogfood/4.3-container.md) runbook's host-platform note.
+  **Remaining 4.5 hardening:** TLS/auth on the TCP port is out of scope here (loopback /
+  `host.docker.internal` only, no external bind); revisit if a remote-daemon topology lands.
 - **Cockpit TUI** (§6.3 — multi-worker panes, attach/detach, per-worker "needs a
   human" flags, container log/process inspection) is **4.4**. 4.3 exposes the
   containerised worker's status + the `attention` projection + the aggregate spend

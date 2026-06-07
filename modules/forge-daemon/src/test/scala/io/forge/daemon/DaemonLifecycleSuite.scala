@@ -59,12 +59,12 @@ class DaemonLifecycleSuite extends CatsEffectSuite:
         state <- DaemonState.boot(inst, pid = 7L)
         shutdown <- Deferred[IO, Unit]
         result <- Daemon
-          .serveUntilShutdown(inst.socketFile, state, shutdown)
+          .serveUntilShutdown(inst.portFile, state, shutdown)
           .background
           .use { serveOutcome =>
             for
-              status <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(1L, "status"))
-              stop <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(2L, "shutdown"))
+              status <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(1L, "status"))
+              stop <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(2L, "shutdown"))
               // The serve loop must terminate once the shutdown grace elapses; joining proves it stopped.
               _ <- serveOutcome
             yield (status, stop)

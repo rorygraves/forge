@@ -33,7 +33,7 @@ object WorkstreamCommands:
   private def newWorkstream(store: InstanceStore, instance: Option[InstanceName], goal: String): IO[ExitCode] =
     withDaemon(store, instance, "workstream new") { resolved =>
       val req = JsonRpc.Request(1L, "create-workstream", ujson.Obj("goal" -> goal))
-      DaemonClient.call(resolved.socketFile, req).attempt.flatMap {
+      DaemonClient.call(resolved.portFile, req).attempt.flatMap {
         case Right(JsonRpc.Response.Success(_, result)) =>
           val id = result.objOpt.flatMap(_.get("workstreamId")).flatMap(_.strOpt).getOrElse("?")
           Console[IO]
@@ -66,7 +66,7 @@ object WorkstreamCommands:
         "spawn-worker",
         ujson.Obj("workstreamId" -> ws.value, "repo" -> absRepo, "feature" -> feature.value)
       )
-      DaemonClient.call(resolved.socketFile, req).attempt.flatMap {
+      DaemonClient.call(resolved.portFile, req).attempt.flatMap {
         case Right(JsonRpc.Response.Success(_, result)) =>
           val id = result.objOpt.flatMap(_.get("workerId")).flatMap(_.strOpt).getOrElse("?")
           Console[IO]
@@ -98,7 +98,7 @@ object WorkstreamCommands:
       render: (Instance, ujson.Value) => IO[ExitCode]
   ): IO[ExitCode] =
     withDaemon(store, instance, label) { resolved =>
-      DaemonClient.call(resolved.socketFile, JsonRpc.Request(1L, "status")).attempt.flatMap {
+      DaemonClient.call(resolved.portFile, JsonRpc.Request(1L, "status")).attempt.flatMap {
         case Right(JsonRpc.Response.Success(_, result)) => render(resolved, result)
         case Right(JsonRpc.Response.Failure(_, err)) =>
           Console[IO].errorln(s"forge $label: ${err.message}").as(ExitCode(1))
@@ -165,6 +165,6 @@ object WorkstreamCommands:
     Console[IO]
       .errorln(
         s"forge $label: no daemon appears to be running for instance '${instance.name.value}' " +
-          s"(no socket at ${instance.socketFile}). Start one with `forge daemon start`."
+          s"(no daemon port file at ${instance.portFile}). Start one with `forge daemon start`."
       )
       .as(ExitCode(1))

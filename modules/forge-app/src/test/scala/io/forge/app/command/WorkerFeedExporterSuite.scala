@@ -45,13 +45,13 @@ class WorkerFeedExporterSuite extends CatsEffectSuite:
       state <- DaemonState.boot(inst, pid = 99L)
       shutdown <- Deferred[IO, Unit]
       result <- Daemon
-        .serveUntilShutdown(inst.socketFile, state, shutdown)
+        .serveUntilShutdown(inst.portFile, state, shutdown)
         .background
         .use(_ => body.guarantee(shutdown.complete(()).void))
     yield result
 
   private def reporterFor(inst: Instance): IO[WorkerReporter] =
-    WorkerReporter.daemon(inst.socketFile, "w1").flatTap(_.register("/repo", featureId))
+    WorkerReporter.daemon(inst.portFile, "w1").flatTap(_.register("/repo", featureId))
 
   /** Three drafts: a non-transition action, then two transitions — a singleton `to` and a parameterized `to` — so both
     * the event export and the two state-name extraction branches are exercised.

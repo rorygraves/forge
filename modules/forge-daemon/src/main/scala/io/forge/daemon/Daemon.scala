@@ -316,19 +316,29 @@ object Daemon:
   private def numField(params: ujson.Value, field: String): Either[String, Double] =
     params.objOpt.flatMap(_.get(field)).flatMap(_.numOpt).toRight(s"missing or non-numeric '$field'")
 
-  /** Serve the instance socket until `shutdown` completes, then release it. Completes normally on shutdown; cancelling
-    * the surrounding fiber (e.g. SIGINT under `IOApp`) also tears the socket down via the server resource's finalizer.
+  /** Bind the daemon's TCP port and serve until `shutdown` completes, then release it. On bind, the resolved
+    * (ephemeral) port is written to `portFile` for clients to discover ([[DaemonAddress.writePortFile]]) and `onBound`
+    * is invoked (e.g. to log "listening on host:port"); the file is removed on a clean stop. Completes normally on
+    * shutdown; cancelling the surrounding fiber (e.g. SIGINT under `IOApp`) also tears the listen socket down via the
+    * server resource's finalizer (and still removes the port file via the `guarantee`).
+    *
+    * `bindHost` defaults to loopback (host clients only); the `--container` daemon passes
+    * [[DaemonSocketServer.AllInterfaces]] so a containerised worker can reach the port over `host.docker.internal`.
     */
   def serveUntilShutdown(
-      socketPath: os.Path,
+      portFile: os.Path,
       state: DaemonState,
       shutdown: Deferred[IO, Unit],
       supervisor: Supervisor = Supervisor.noop,
       broker: CredentialBroker = CredentialBroker.noop,
-      budget: BudgetPolicy = BudgetPolicy.unlimited
+      budget: BudgetPolicy = BudgetPolicy.unlimited,
+      bindHost: com.comcast.ip4s.Host = DaemonSocketServer.Loopback,
+      onBound: Int => IO[Unit] = _ => IO.unit
   ): IO[Unit] =
     DaemonSocketServer
-      .serve(socketPath, handler(state, shutdown, supervisor, broker, budget))
+      .serve(handler(state, shutdown, supervisor, broker, budget), host = bindHost)
+      .evalTap(bound => DaemonAddress.writePortFile(portFile, bound.port.value) *> onBound(bound.port.value))
       .interruptWhen(shutdown.get.attempt)
       .compile
       .drain
+      .guarantee(DaemonAddress.deletePortFile(portFile))

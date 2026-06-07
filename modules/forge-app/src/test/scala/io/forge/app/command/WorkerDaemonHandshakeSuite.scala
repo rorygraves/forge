@@ -45,7 +45,7 @@ class WorkerDaemonHandshakeSuite extends CatsEffectSuite:
       state <- DaemonState.boot(inst, pid = 99L)
       shutdown <- Deferred[IO, Unit]
       result <- Daemon
-        .serveUntilShutdown(inst.socketFile, state, shutdown, Supervisor.noop, broker, budget)
+        .serveUntilShutdown(inst.portFile, state, shutdown, Supervisor.noop, broker, budget)
         .background
         .use(_ => body(state).guarantee(shutdown.complete(()).void))
     yield result
@@ -63,7 +63,7 @@ class WorkerDaemonHandshakeSuite extends CatsEffectSuite:
       val broker = realBroker(Map("FORGE_GH_TOKEN" -> "ghp_scoped", "ANTHROPIC_API_KEY" -> "sk-ant"))
       served(inst, broker, BudgetPolicy.default) { state =>
         for
-          reporter <- WorkerReporter.daemon(inst.socketFile, "w-1")
+          reporter <- WorkerReporter.daemon(inst.portFile, "w-1")
           // 1. register (WorkerLoop step 1)
           _ <- reporter.register("/repo", feature)
           // 2. broker credentials over the control channel (O6) — the scoped gh token, never a host login.
@@ -97,7 +97,7 @@ class WorkerDaemonHandshakeSuite extends CatsEffectSuite:
       val tiny = BudgetPolicy(perWorkstreamCapUsd = BigDecimal(1), perInstanceCapUsd = BigDecimal(1))
       served(inst, broker, tiny) { state =>
         for
-          reporter <- WorkerReporter.daemon(inst.socketFile, "w-1")
+          reporter <- WorkerReporter.daemon(inst.portFile, "w-1")
           _ <- reporter.register("/repo", feature)
           reserver = new ReportingBudgetReserver(reporter, BigDecimal(8), holdBackoff = 50.millis)
           // The reserver must hold on a refuse: race it against a window — the window must win (it never proceeds).

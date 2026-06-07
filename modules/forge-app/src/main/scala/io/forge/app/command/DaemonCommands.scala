@@ -6,7 +6,7 @@ import cats.effect.std.Console
 import io.forge.app.cli.DaemonCommand
 import io.forge.app.lock.{FileProcessLock, LockAcquireResult, LockMetadata}
 import io.forge.core.InstanceName
-import io.forge.daemon.{BudgetPolicy, Daemon, DaemonClient, DaemonState, JsonRpc}
+import io.forge.daemon.{BudgetPolicy, Daemon, DaemonAddress, DaemonClient, DaemonSocketServer, DaemonState, JsonRpc}
 import io.forge.instance.{FileInstanceStore, Instance, InstanceStore}
 
 import java.net.InetAddress
@@ -88,18 +88,26 @@ object DaemonCommands:
         if live > 0 then Console[IO].println(s"forge daemon: reconciling $live worker(s) from the instance log…")
         else IO.unit
       _ <- supervisor.reconcile
-      _ <- Console[IO].println(s"forge daemon: listening on ${instance.socketFile} (boot #$boots).")
+      // A containerised daemon binds all interfaces so a worker can reach it over `host.docker.internal`; a host-only
+      // daemon binds loopback. The ephemeral port is logged once it binds (see `onBound`).
+      bindHost = if container then DaemonSocketServer.AllInterfaces else DaemonSocketServer.Loopback
       _ <- supervisor
         .superviseLoop(RealSupervisor.DefaultCadence)
         .background
         .use(_ =>
           Daemon.serveUntilShutdown(
-            instance.socketFile,
+            instance.portFile,
             state,
             shutdown,
             supervisor,
             RealCredentialBroker.default,
-            BudgetPolicy.default
+            BudgetPolicy.default,
+            bindHost = bindHost,
+            onBound = port =>
+              val where =
+                if container then s"0.0.0.0:$port (workers reach it at ${DaemonAddress.DockerHost}:$port)"
+                else s"${DaemonAddress.Loopback}:$port"
+              Console[IO].println(s"forge daemon: listening on $where (boot #$boots).")
           )
         )
       _ <- Console[IO].println("forge daemon: stopped.")
@@ -111,7 +119,7 @@ object DaemonCommands:
     InstanceResolver.resolve(store, instance, "daemon stop").flatMap {
       case Left(code) => IO.pure(code)
       case Right(resolved) =>
-        DaemonClient.call(resolved.socketFile, JsonRpc.Request(1L, "shutdown")).attempt.flatMap {
+        DaemonClient.call(resolved.portFile, JsonRpc.Request(1L, "shutdown")).attempt.flatMap {
           case Right(_: JsonRpc.Response.Success) =>
             Console[IO]
               .println(s"forge daemon: stop requested for instance '${resolved.name.value}'.")
@@ -128,7 +136,7 @@ object DaemonCommands:
     InstanceResolver.resolve(store, instance, "daemon status").flatMap {
       case Left(code) => IO.pure(code)
       case Right(resolved) =>
-        DaemonClient.call(resolved.socketFile, JsonRpc.Request(1L, "status")).attempt.flatMap {
+        DaemonClient.call(resolved.portFile, JsonRpc.Request(1L, "status")).attempt.flatMap {
           case Right(JsonRpc.Response.Success(_, result)) =>
             Console[IO].println(renderStatus(resolved, result)).as(ExitCode.Success)
           case Right(JsonRpc.Response.Failure(_, err)) =>
@@ -160,7 +168,7 @@ object DaemonCommands:
     Console[IO]
       .errorln(
         s"forge $label: no daemon appears to be running for instance '${instance.name.value}' " +
-          s"(no socket at ${instance.socketFile}). Start one with `forge daemon start`."
+          s"(no daemon port file at ${instance.portFile}). Start one with `forge daemon start`."
       )
       .as(ExitCode(1))
 

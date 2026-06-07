@@ -38,7 +38,7 @@ class DaemonSpawnWorkerSuite extends CatsEffectSuite:
       state <- DaemonState.boot(inst, pid = 99L)
       shutdown <- Deferred[IO, Unit]
       result <- Daemon
-        .serveUntilShutdown(inst.socketFile, state, shutdown, supervisor)
+        .serveUntilShutdown(inst.portFile, state, shutdown, supervisor)
         .background
         .use(_ => body.guarantee(shutdown.complete(()).void))
     yield result
@@ -51,7 +51,7 @@ class DaemonSpawnWorkerSuite extends CatsEffectSuite:
       Ref.of[IO, Vector[(WorkstreamId, String, FeatureId)]](Vector.empty).flatMap { calls =>
         served(inst, new FakeSupervisor(calls, Right("w-1"))) {
           for
-            resp <- DaemonClient.callWithRetry(inst.socketFile, spawnReq(1L, "ws-1", "/repo", "feat"))
+            resp <- DaemonClient.callWithRetry(inst.portFile, spawnReq(1L, "ws-1", "/repo", "feat"))
             seen <- calls.get
           yield
             resp match
@@ -70,8 +70,8 @@ class DaemonSpawnWorkerSuite extends CatsEffectSuite:
       Ref.of[IO, Vector[(WorkstreamId, String, FeatureId)]](Vector.empty).flatMap { calls =>
         served(inst, new FakeSupervisor(calls, Left("no such workstream ws-9"))) {
           for
-            bad <- DaemonClient.callWithRetry(inst.socketFile, spawnReq(1L, "ws-9", "/repo", "feat"))
-            ok <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(2L, "status"))
+            bad <- DaemonClient.callWithRetry(inst.portFile, spawnReq(1L, "ws-9", "/repo", "feat"))
+            ok <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(2L, "status"))
           yield
             bad match
               case JsonRpc.Response.Failure(Some(1L), err) =>
@@ -90,7 +90,7 @@ class DaemonSpawnWorkerSuite extends CatsEffectSuite:
         served(inst, new FakeSupervisor(calls, Right("w-1"))) {
           for
             bad <- DaemonClient.callWithRetry(
-              inst.socketFile,
+              inst.portFile,
               JsonRpc.Request(1L, "spawn-worker", ujson.Obj("workstreamId" -> "ws-1")) // no repo/feature
             )
             seen <- calls.get
@@ -107,7 +107,7 @@ class DaemonSpawnWorkerSuite extends CatsEffectSuite:
   test("the default (no-supervisor) daemon refuses spawn-worker with an InternalError") {
     instance.use { inst =>
       served(inst, Supervisor.noop) {
-        DaemonClient.callWithRetry(inst.socketFile, spawnReq(1L, "ws-1", "/repo", "feat")).map {
+        DaemonClient.callWithRetry(inst.portFile, spawnReq(1L, "ws-1", "/repo", "feat")).map {
           case JsonRpc.Response.Failure(Some(1L), err) => assertEquals(err.code, JsonRpc.RpcError.InternalError)
           case other => fail(s"expected an InternalError, got $other")
         }

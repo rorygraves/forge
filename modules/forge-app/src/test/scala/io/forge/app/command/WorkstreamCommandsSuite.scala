@@ -28,7 +28,7 @@ class WorkstreamCommandsSuite extends CatsEffectSuite:
     } { case (home, _) => IO.blocking(os.remove.all(home)).void }
 
   private def awaitReady(inst: Instance): IO[Unit] =
-    DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(0L, "status")).void
+    DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(0L, "status")).void
 
   test("new → list → worker list against a running daemon all succeed") {
     fixture.use { case (home, inst) =>
@@ -39,7 +39,7 @@ class WorkstreamCommandsSuite extends CatsEffectSuite:
           listExit <- WorkstreamCommands.run(home, WorkstreamCommand.List(Some(name)))
           workerListExit <- WorkstreamCommands.run(home, WorkstreamCommand.WorkerList(Some(name)))
           // The create went through the daemon and is visible in its snapshot.
-          status <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(9L, "status"))
+          status <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(9L, "status"))
           _ <- DaemonCommands.run(home, DaemonCommand.Stop(Some(name)))
           _ <- startOutcome.flatMap(_.embedNever)
         yield
@@ -62,7 +62,7 @@ class WorkstreamCommandsSuite extends CatsEffectSuite:
         _ <- state.record(io.forge.instance.InstanceEvent.WorkstreamCreated(WorkstreamId("ws-1"), "g"))
         shutdown <- Deferred[IO, Unit]
         exit <- Daemon
-          .serveUntilShutdown(inst.socketFile, state, shutdown, fakeSupervisor)
+          .serveUntilShutdown(inst.portFile, state, shutdown, fakeSupervisor)
           .background
           .use { _ =>
             awaitReady(inst) *>

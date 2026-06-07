@@ -46,7 +46,7 @@ class DaemonCrashRecoverySuite extends CatsEffectSuite:
     for
       state <- DaemonState.boot(inst, pid)
       shutdown <- Deferred[IO, Unit] // deliberately never completed → the serve fiber is cancelled, not stopped cleanly
-      result <- Daemon.serveUntilShutdown(inst.socketFile, state, shutdown).background.use(_ => body)
+      result <- Daemon.serveUntilShutdown(inst.portFile, state, shutdown).background.use(_ => body)
     yield result
 
   test("crash mid-life and restart: status snapshot + worker event tail rebuild from the instance log alone") {
@@ -55,10 +55,10 @@ class DaemonCrashRecoverySuite extends CatsEffectSuite:
         // First daemon life: register a worker, set its status, push two exported events, then crash.
         _ <- crashAfter(inst, pid = 1L) {
           for
-            _ <- DaemonClient.callWithRetry(inst.socketFile, registerReq(1L, "w1", "/repo", "add-feature"))
-            _ <- DaemonClient.callWithRetry(inst.socketFile, statusReq(2L, "w1", "Refining"))
-            _ <- DaemonClient.callWithRetry(inst.socketFile, eventReq(3L, "w1", "a"))
-            _ <- DaemonClient.callWithRetry(inst.socketFile, eventReq(4L, "w1", "b"))
+            _ <- DaemonClient.callWithRetry(inst.portFile, registerReq(1L, "w1", "/repo", "add-feature"))
+            _ <- DaemonClient.callWithRetry(inst.portFile, statusReq(2L, "w1", "Refining"))
+            _ <- DaemonClient.callWithRetry(inst.portFile, eventReq(3L, "w1", "a"))
+            _ <- DaemonClient.callWithRetry(inst.portFile, eventReq(4L, "w1", "b"))
           yield ()
         }
         // Lose the derived cache: a hard crash may leave only the canonical log behind. The restart must rebuild from it
@@ -67,11 +67,11 @@ class DaemonCrashRecoverySuite extends CatsEffectSuite:
         // Restart: a fresh daemon rebuilds, then we read both the status snapshot and the replayed worker feed.
         result <- DaemonState.boot(inst, pid = 2L).flatMap { state2 =>
           Deferred[IO, Unit].flatMap { shutdown2 =>
-            Daemon.serveUntilShutdown(inst.socketFile, state2, shutdown2).background.use { _ =>
+            Daemon.serveUntilShutdown(inst.portFile, state2, shutdown2).background.use { _ =>
               (for
-                status <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(5L, "status"))
+                status <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(5L, "status"))
                 feed <- DaemonClient
-                  .subscribe(inst.socketFile, JsonRpc.Request(6L, "subscribe"))
+                  .subscribe(inst.portFile, JsonRpc.Request(6L, "subscribe"))
                   .take(4) // worker.registered, worker.status, two worker.event — the rebuilt tail
                   .compile
                   .toVector

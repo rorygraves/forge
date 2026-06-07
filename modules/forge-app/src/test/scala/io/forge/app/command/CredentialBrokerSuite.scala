@@ -117,7 +117,7 @@ class CredentialBrokerSuite extends CatsEffectSuite:
       state <- DaemonState.boot(inst, pid = 99L)
       shutdown <- Deferred[IO, Unit]
       result <- Daemon
-        .serveUntilShutdown(inst.socketFile, state, shutdown, io.forge.daemon.Supervisor.noop, broker)
+        .serveUntilShutdown(inst.portFile, state, shutdown, io.forge.daemon.Supervisor.noop, broker)
         .background
         .use(_ => body.guarantee(shutdown.complete(()).void))
     yield result
@@ -127,7 +127,7 @@ class CredentialBrokerSuite extends CatsEffectSuite:
     */
   private def reporterFor(inst: Instance): IO[WorkerReporter] =
     WorkerReporter
-      .daemon(inst.socketFile, "w-1")
+      .daemon(inst.portFile, "w-1")
       .flatTap(_.register("/repo", FeatureId("feat")))
 
   test("a worker receives the brokered env over the control channel") {

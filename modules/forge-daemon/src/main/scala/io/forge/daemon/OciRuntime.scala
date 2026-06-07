@@ -58,10 +58,14 @@ trait OciRuntime:
   *   - `workdir` — the in-container working directory (`docker -w`); `None` ⇒ the image default.
   *   - `env` — environment entries set inside the container (`docker -e`). The credential broker (4.3.3) injects
   *     short-lived secrets here / over the control channel; a **host home mount is never used** (O6).
-  *   - `mounts` — host→container bind mounts (the isolated clone, the daemon control socket — 4.3.4). Order-preserving.
-  *   - `network` — the container network (`docker --network`); `None` ⇒ the Docker default bridge. `Some("none")`
-  *     isolates it fully; a named network or `host` is set by the supervisor when the worker must reach the daemon
-  *     socket by TCP rather than a mounted Unix socket.
+  *   - `mounts` — host→container bind mounts (the isolated clone — 4.3.4). Order-preserving. The daemon control channel
+  *     is **not** a mount: the worker reaches the daemon over TCP (`host.docker.internal:<port>`, see `extraHosts`).
+  *   - `network` — the container network (`docker --network`); `None` ⇒ the Docker default bridge (on which
+  *     `host.docker.internal` resolves to the host). `Some("none")` isolates it fully; a named network or `host` is set
+  *     by the supervisor only when the default bridge can't reach the daemon.
+  *   - `extraHosts` — `--add-host name:value` entries. The worker container always carries
+  *     `host.docker.internal:host-gateway` so it can reach the host daemon's TCP port (built-in on Docker Desktop;
+  *     `host-gateway` wires it on Linux).
   *   - `name` — an optional stable container name (`docker --name`) so the supervisor can reattach by name across a
   *     restart in addition to the id.
   *   - `removeOnExit` — when true, pass `--rm` so the OCI daemon removes the container as soon as it exits. Defaults
@@ -76,6 +80,7 @@ final case class ContainerSpec(
     env: Map[String, String] = Map.empty,
     mounts: Seq[Mount] = Seq.empty,
     network: Option[String] = None,
+    extraHosts: Map[String, String] = Map.empty,
     name: Option[String] = None,
     removeOnExit: Boolean = false
 )
@@ -179,9 +184,9 @@ object DockerRuntime extends OciRuntime:
   // --- pure argv builders (unit-tested without Docker) ---
 
   /** The `docker run -d …` argv for `spec`. Flag order: detached, then `--rm`/`--name`/`--network` (run options), then
-    * `-w`/`-e`/`-v` (container config, env keys **sorted** for a deterministic argv), then the image, then the in-
-    * container command. Env keys are sorted so the argv is stable regardless of `Map` iteration order (and so the unit
-    * test is not order-flaky).
+    * `-w`/`-e`/`--add-host`/`-v` (container config, env + add-host keys **sorted** for a deterministic argv), then the
+    * image, then the in-container command. Map-derived keys are sorted so the argv is stable regardless of `Map`
+    * iteration order (and so the unit test is not order-flaky).
     */
   private[daemon] def runArgs(spec: ContainerSpec): Vector[String] =
     val base = Vector(Docker, "run", "-d")
@@ -190,9 +195,10 @@ object DockerRuntime extends OciRuntime:
     val network = spec.network.toVector.flatMap(n => Vector("--network", n))
     val workdir = spec.workdir.toVector.flatMap(w => Vector("-w", w))
     val env = spec.env.toVector.sortBy(_._1).flatMap { case (k, v) => Vector("-e", s"$k=$v") }
+    val addHosts = spec.extraHosts.toVector.sortBy(_._1).flatMap { case (k, v) => Vector("--add-host", s"$k:$v") }
     val mounts = spec.mounts.toVector.flatMap(m => Vector("-v", mountArg(m)))
     val command = spec.command.toVector
-    base ++ rm ++ name ++ network ++ workdir ++ env ++ mounts ++ Vector(spec.image) ++ command
+    base ++ rm ++ name ++ network ++ workdir ++ env ++ addHosts ++ mounts ++ Vector(spec.image) ++ command
 
   /** The `-v` value for a mount: `<host-source>:<container-target>[:ro]`. */
   private[daemon] def mountArg(m: Mount): String =

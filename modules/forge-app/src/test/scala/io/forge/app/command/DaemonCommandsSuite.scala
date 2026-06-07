@@ -33,7 +33,7 @@ class DaemonCommandsSuite extends CatsEffectSuite:
 
   /** Wait for the daemon to bind its socket (the foreground `start` boots asynchronously to our fork). */
   private def awaitReady(inst: Instance): IO[Unit] =
-    DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(0L, "status")).void
+    DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(0L, "status")).void
 
   test("start → status → stop lifecycle returns success at every step") {
     fixture.use { case (home, inst) =>

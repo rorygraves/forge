@@ -3,7 +3,7 @@ package io.forge.app.command
 import cats.effect.{IO, Ref}
 import io.forge.app.orchestrator.ReservationOutcome
 import io.forge.core.FeatureId
-import io.forge.daemon.{DaemonClient, JsonRpc}
+import io.forge.daemon.{DaemonAddress, DaemonClient, JsonRpc}
 
 /** Task 4.2.3 — the worker→daemon **control seam** (B3 event export): the three RPCs a `forge worker` process uses to
   * phone home to the instance socket — `register-worker`, `worker-status`, `worker-event`.
@@ -46,23 +46,45 @@ trait WorkerReporter:
 
 object WorkerReporter:
 
-  /** Build a [[DaemonReporter]] phoning home over `socket` as `workerId`. Allocates the request-id counter (a fresh
-    * connection per call means the id need only be locally unique for response correlation, but a monotonic counter
-    * keeps the on-wire trace readable).
+  /** Build a [[DaemonReporter]] phoning home to the daemon at a fixed `address` as `workerId` (a containerised worker
+    * connects to `host.docker.internal:<port>`). Allocates the request-id counter (a fresh connection per call means
+    * the id need only be locally unique for response correlation, but a monotonic counter keeps the on-wire trace
+    * readable).
     */
-  def daemon(socket: os.Path, workerId: String): IO[WorkerReporter] =
-    Ref.of[IO, Long](0L).map(new DaemonReporter(socket, workerId, _))
+  def daemon(address: DaemonAddress, workerId: String): IO[WorkerReporter] =
+    Ref.of[IO, Long](0L).map(new DaemonReporter(Right(address), workerId, _))
 
-  /** Phones home over the instance Unix-domain socket via [[DaemonClient]]. */
-  private final class DaemonReporter(socket: os.Path, workerId: String, ids: Ref[IO, Long]) extends WorkerReporter:
+  /** Build a [[DaemonReporter]] that resolves the daemon's loopback endpoint from its port-discovery file on **each**
+    * RPC (a host-process worker, whose daemon is on the same host). The resolution is deferred (not read at
+    * construction) so the first `register` — sent via `callWithRetry` — rides out the start-up race where the worker
+    * out-races the daemon binding its port and writing the file.
+    */
+  def daemon(portFile: os.Path, workerId: String): IO[WorkerReporter] =
+    Ref.of[IO, Long](0L).map(new DaemonReporter(Left(portFile), workerId, _))
+
+  /** Phones home over the daemon's TCP socket via [[DaemonClient]]. The `target` is either the daemon's port-discovery
+    * file (host worker — resolved + connect re-tried per call) or a fixed address (container worker —
+    * `host.docker.internal:<port>`); both route through the matching [[DaemonClient]] overload.
+    */
+  private final class DaemonReporter(target: Either[os.Path, DaemonAddress], workerId: String, ids: Ref[IO, Long])
+      extends WorkerReporter:
 
     private def nextId: IO[Long] = ids.updateAndGet(_ + 1L)
+
+    /** A bounded-retry call (used by `register`, which may out-race the daemon's bind). */
+    private def callWithRetry(request: JsonRpc.Request): IO[JsonRpc.Response] = target match
+      case Left(portFile) => DaemonClient.callWithRetry(portFile, request)
+      case Right(address) => DaemonClient.callWithRetry(address, request)
+
+    /** A single-shot call (the daemon is up once `register` has succeeded). */
+    private def callOnce(request: JsonRpc.Request): IO[JsonRpc.Response] = target match
+      case Left(portFile) => DaemonClient.call(portFile, request)
+      case Right(address) => DaemonClient.call(address, request)
 
     def register(repo: String, feature: FeatureId): IO[Unit] =
       nextId.flatMap { id =>
         expectOk(
-          DaemonClient.callWithRetry(
-            socket,
+          callWithRetry(
             JsonRpc.Request(
               id,
               "register-worker",
@@ -76,10 +98,7 @@ object WorkerReporter:
     def status(status: String): IO[Unit] =
       nextId.flatMap { id =>
         expectOk(
-          DaemonClient.call(
-            socket,
-            JsonRpc.Request(id, "worker-status", ujson.Obj("workerId" -> workerId, "status" -> status))
-          ),
+          callOnce(JsonRpc.Request(id, "worker-status", ujson.Obj("workerId" -> workerId, "status" -> status))),
           "worker-status"
         )
       }
@@ -87,21 +106,14 @@ object WorkerReporter:
     def event(event: ujson.Value): IO[Unit] =
       nextId.flatMap { id =>
         expectOk(
-          DaemonClient.call(
-            socket,
-            JsonRpc.Request(id, "worker-event", ujson.Obj("workerId" -> workerId, "event" -> event))
-          ),
+          callOnce(JsonRpc.Request(id, "worker-event", ujson.Obj("workerId" -> workerId, "event" -> event))),
           "worker-event"
         )
       }
 
     def brokerCredentials(repo: String): IO[Map[String, String]] =
       nextId.flatMap { id =>
-        DaemonClient
-          .call(
-            socket,
-            JsonRpc.Request(id, "broker-credentials", ujson.Obj("workerId" -> workerId, "repo" -> repo))
-          )
+        callOnce(JsonRpc.Request(id, "broker-credentials", ujson.Obj("workerId" -> workerId, "repo" -> repo)))
           .flatMap {
             case JsonRpc.Response.Success(_, body) => IO.fromEither(parseCredentials(body))
             case JsonRpc.Response.Failure(_, err) =>
@@ -111,15 +123,13 @@ object WorkerReporter:
 
     def reserveBudget(estimateUsd: BigDecimal): IO[ReservationOutcome] =
       nextId.flatMap { id =>
-        DaemonClient
-          .call(
-            socket,
-            JsonRpc.Request(
-              id,
-              "reserve-budget",
-              ujson.Obj("workerId" -> workerId, "estimateUsd" -> ujson.Num(estimateUsd.toDouble))
-            )
+        callOnce(
+          JsonRpc.Request(
+            id,
+            "reserve-budget",
+            ujson.Obj("workerId" -> workerId, "estimateUsd" -> ujson.Num(estimateUsd.toDouble))
           )
+        )
           .flatMap {
             case JsonRpc.Response.Success(_, body) => IO.fromEither(parseReservation(body))
             // A refuse is a *success* body (`granted: false`); a JSON-RPC failure here is a real transport/protocol

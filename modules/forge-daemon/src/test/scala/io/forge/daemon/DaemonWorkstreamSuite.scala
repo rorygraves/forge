@@ -30,7 +30,7 @@ class DaemonWorkstreamSuite extends CatsEffectSuite:
       state <- DaemonState.boot(inst, pid = 99L)
       shutdown <- Deferred[IO, Unit]
       result <- Daemon
-        .serveUntilShutdown(inst.socketFile, state, shutdown)
+        .serveUntilShutdown(inst.portFile, state, shutdown)
         .background
         .use(_ => body(state).guarantee(shutdown.complete(()).void))
     yield result
@@ -42,9 +42,9 @@ class DaemonWorkstreamSuite extends CatsEffectSuite:
     instance.use { inst =>
       served(inst) { _ =>
         for
-          first <- DaemonClient.callWithRetry(inst.socketFile, createReq(1L, "add auth"))
-          second <- DaemonClient.callWithRetry(inst.socketFile, createReq(2L, "add billing"))
-          status <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(3L, "status"))
+          first <- DaemonClient.callWithRetry(inst.portFile, createReq(1L, "add auth"))
+          second <- DaemonClient.callWithRetry(inst.portFile, createReq(2L, "add billing"))
+          status <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(3L, "status"))
         yield
           assertEquals(idOf(first), "ws-1")
           assertEquals(idOf(second), "ws-2")
@@ -66,9 +66,9 @@ class DaemonWorkstreamSuite extends CatsEffectSuite:
           // Ten create-workstream RPCs fired at once over the parJoinUnbounded server. A non-atomic allocation would
           // read the same snapshot from several handlers and hand out duplicate ws-N ids; the gated modify must not.
           responses <- (1 to 10).toList.parTraverse(i =>
-            DaemonClient.callWithRetry(inst.socketFile, createReq(i.toLong, s"g$i"))
+            DaemonClient.callWithRetry(inst.portFile, createReq(i.toLong, s"g$i"))
           )
-          status <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(99L, "status"))
+          status <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(99L, "status"))
         yield
           val ids = responses.map(idOf)
           assertEquals(ids.toSet.size, 10, s"all ten workstream ids must be distinct: $ids")
@@ -86,8 +86,8 @@ class DaemonWorkstreamSuite extends CatsEffectSuite:
     instance.use { inst =>
       served(inst) { _ =>
         for
-          bad <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(1L, "create-workstream"))
-          ok <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(2L, "status"))
+          bad <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(1L, "create-workstream"))
+          ok <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(2L, "status"))
         yield
           bad match
             case JsonRpc.Response.Failure(Some(1L), err) => assertEquals(err.code, JsonRpc.RpcError.InvalidParams)
@@ -101,7 +101,7 @@ class DaemonWorkstreamSuite extends CatsEffectSuite:
     instance.use { inst =>
       served(inst) { state =>
         for
-          create <- DaemonClient.callWithRetry(inst.socketFile, createReq(1L, "add auth"))
+          create <- DaemonClient.callWithRetry(inst.portFile, createReq(1L, "add auth"))
           ws = idOf(create)
           // worker.spawned is a daemon-side record (the supervisor records it in 4.2.5); here drive it via the state
           // directly to exercise the snapshot/attention surface this task owns.
@@ -117,10 +117,10 @@ class DaemonWorkstreamSuite extends CatsEffectSuite:
               )
           )
           _ <- DaemonClient.callWithRetry(
-            inst.socketFile,
+            inst.portFile,
             JsonRpc.Request(2L, "worker-status", ujson.Obj("workerId" -> "w1", "status" -> "NeedsHumanIntervention"))
           )
-          status <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(3L, "status"))
+          status <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(3L, "status"))
         yield status match
           case JsonRpc.Response.Success(_, body) =>
             val w = body.obj("workers").arr.head.obj
@@ -138,7 +138,7 @@ class DaemonWorkstreamSuite extends CatsEffectSuite:
   test("create-workstream is durable: the workstream rebuilds from the instance log alone") {
     instance.use { inst =>
       for
-        _ <- served(inst)(_ => DaemonClient.callWithRetry(inst.socketFile, createReq(1L, "add auth")).void)
+        _ <- served(inst)(_ => DaemonClient.callWithRetry(inst.portFile, createReq(1L, "add auth")).void)
         rebuilt <- FileInstanceLog(inst).flatMap(_.replay).map(RebuildInstanceState.fold)
       yield
         val ws = rebuilt.workstream(io.forge.core.WorkstreamId("ws-1")).getOrElse(fail("ws-1 missing from rebuilt log"))

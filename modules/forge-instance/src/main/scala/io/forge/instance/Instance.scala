@@ -61,12 +61,14 @@ final case class Instance(name: InstanceName, dir: os.Path):
   /** `instances/<name>/.lock.json` — sibling holder-metadata for [[lockFile]] (the §13 "who holds it?" diagnostic). */
   def lockMetadataFile: os.Path = dir / ".lock.json"
 
-  /** `instances/<name>/daemon.sock` — the Unix-domain socket the daemon (Phase-4 §6.1 / Slice 4.1) binds and the
-    * CLI/TUI clients connect to (JSON-RPC 2.0 over the socket — contract §6.3 / O2). Lives beside the instance lock the
-    * daemon holds. A leftover stale socket file from a crashed daemon is unlinked before re-bind (the OS lock, not the
-    * socket file, is the liveness authority).
+  /** `instances/<name>/daemon.port` — the **TCP port discovery file** the daemon (Phase-4 §6.1 / Slice 4.1) writes once
+    * it binds its ephemeral JSON-RPC port, and CLI/TUI clients (and a host-process worker) read back to connect over
+    * loopback (JSON-RPC 2.0 over TCP — contract §6.3 / O2). The daemon speaks TCP rather than a Unix-domain socket so a
+    * containerised worker (Slice 4.3) can reach it over `host.docker.internal` from inside its OCI container. Lives
+    * beside the instance lock the daemon holds. A leftover stale port file from a crashed daemon is overwritten on the
+    * next bind (the OS lock, not this file, is the liveness authority).
     */
-  def socketFile: os.Path = dir / "daemon.sock"
+  def portFile: os.Path = dir / "daemon.port"
 
   /** `instances/<name>/log/instance.jsonl` — the durable append-only **instance action log** (contract §6.4 / O8): the
     * daemon's source of truth, mirroring the per-feature `ForgePaths.featureLog` idiom at the instance level. Written

@@ -114,11 +114,11 @@ object DaemonCommand:
   *
   * The optional fields are the Slice-4.3 **container-mode** overrides: a containerised worker (started inside an OCI
   * container by the [[io.forge.app.command.ContainerRuntime]]) cannot derive its paths from the host `~/.forge` (which
-  * does not exist in the container), so the daemon passes the in-container bind-mount paths explicitly — `--worker-root
-  * <path>` (the worker root; `checkout = <root>/checkout`) and `--socket <path>` (the mounted control socket) — and the
-  * `--container` flag tells the worker to **broker its credentials** over that socket (O6) instead of relying on
-  * ambient host credentials. Absent for a 4.2 host-process worker (it derives paths from the instance and inherits the
-  * daemon's environment).
+  * does not exist in the container) nor read the host port file, so the daemon passes them explicitly — `--worker-root
+  * <path>` (the in-container worker root; `checkout = <root>/checkout`) and `--socket <host:port>` (the daemon's TCP
+  * address, `host.docker.internal:<port>`) — and the `--container` flag tells the worker to **broker its credentials**
+  * over that connection (O6) instead of relying on ambient host credentials. Absent for a 4.2 host-process worker (it
+  * derives paths from the instance and reads the daemon's loopback port from the instance port file).
   */
 final case class WorkerCommand(
     instance: InstanceName,

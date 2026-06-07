@@ -4,7 +4,7 @@ import cats.effect.{IO, Resource}
 import io.forge.core.FeatureId
 import io.forge.core.forgefile.FileForgefileStore
 import io.forge.core.paths.ForgePaths
-import io.forge.daemon.{ContainerSpec, Mount, OciRuntime, WorkerSpawner}
+import io.forge.daemon.{ContainerSpec, DaemonAddress, Mount, OciRuntime, WorkerSpawner}
 import io.forge.instance.Instance
 
 /** Task 4.3.4 — the seam abstracting **how** the daemon launches a worker: as a host OS process (Slice 4.2) or inside
@@ -59,23 +59,27 @@ final class HostProcessRuntime(spawner: WorkerSpawner, launcher: WorkerLauncher)
 
 /** The containerised runtime (Slice 4.3 path, O7) — resolves the worker container's image from the repo's normative
   * `Forgefile` (O1, falling back to [[defaultImage]] when none is committed), builds the [[ContainerSpec]] (the
-  * isolated clone + the daemon control socket mounted in, **no host home mount** — O6), and runs `forge worker` inside
-  * it via the abstract [[OciRuntime]] seam. The launched worker's key is its container id.
+  * isolated clone mounted in, **no host home mount** — O6), and runs `forge worker` inside it via the abstract
+  * [[OciRuntime]] seam. The launched worker's key is its container id.
   *
-  * Credentials are **not** in the spec (a `docker inspect`-safe posture, O6): the in-container worker brokers them over
-  * the mounted control socket (`broker-credentials`, Task 4.3.3) and applies them to its own process env.
+  * The worker reaches the daemon over **TCP** at `host.docker.internal:<port>` (resolved at launch from the daemon's
+  * port file, which it has written by the time any spawn runs) rather than a bind-mounted Unix socket — a far more
+  * reliable channel across the Docker Desktop VM boundary on macOS. Credentials are **not** in the spec (a `docker
+  * inspect`-safe posture, O6): the in-container worker brokers them over that TCP connection (`broker-credentials`,
+  * Task 4.3.3) and applies them to its own process env.
   */
 final class ContainerRuntime(oci: OciRuntime, defaultImage: String, home: os.Path = os.home) extends WorkerRuntime:
 
   def launch(instance: Instance, workerId: String, repo: String, feature: FeatureId): Resource[IO, LaunchedWorker] =
-    Resource.eval(resolveImage(instance, workerId)).flatMap { image =>
-      oci.run(ContainerRuntime.buildSpec(instance, workerId, repo, feature, image)).map { handle =>
-        new LaunchedWorker:
-          def key: LivenessKey = LivenessKey.ContainerId(handle.containerId)
-          def awaitExit: IO[Int] = handle.awaitExit
-          def kill: IO[Unit] = handle.kill
-      }
-    }
+    for
+      image <- Resource.eval(resolveImage(instance, workerId))
+      port <- Resource.eval(DaemonAddress.readPort(instance.portFile))
+      daemon = DaemonAddress.dockerHost(port)
+      handle <- oci.run(ContainerRuntime.buildSpec(instance, workerId, repo, feature, image, daemon))
+    yield new LaunchedWorker:
+      def key: LivenessKey = LivenessKey.ContainerId(handle.containerId)
+      def awaitExit: IO[Int] = handle.awaitExit
+      def kill: IO[Unit] = handle.kill
 
   /** The image the worker's container runs: the clone's committed `Forgefile.image` (O1, the normative source of
     * truth), or [[defaultImage]] when no `Forgefile` is committed. The clone is at `instance.workerCheckout(workerId)`;
@@ -94,9 +98,6 @@ object ContainerRuntime:
     */
   val ContainerWorkerRoot: String = "/forge/worker"
 
-  /** The in-container path the daemon control socket is bind-mounted to (the worker reaches the daemon over it, O9). */
-  val ContainerSocket: String = "/forge/daemon.sock"
-
   /** The worker entrypoint inside the container — the `forge` launcher the container image provides (the Forgefile
     * image is a forge-capable base bundling `forge` + the pinned `gh`/`claude`/`codex` tooling, O1).
     */
@@ -108,17 +109,21 @@ object ContainerRuntime:
   val DefaultImage: String = "forge-worker:latest"
 
   /** Build the [[ContainerSpec]] for a containerised worker (Task 4.3.4) — pure, so the always-on test can assert the
-    * mounts (the clone root + the control socket), the **absence of any host-home mount** (O6), and the `forge worker`
-    * argv without Docker. Two bind mounts only: the worker root (RW; `checkout = <root>/checkout`, the local-runtime
-    * family alongside) and the daemon socket. No `env` (secrets never enter the spec, O6 — the worker brokers them over
-    * the mounted socket). `removeOnExit = false` so a restarted daemon can still inspect/await the exited container.
+    * single clone mount, the **absence of any host-home mount or daemon-socket mount** (O6 / the TCP migration), the
+    * `--add-host` that lets the worker reach the daemon, and the `forge worker` argv without Docker. **One** bind
+    * mount: the worker root (RW; `checkout = <root>/checkout`, the local-runtime family alongside). The daemon is
+    * reached over TCP at `daemon` (`host.docker.internal:<port>`), passed as the `--socket` value, with
+    * `host.docker.internal:host-gateway` added so the name resolves. No `env` (secrets never enter the spec, O6 — the
+    * worker brokers them over the TCP connection). `removeOnExit = false` so a restarted daemon can still inspect/await
+    * the exited container.
     */
   def buildSpec(
       instance: Instance,
       workerId: String,
       repo: String,
       feature: FeatureId,
-      image: String
+      image: String,
+      daemon: DaemonAddress
   ): ContainerSpec =
     ContainerSpec(
       image = image,
@@ -136,14 +141,14 @@ object ContainerRuntime:
         "--worker-root",
         ContainerWorkerRoot,
         "--socket",
-        ContainerSocket,
+        daemon.render,
         "--container"
       ),
       workdir = Some(s"$ContainerWorkerRoot/checkout"),
       mounts = Seq(
-        Mount(instance.workerRoot(workerId), ContainerWorkerRoot),
-        Mount(instance.socketFile, ContainerSocket)
+        Mount(instance.workerRoot(workerId), ContainerWorkerRoot)
       ),
+      extraHosts = Map(DaemonAddress.DockerHost -> "host-gateway"),
       name = Some(s"forge-${instance.name.value}-$workerId"),
       removeOnExit = false
     )

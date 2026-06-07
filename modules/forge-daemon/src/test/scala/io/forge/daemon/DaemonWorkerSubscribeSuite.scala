@@ -34,7 +34,7 @@ class DaemonWorkerSubscribeSuite extends CatsEffectSuite:
       state <- DaemonState.boot(inst, pid = 99L)
       shutdown <- Deferred[IO, Unit]
       result <- Daemon
-        .serveUntilShutdown(inst.socketFile, state, shutdown)
+        .serveUntilShutdown(inst.portFile, state, shutdown)
         .background
         .use(_ => body(state).guarantee(shutdown.complete(()).void))
     yield result
@@ -53,8 +53,8 @@ class DaemonWorkerSubscribeSuite extends CatsEffectSuite:
     instance.use { inst =>
       served(inst) { _ =>
         for
-          reg <- DaemonClient.callWithRetry(inst.socketFile, registerReq(1L, "w1", "/repo", "add-feature"))
-          status <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(2L, "status"))
+          reg <- DaemonClient.callWithRetry(inst.portFile, registerReq(1L, "w1", "/repo", "add-feature"))
+          status <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(2L, "status"))
         yield
           assert(reg.isInstanceOf[JsonRpc.Response.Success], s"expected register ack, got $reg")
           status match
@@ -76,14 +76,14 @@ class DaemonWorkerSubscribeSuite extends CatsEffectSuite:
       for
         _ <- served(inst) { _ =>
           for
-            _ <- DaemonClient.callWithRetry(inst.socketFile, registerReq(1L, "w1", "/repo", "add-feature"))
+            _ <- DaemonClient.callWithRetry(inst.portFile, registerReq(1L, "w1", "/repo", "add-feature"))
             _ <- DaemonClient.callWithRetry(
-              inst.socketFile,
+              inst.portFile,
               JsonRpc.Request(2L, "worker-status", ujson.Obj("workerId" -> "w1", "status" -> "Refining"))
             )
-            _ <- DaemonClient.callWithRetry(inst.socketFile, eventReq(3L, "w1", "a"))
-            status <- DaemonClient.callWithRetry(inst.socketFile, eventReq(4L, "w1", "b")) *>
-              DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(5L, "status"))
+            _ <- DaemonClient.callWithRetry(inst.portFile, eventReq(3L, "w1", "a"))
+            status <- DaemonClient.callWithRetry(inst.portFile, eventReq(4L, "w1", "b")) *>
+              DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(5L, "status"))
           yield status match
             case JsonRpc.Response.Success(_, body) =>
               val w = body.obj("workers").arr.head.obj
@@ -105,15 +105,15 @@ class DaemonWorkerSubscribeSuite extends CatsEffectSuite:
       served(inst) { _ =>
         for
           // Seed: a worker + two exported events recorded before anyone subscribes.
-          _ <- DaemonClient.callWithRetry(inst.socketFile, registerReq(1L, "w1", "/repo", "add-feature"))
-          _ <- DaemonClient.callWithRetry(inst.socketFile, eventReq(2L, "w1", "seed-a"))
-          _ <- DaemonClient.callWithRetry(inst.socketFile, eventReq(3L, "w1", "seed-b"))
+          _ <- DaemonClient.callWithRetry(inst.portFile, registerReq(1L, "w1", "/repo", "add-feature"))
+          _ <- DaemonClient.callWithRetry(inst.portFile, eventReq(2L, "w1", "seed-a"))
+          _ <- DaemonClient.callWithRetry(inst.portFile, eventReq(3L, "w1", "seed-b"))
           // Subscribe, and after the seed has been delivered, record one more event live.
           pushLive = Stream.eval(
-            IO.sleep(300.millis) *> DaemonClient.call(inst.socketFile, eventReq(4L, "w1", "live-c"))
+            IO.sleep(300.millis) *> DaemonClient.call(inst.portFile, eventReq(4L, "w1", "live-c"))
           )
           events <- DaemonClient
-            .subscribe(inst.socketFile, JsonRpc.Request(9L, "subscribe"))
+            .subscribe(inst.portFile, JsonRpc.Request(9L, "subscribe"))
             .take(5)
             .concurrently(pushLive)
             .compile
@@ -147,9 +147,9 @@ class DaemonWorkerSubscribeSuite extends CatsEffectSuite:
       served(inst) { _ =>
         for
           // 'FEATURE' is not a valid FeatureId (must be lowercase) → InvalidParams.
-          bad <- DaemonClient.callWithRetry(inst.socketFile, registerReq(1L, "w1", "/repo", "FEATURE"))
+          bad <- DaemonClient.callWithRetry(inst.portFile, registerReq(1L, "w1", "/repo", "FEATURE"))
           // The connection/daemon survives: a follow-up status still answers.
-          ok <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(2L, "status"))
+          ok <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(2L, "status"))
         yield
           bad match
             case JsonRpc.Response.Failure(Some(1L), err) =>

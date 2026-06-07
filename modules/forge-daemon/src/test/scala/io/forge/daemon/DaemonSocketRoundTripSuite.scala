@@ -1,24 +1,14 @@
 package io.forge.daemon
 
-import cats.effect.{IO, Resource}
+import cats.effect.{Deferred, IO}
 import munit.CatsEffectSuite
 
-import java.util.UUID
-
-/** Task 4.1.1 — the IPC spike's proof: a JSON-RPC `status` request round-trips over a real Unix-domain socket, an
-  * unknown method comes back as a JSON-RPC `MethodNotFound` error (not a torn-down connection), and a malformed line is
-  * answered with a `null`-id parse error. This exercises the whole transport (`DaemonSocketServer` ↔ `DaemonClient` ↔
-  * `JsonRpc`) end-to-end, which is the riskiest new Phase-4.1 contract.
+/** Task 4.1.1 — the IPC spike's proof (re-pointed at TCP in the Slice-4.3 migration): a JSON-RPC `status` request
+  * round-trips over a real loopback TCP socket, an unknown method comes back as a JSON-RPC `MethodNotFound` error (not
+  * a torn-down connection), and two requests on one connection are both answered. This exercises the whole transport
+  * (`DaemonSocketServer` ↔ `DaemonClient` ↔ `JsonRpc`) end-to-end, which is the riskiest new Phase-4 contract.
   */
 class DaemonSocketRoundTripSuite extends CatsEffectSuite:
-
-  /** A short `/tmp`-rooted socket path (macOS caps `sun_path` at 104 bytes, so the long `/var/folders/...` tmp dir is
-    * unsafe), cleaned up after the test.
-    */
-  private val socketPath: Resource[IO, os.Path] =
-    Resource.make(IO(os.Path("/tmp") / s"forge-daemon-${UUID.randomUUID()}.sock")) { p =>
-      IO.blocking(os.remove(p, checkExists = false)).void
-    }
 
   /** Echo handler: `status` → `{status:"ok"}` (with the request id reflected so the test can assert id-echo), anything
     * else → MethodNotFound.
@@ -30,42 +20,51 @@ class DaemonSocketRoundTripSuite extends CatsEffectSuite:
       IO.pure(JsonRpc.Response.fail(req.id, JsonRpc.RpcError.methodNotFound(req.method)))
   }
 
-  test("status request round-trips over the unix socket") {
-    socketPath.use { sock =>
-      DaemonSocketServer.serve(sock, handler).compile.drain.background.use { _ =>
-        DaemonClient.callWithRetry(sock, JsonRpc.Request(7L, "status")).map { resp =>
-          assertEquals(
-            resp,
-            JsonRpc.Response.Success(Some(7L), ujson.Obj("status" -> "ok", "echoedId" -> ujson.Num(7d)))
-          )
-        }
+  /** Bind the server on an ephemeral loopback port, hand `body` the resolved [[DaemonAddress]], and tear the server
+    * down when `body` completes. The server stream emits its bound address as the first element, which we relay through
+    * a `Deferred` so the client knows which port to dial.
+    */
+  private def served[A](body: DaemonAddress => IO[A]): IO[A] =
+    Deferred[IO, Int].flatMap { boundPort =>
+      DaemonSocketServer
+        .serve(handler)
+        .evalTap(bound => boundPort.complete(bound.port.value).void)
+        .compile
+        .drain
+        .background
+        .use(_ => boundPort.get.flatMap(p => body(DaemonAddress.loopback(p))))
+    }
+
+  test("status request round-trips over the TCP socket") {
+    served { addr =>
+      DaemonClient.callWithRetry(addr, JsonRpc.Request(7L, "status")).map { resp =>
+        assertEquals(
+          resp,
+          JsonRpc.Response.Success(Some(7L), ujson.Obj("status" -> "ok", "echoedId" -> ujson.Num(7d)))
+        )
       }
     }
   }
 
   test("unknown method returns a JSON-RPC MethodNotFound error") {
-    socketPath.use { sock =>
-      DaemonSocketServer.serve(sock, handler).compile.drain.background.use { _ =>
-        DaemonClient.callWithRetry(sock, JsonRpc.Request(3L, "no-such-method")).map { resp =>
-          assertEquals(
-            resp,
-            JsonRpc.Response
-              .Failure(Some(3L), JsonRpc.RpcError(JsonRpc.RpcError.MethodNotFound, "method not found: no-such-method"))
-          )
-        }
+    served { addr =>
+      DaemonClient.callWithRetry(addr, JsonRpc.Request(3L, "no-such-method")).map { resp =>
+        assertEquals(
+          resp,
+          JsonRpc.Response
+            .Failure(Some(3L), JsonRpc.RpcError(JsonRpc.RpcError.MethodNotFound, "method not found: no-such-method"))
+        )
       }
     }
   }
 
   test("two requests on one connection both get answered (line-oriented loop)") {
-    socketPath.use { sock =>
-      DaemonSocketServer.serve(sock, handler).compile.drain.background.use { _ =>
-        for
-          a <- DaemonClient.callWithRetry(sock, JsonRpc.Request(1L, "status"))
-          b <- DaemonClient.callWithRetry(sock, JsonRpc.Request(2L, "status"))
-        yield
-          assertEquals(a.id, Some(1L))
-          assertEquals(b.id, Some(2L))
-      }
+    served { addr =>
+      for
+        a <- DaemonClient.callWithRetry(addr, JsonRpc.Request(1L, "status"))
+        b <- DaemonClient.callWithRetry(addr, JsonRpc.Request(2L, "status"))
+      yield
+        assertEquals(a.id, Some(1L))
+        assertEquals(b.id, Some(2L))
     }
   }

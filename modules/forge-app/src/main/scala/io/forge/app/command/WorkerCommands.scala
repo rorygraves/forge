@@ -6,6 +6,7 @@ import io.forge.app.cli.WorkerCommand
 import io.forge.app.config.{ConfigError, ForgeConfigLoader}
 import io.forge.app.lock.{FileProcessLock, LockAcquireResult, LockMetadata}
 import io.forge.core.paths.ForgePaths
+import io.forge.daemon.DaemonAddress
 import io.forge.instance.{FileInstanceStore, Instance, InstanceError}
 
 import java.net.InetAddress
@@ -42,8 +43,11 @@ object WorkerCommands:
         case Right(instance) => runOnClone(home, instance, command)
       }
 
-  /** The 4.2 **host-process** path: resolve the worker's re-rooted clone paths + socket from the loaded [[Instance]]
-    * (the instance dir exists on the host), no credential brokering (the worker inherits the daemon's environment).
+  /** The 4.2 **host-process** path: resolve the worker's re-rooted clone paths from the loaded [[Instance]] (the
+    * instance dir exists on the host); the daemon is reached over loopback at the port the daemon wrote to the instance
+    * port file (resolved per-RPC by the reporter, so the first `register` rides out the start-up race), no credential
+    * brokering (the worker inherits the daemon's environment). An absent port file / unreachable daemon degrades to a
+    * non-zero exit via [[degrade]] rather than crashing.
     */
   private def runOnClone(home: os.Path, instance: Instance, command: WorkerCommand): IO[ExitCode] =
     drive(
@@ -51,32 +55,39 @@ object WorkerCommands:
       command,
       checkout = instance.workerCheckout(command.workerId),
       workerRoot = instance.workerRoot(command.workerId),
-      socket = instance.socketFile,
+      daemon = Left(instance.portFile),
       brokerCredentials = false
     )
 
   /** The 4.3 **containerised** path: the instance dir does not exist inside the container, so the daemon passes the
-    * in-container bind-mount paths explicitly (`--worker-root` + `--socket`); the worker brokers its credentials over
-    * that socket (O6) rather than inheriting host credentials. Both flags are required in container mode — a
-    * `--container` invocation missing them is a malformed spawn and degrades to a non-zero exit.
+    * in-container worker root and the daemon's TCP address explicitly (`--worker-root` + `--socket
+    * host.docker.internal:<port>`); the worker brokers its credentials over that connection (O6) rather than inheriting
+    * host credentials. Both flags are required in container mode — a `--container` invocation missing them, or with an
+    * unparseable `--socket` address, is a malformed spawn and degrades to a non-zero exit.
     */
   private def runContainerised(home: os.Path, command: WorkerCommand): IO[ExitCode] =
     (command.workerRoot, command.socket) match
       case (Some(rootRaw), Some(socketRaw)) =>
-        val workerRoot = os.Path(rootRaw)
-        drive(
-          home,
-          command,
-          checkout = workerRoot / "checkout",
-          workerRoot = workerRoot,
-          socket = os.Path(socketRaw),
-          brokerCredentials = true
-        )
+        DaemonAddress.parse(socketRaw) match
+          case Right(daemon) =>
+            val workerRoot = os.Path(rootRaw)
+            drive(
+              home,
+              command,
+              checkout = workerRoot / "checkout",
+              workerRoot = workerRoot,
+              daemon = Right(daemon),
+              brokerCredentials = true
+            )
+          case Left(reason) =>
+            Console[IO]
+              .errorln(s"forge worker '${command.workerId}': invalid --socket '$socketRaw' ($reason).")
+              .as(ExitCode(1))
       case _ =>
         Console[IO]
           .errorln(
             s"forge worker '${command.workerId}': --container requires both --worker-root and --socket " +
-              "(the daemon passes the in-container mount paths)."
+              "(the daemon passes the in-container worker root and the host.docker.internal:<port> daemon address)."
           )
           .as(ExitCode(1))
 
@@ -90,7 +101,7 @@ object WorkerCommands:
       command: WorkerCommand,
       checkout: os.Path,
       workerRoot: os.Path,
-      socket: os.Path,
+      daemon: Either[os.Path, DaemonAddress],
       brokerCredentials: Boolean
   ): IO[ExitCode] =
     IO.blocking(os.exists(checkout)).flatMap {
@@ -108,12 +119,13 @@ object WorkerCommands:
             Console[IO].errorln(s"forge worker '${command.workerId}': ${configErrorMessage(err)}").as(ExitCode(78))
           case Right(config) =>
             underWorkerLock(paths, command) {
-              WorkerReporter
-                .daemon(socket, command.workerId)
-                .flatMap(reporter =>
-                  WorkerLoop.run(paths, config, reporter, command.repo, command.feature, brokerCredentials)
-                )
-                .handleErrorWith(degrade(command, socket))
+              val reporter = daemon match
+                case Left(portFile) => WorkerReporter.daemon(portFile, command.workerId)
+                case Right(address) => WorkerReporter.daemon(address, command.workerId)
+              val endpoint = daemon.fold(_.toString, _.render)
+              reporter
+                .flatMap(r => WorkerLoop.run(paths, config, r, command.repo, command.feature, brokerCredentials))
+                .handleErrorWith(degrade(command, endpoint))
             }
         }
     }
@@ -166,15 +178,16 @@ object WorkerCommands:
     case Some(m) => s" Holder: pid=${m.pid} host=${m.hostname} command='${m.command}' started=${m.startedAt}."
     case None => ""
 
-  /** A loop error that escapes [[WorkerLoop]] — most often an unreachable daemon (the reporter's RPCs raise) — degrades
-    * to exit 1 with the daemon-down diagnostic, never a crash. `socket` is the control socket the worker phones home
-    * over (the instance socket for a host worker, the mounted in-container socket for a containerised one).
+  /** A loop error that escapes [[WorkerLoop]] — most often an unreachable daemon (the reporter's RPCs raise, or its
+    * port file is absent) — degrades to exit 1 with the daemon-down diagnostic, never a crash. `endpoint` describes
+    * where the worker tried to reach the daemon (the loopback `host:port` for a host worker,
+    * `host.docker.internal:<port>` for a containerised one, or the port-file path when no daemon had bound).
     */
-  private def degrade(command: WorkerCommand, socket: os.Path)(error: Throwable): IO[ExitCode] =
+  private def degrade(command: WorkerCommand, endpoint: String)(error: Throwable): IO[ExitCode] =
     Console[IO]
       .errorln(
         s"forge worker '${command.workerId}': could not complete (${error.getMessage}). " +
-          s"Is `forge daemon start --instance ${command.instance.value}` running at $socket?"
+          s"Is `forge daemon start --instance ${command.instance.value}` running at $endpoint?"
       )
       .as(ExitCode(1))
 

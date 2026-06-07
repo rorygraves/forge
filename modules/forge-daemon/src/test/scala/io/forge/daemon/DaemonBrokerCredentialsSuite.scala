@@ -38,7 +38,7 @@ class DaemonBrokerCredentialsSuite extends CatsEffectSuite:
       state <- DaemonState.boot(inst, pid = 99L)
       shutdown <- Deferred[IO, Unit]
       result <- Daemon
-        .serveUntilShutdown(inst.socketFile, state, shutdown, Supervisor.noop, broker)
+        .serveUntilShutdown(inst.portFile, state, shutdown, Supervisor.noop, broker)
         .background
         .use(_ => body.guarantee(shutdown.complete(()).void))
     yield result
@@ -55,7 +55,7 @@ class DaemonBrokerCredentialsSuite extends CatsEffectSuite:
         )
         served(inst, new FakeBroker(calls, Right(creds))) {
           for
-            resp <- DaemonClient.callWithRetry(inst.socketFile, brokerReq(1L, "w-1", "/repo"))
+            resp <- DaemonClient.callWithRetry(inst.portFile, brokerReq(1L, "w-1", "/repo"))
             seen <- calls.get
           yield
             resp match
@@ -75,8 +75,8 @@ class DaemonBrokerCredentialsSuite extends CatsEffectSuite:
       Ref.of[IO, Vector[(String, String)]](Vector.empty).flatMap { calls =>
         served(inst, new FakeBroker(calls, Left(BrokerError.MissingRequiredSecret("FORGE_GH_TOKEN")))) {
           for
-            bad <- DaemonClient.callWithRetry(inst.socketFile, brokerReq(1L, "w-1", "/repo"))
-            ok <- DaemonClient.callWithRetry(inst.socketFile, JsonRpc.Request(2L, "status"))
+            bad <- DaemonClient.callWithRetry(inst.portFile, brokerReq(1L, "w-1", "/repo"))
+            ok <- DaemonClient.callWithRetry(inst.portFile, JsonRpc.Request(2L, "status"))
           yield
             bad match
               case JsonRpc.Response.Failure(Some(1L), err) =>
@@ -95,7 +95,7 @@ class DaemonBrokerCredentialsSuite extends CatsEffectSuite:
         served(inst, new FakeBroker(calls, Right(BrokeredCredentials(Map.empty)))) {
           for
             bad <- DaemonClient.callWithRetry(
-              inst.socketFile,
+              inst.portFile,
               JsonRpc.Request(1L, "broker-credentials", ujson.Obj("workerId" -> "w-1")) // no repo
             )
             seen <- calls.get
@@ -112,7 +112,7 @@ class DaemonBrokerCredentialsSuite extends CatsEffectSuite:
   test("the default (no-broker) daemon refuses broker-credentials with an InternalError") {
     instance.use { inst =>
       served(inst, CredentialBroker.noop) {
-        DaemonClient.callWithRetry(inst.socketFile, brokerReq(1L, "w-1", "/repo")).map {
+        DaemonClient.callWithRetry(inst.portFile, brokerReq(1L, "w-1", "/repo")).map {
           case JsonRpc.Response.Failure(Some(1L), err) => assertEquals(err.code, JsonRpc.RpcError.InternalError)
           case other => fail(s"expected an InternalError, got $other")
         }
