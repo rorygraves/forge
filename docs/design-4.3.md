@@ -38,7 +38,8 @@
 > all sit. The `Forgefile` (4.3.2), broker (4.3.3), and B2 protocol (4.3.5) are
 > comparatively mechanical (a parser, a control-channel handshake, more instance-log
 > events + a reservation table over the existing single-writer gate). So a runnable
-> `docker run`↔await-exit↔kill spike goes in front. Tasks 4.3.2–4.3.6 open.
+> `docker run`↔await-exit↔kill spike goes in front. **Tasks 4.3.1–4.3.5 landed;
+> Task 4.3.6 (proof + close-out) open.**
 
 ---
 
@@ -172,7 +173,7 @@ container runtime also exposes), so the supervisor is unchanged in shape.
   restarted daemon, the container having survived. Idempotent against a re-issued spawn
   as the host path is.
 
-- [ ] **Task 4.3.5 — B2 budget reservation protocol + `cost.update` fan-in.** Four new
+- [x] **Task 4.3.5 — B2 budget reservation protocol + `cost.update` fan-in.** Four new
   `InstanceEvent` variants (`budget.reserve` / `budget.grant` / `budget.refuse` /
   `budget.finalize`) folded into `InstanceState` (committed totals + outstanding
   reservations, per-workstream + per-instance); a daemon `reserve` RPC over the worker
@@ -323,6 +324,45 @@ container runtime also exposes), so the supervisor is unchanged in shape.
   pid→`containerId` generalisation + the `--container`/`--socket`/`--worker-root` worker contract + the
   `forge-worker:latest` default image / forge-capable-image expectation. The full container-worker-reaches-the-daemon +
   real feature loop tie-together (a built forge-capable image) is the Task 4.3.6 dogfood. Tasks 4.3.5–4.3.6 open.
+- **2026-06-06** — **Task 4.3.5 (B2 budget reservation protocol + `cost.update` fan-in) landed.** The aggregate budget
+  layer *above* the frozen §12 per-session checks: a worker obtains a fleet-wide reservation before each agent spawn,
+  the daemon refusing one that would oversubscribe the cap, and each worker's exported `cost.update` fanning into live
+  totals. (1) **Four `budget.*` `InstanceEvent` variants (forge-instance)** — `budget.reserve`/`grant`/`refuse`/`finalize`
+  (codec + decode + the open-`kind` no-op tolerance the 4.1 header already promised), folded into a new
+  `InstanceState` shape (**schema v3 → v4**): `committedUsd` + `committedByWorkstream` (keyed by ws-id string) +
+  a `reservations` table (keyed by `workerId` — one outstanding per sequential worker; a fresh `grant` *replaces* the
+  prior, so a missing finalize cannot leak headroom). `grant` adds outstanding; `finalize` clears it (reservation-id
+  matched; a stale id is a no-op); `worker.exited` releases a dead worker's reservation. (2) **The `cost.update` fan-in
+  is the sole writer of committed spend** — `WorkerEvent`'s fold detects an exported §19 `cost.update`
+  (`InstanceEvent.costUpdateUsd`) and adds its per-turn `usd` delta to the instance + workstream committed totals, so
+  `finalize` only *releases* the estimate (carrying `actualUsd` for audit) and never double-counts. (3) **`BudgetPolicy`
+  (forge-daemon)** — the pure per-workstream / per-instance cap decision (`committed + outstanding-excluding-self +
+  estimate ≤ cap`), with `default` (generous: $200 ws / $1000 instance) and `unlimited` (the safe control-only / test
+  default — a missing budget cap must never *accidentally* block a worker, unlike `CredentialBroker.noop` which refuses).
+  Constructed-default posture mirrors the 4.3.3 `CredentialPolicy`; `InstanceConfig` persistence is a carry-forward.
+  (4) **`reserve-budget` RPC (`Daemon.handler`)** — `{workerId, estimateUsd}` → authorize **under the single-writer
+  gate** (`DaemonState.modify`, so two concurrent reservers cannot both win) → durable `budget.reserve` +
+  `grant`/`refuse`, answering `{granted, reservationId?, reason?}`. A **refuse is a success body** (`granted:false`),
+  not a JSON-RPC error — the worker holds, never fails. `worker-event` switched to `modify` so a `cost.update` for a
+  worker holding a reservation emits a `budget.finalize` atomically with the event. (5) **Worker side (forge-app)** —
+  a `BudgetReserver` seam (`noop` for the non-daemon `forge run`, byte-identical to pre-4.3.5) wrapping each
+  `RealSideEffects` driver launch/resume (`reserving { … }`, the §8 wrap the frozen FSM never sees); the daemon-backed
+  `ReportingBudgetReserver` phones `reserve-budget` and **holds** on a refuse (reports a `BudgetHold` status, retries
+  after a backoff — Slice-2.2's never-kill-mid-turn rule lifted to the aggregate); `WorkerReporter.reserveBudget`
+  (refuse decodes to `ReservationOutcome.Refused`, only a transport error raises); `WorkerLoop` injects it with the
+  coarse O11 estimate = `config.maxPieceCostUsd`; `DaemonCommands` passes `BudgetPolicy.default`. (6) **Status JSON**
+  exposes `committedUsd`/`outstandingUsd` (instance + per-workstream) for the cockpit spend view (4.4). **Tests:**
+  `BudgetReservationSuite` (codec round-trip + fold: grant/finalize/replace/exit-release + `cost.update` fan-in +
+  status JSON), `BudgetPolicySuite` (cap decision incl. exclude-self + no-workstream + unlimited), `DaemonReserveBudgetSuite`
+  (RPC grant/refuse-is-a-success/`InvalidParams` + the `cost.update`-finalizes-and-commits round-trip over an in-process
+  daemon), `BudgetReserverSuite` (grant proceeds / refuse holds-and-retries / `parseReservation`), + `RealSideEffectsSuite`
+  reserve-before-spawn. `forge-instance` 55→63, `forge-daemon` 37→48, `forge-app` 543→558; full `sbt test` green,
+  `scalafmtCheckAll` clean, ForgePaths smell sweep passes. **Spec deltas (§23) to fold into the live contract at 4.3.6
+  close-out:** the four `budget.*` instance-log events + the `InstanceState` v4 budget aggregates/reservation table; the
+  `reserve-budget` RPC wire (`{workerId, estimateUsd}` → `{granted, reservationId?, reason?}`) + the refuse-is-a-success
+  convention; the implicit `cost.update`-drives-`finalize` fan-in; the coarse O11 estimate = per-piece cap; the status
+  JSON `committedUsd`/`outstandingUsd` fields. The live container-worker budget-cycle tie-together is the Task 4.3.6
+  dogfood. Task 4.3.6 open.
 
 ---
 
@@ -374,6 +414,14 @@ container runtime also exposes), so the supervisor is unchanged in shape.
   (4.3.4) builds the `ContainerSpec` that omits any host-home mount and has the worker
   *apply* the brokered env in-process, and 4.3.6 asserts it live (no `~`/home mount; gh
   token scoped).
+- **Reviewer-spawn reservation (B2, from Task 4.3.5).** 4.3.5 wraps the §11 **driver**
+  launches/resumes (the dominant spend) with the `reserve-budget` handshake; the **reviewer**
+  one-shots (a separate `ReviewerCall` seam, cheaper) are **not** pre-reserved. Reviewer spend
+  is still fully accounted — it fans into the committed totals via its `actor="reviewer"`
+  `cost.update` export (contract 1.16) — so the cap is enforced *after* a reviewer turn, not
+  *before* it. Pre-authorizing reviewer spawns (and the `budget.refuse`→hold on the reviewer
+  path) is a small follow-up, deferred unless a reviewer-heavy run shows the unreserved spend
+  matters; the minimal protocol holds the line on the expensive driver sessions.
 - **Non-Docker OCI runtimes** (Podman / colima, O7) — the seam is abstract and
   Docker-first; a second backend is added only if the host fleet needs it.
 - **Local bare/reference mirror clone cache** (O10) — carried from 4.2; still a

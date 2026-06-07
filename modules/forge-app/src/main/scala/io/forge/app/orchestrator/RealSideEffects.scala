@@ -59,22 +59,32 @@ final class RealSideEffects(
     // D4 — the §6.5 `RepoProfile.commitIdentity` resolved **once per run** (build-time, by `OrchestratorBuilder`).
     // `Some` for a profiled run with `adapt.enabled` (every Forge commit is authored as that identity, default
     // `forge[bot]`); `None` for an unprofiled / `adapt.enabled = false` run (ambient git identity — pre-D4 behaviour).
-    commitIdentity: Option[CommitIdentity] = None
+    commitIdentity: Option[CommitIdentity] = None,
+    // B2 (Task 4.3.5) — the aggregate budget reservation seam. `BudgetReserver.noop` for a non-daemon `forge run` (no
+    // aggregate budget; the launch path is byte-identical to pre-4.3.5). A daemon-spawned worker injects a real reserver
+    // that authorizes each driver spawn against the fleet cap and holds on a refuse (never killing mid-turn).
+    reserver: BudgetReserver = BudgetReserver.noop
 ) extends SideEffects:
 
   import RealSideEffects.statusToFileChanges
 
   private val cli: String = connector.name
 
+  /** B2 — reserve aggregate budget headroom before a driver spawn, then run the launch. The reserver holds on a refuse
+    * (it returns only once granted), so the launch is gated on budget without the FSM ever seeing it (§8).
+    */
+  private def reserving(launch: IO[ActiveSession]): IO[ActiveSession] = reserver.reserveBeforeSpawn *> launch
+
   // --- driver-session launches ----------------------------------------------
 
-  override def launchSpec(feature: Feature): IO[ActiveSession] =
+  override def launchSpec(feature: Feature): IO[ActiveSession] = reserving {
     specStore.loadDesign(feature.id).flatMap { designE =>
       val brief = designE.toOption.map(_.trim).filter(_.nonEmpty).getOrElse(feature.manifest.title)
       connector
         .runStreamingSpec(promptPath("specify"), specMessage(feature, brief))
         .map(ActiveSession(SessionPhase.Spec, _))
     }
+  }
 
   override def resumeDesignRevision(feature: Feature, round: Int): IO[ActiveSession] =
     resumeDesign(feature, revisionMessage(round))
@@ -82,14 +92,15 @@ final class RealSideEffects(
   override def resumeDesignFeedback(feature: Feature, pr: PrNumber, round: Int): IO[ActiveSession] =
     resumeDesign(feature, feedbackMessage(feature, round))
 
-  override def launchImplement(feature: Feature, piece: PieceId): IO[ActiveSession] =
+  override def launchImplement(feature: Feature, piece: PieceId): IO[ActiveSession] = reserving {
     connector
       .runHeadlessImplementation(
         ImplementationPrompt(feature.id, piece, promptPath("implement"), implementBody(feature, piece))
       )
       .map(ActiveSession(SessionPhase.Implement, _))
+  }
 
-  override def launchFixup(feature: Feature, piece: PieceId, attempt: Int): IO[ActiveSession] =
+  override def launchFixup(feature: Feature, piece: PieceId, attempt: Int): IO[ActiveSession] = reserving {
     // §11.6 / gap #12: before spawning the fix-up driver, capture the piece PR's failing CI checks into
     // `pieces/<p>.failures.md` so the driver knows WHAT to fix instead of running blind. Best-effort — a gh hiccup
     // writes a note rather than aborting the fix-up.
@@ -97,16 +108,19 @@ final class RealSideEffects(
       connector
         .runFixup(FixupPrompt(feature.id, piece, attempt, promptPath("fixup"), fixupBody(feature, piece, attempt)))
         .map(ActiveSession(SessionPhase.Fixup, _))
+  }
 
-  override def resumeImplement(feature: Feature, piece: PieceId, sessionId: String): IO[ActiveSession] =
+  override def resumeImplement(feature: Feature, piece: PieceId, sessionId: String): IO[ActiveSession] = reserving {
     connector
       .resumeHeadlessDriver(sessionId, promptPath("implement"), resumeMessage(feature, piece))
       .map(ActiveSession(SessionPhase.Implement, _, resumed = true))
+  }
 
-  override def resumeFixup(feature: Feature, piece: PieceId, sessionId: String): IO[ActiveSession] =
+  override def resumeFixup(feature: Feature, piece: PieceId, sessionId: String): IO[ActiveSession] = reserving {
     connector
       .resumeHeadlessDriver(sessionId, promptPath("fixup"), resumeMessage(feature, piece))
       .map(ActiveSession(SessionPhase.Fixup, _, resumed = true))
+  }
 
   /** D3-3 continuation nudge for a resumed implement/fix-up driver. The CLI restores the prior conversation (C19), so
     * this only points the driver back at the in-flight task with absolute paths (C19 watch item 3: cheap models
@@ -171,11 +185,12 @@ final class RealSideEffects(
        |fine — do NOT run the full test suite). Then stop; Forge commits and re-runs CI.
        |""".stripMargin
 
-  private def resumeDesign(feature: Feature, message: String): IO[ActiveSession] =
+  private def resumeDesign(feature: Feature, message: String): IO[ActiveSession] = reserving {
     IO.fromOption(feature.designSessionId)(
       new IllegalStateException("resume design driver: feature.designSessionId is empty")
     ).flatMap(connector.resumeStreamingSpec(_, promptPath("specify"), message))
       .map(ActiveSession(SessionPhase.DesignRevision, _, resumed = true))
+  }
 
   // --- reviewer-input assembly ----------------------------------------------
 
@@ -378,12 +393,13 @@ final class RealSideEffects(
       os.write.over(failuresFile(feature.id, piece), buildFailuresMd(piece, failureLog), createFolders = true)
     )
 
-  override def launchBuildFixup(feature: Feature, piece: PieceId, attempt: Int): IO[ActiveSession] =
+  override def launchBuildFixup(feature: Feature, piece: PieceId, attempt: Int): IO[ActiveSession] = reserving {
     // §8.3 — the pre-PR Build fix-up driver. Unlike `launchFixup`, NO `writeFailures` (no PR / no CI checks): the Build
     // gate already wrote `pieces/<p>.failures.md` via `writeBuildFailures`, and `fixupBody` points the driver at it.
     connector
       .runFixup(FixupPrompt(feature.id, piece, attempt, promptPath("fixup"), fixupBody(feature, piece, attempt)))
       .map(ActiveSession(SessionPhase.Fixup, _))
+  }
 
   private def buildFailuresMd(piece: PieceId, failureLog: String): String =
     s"""# Piece ${piece.value} — local build failed (pre-PR)

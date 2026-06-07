@@ -6,7 +6,7 @@ import cats.effect.std.Console
 import io.forge.app.cli.DaemonCommand
 import io.forge.app.lock.{FileProcessLock, LockAcquireResult, LockMetadata}
 import io.forge.core.InstanceName
-import io.forge.daemon.{Daemon, DaemonClient, DaemonState, JsonRpc}
+import io.forge.daemon.{BudgetPolicy, Daemon, DaemonClient, DaemonState, JsonRpc}
 import io.forge.instance.{FileInstanceStore, Instance, InstanceStore}
 
 import java.net.InetAddress
@@ -93,7 +93,14 @@ object DaemonCommands:
         .superviseLoop(RealSupervisor.DefaultCadence)
         .background
         .use(_ =>
-          Daemon.serveUntilShutdown(instance.socketFile, state, shutdown, supervisor, RealCredentialBroker.default)
+          Daemon.serveUntilShutdown(
+            instance.socketFile,
+            state,
+            shutdown,
+            supervisor,
+            RealCredentialBroker.default,
+            BudgetPolicy.default
+          )
         )
       _ <- Console[IO].println("forge daemon: stopped.")
     yield ExitCode.Success

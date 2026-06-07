@@ -1,6 +1,7 @@
 package io.forge.app.command
 
 import cats.effect.{IO, Ref}
+import io.forge.app.orchestrator.ReservationOutcome
 import io.forge.core.FeatureId
 import io.forge.daemon.{DaemonClient, JsonRpc}
 
@@ -35,6 +36,13 @@ trait WorkerReporter:
     * map matters to the caller.
     */
   def brokerCredentials(repo: String): IO[Map[String, String]]
+
+  /** `reserve-budget` — request aggregate budget headroom (up to `estimateUsd`) before the next agent spawn (B2, Task
+    * 4.3.5). A [[ReservationOutcome.Granted]] / [[ReservationOutcome.Refused]] is the *protocol* outcome — a refuse is
+    * a normal answer the worker holds on, **not** an `IO` error. Only a transport failure (an unreachable daemon, or a
+    * contract-violating wire body) is raised, so the worker's degrade path reports it.
+    */
+  def reserveBudget(estimateUsd: BigDecimal): IO[ReservationOutcome]
 
 object WorkerReporter:
 
@@ -101,6 +109,26 @@ object WorkerReporter:
           }
       }
 
+    def reserveBudget(estimateUsd: BigDecimal): IO[ReservationOutcome] =
+      nextId.flatMap { id =>
+        DaemonClient
+          .call(
+            socket,
+            JsonRpc.Request(
+              id,
+              "reserve-budget",
+              ujson.Obj("workerId" -> workerId, "estimateUsd" -> ujson.Num(estimateUsd.toDouble))
+            )
+          )
+          .flatMap {
+            case JsonRpc.Response.Success(_, body) => IO.fromEither(parseReservation(body))
+            // A refuse is a *success* body (`granted: false`); a JSON-RPC failure here is a real transport/protocol
+            // error (a malformed request the daemon rejected), not a budget refusal — raise it.
+            case JsonRpc.Response.Failure(_, err) =>
+              IO.raiseError(new RuntimeException(s"reserve-budget failed: ${err.message}"))
+          }
+      }
+
   /** Decode the `broker-credentials` success body (`{env: {<key>: <secret>}, missing: [...]}`) into the env map the
     * worker injects. A non-object `env`, or a non-string value, is a contract violation surfaced as a `Left` (the
     * caller raises it) rather than silently dropping a credential. The `missing` field is ignored here.
@@ -119,6 +147,23 @@ object WorkerReporter:
             }
           case None => Left(new RuntimeException("broker-credentials: 'env' is not an object"))
       case None => Left(new RuntimeException("broker-credentials: response missing 'env'"))
+
+  /** Decode the `reserve-budget` success body into a [[ReservationOutcome]]. `{granted: true, reservationId}` →
+    * [[ReservationOutcome.Granted]]; `{granted: false, reason?}` → [[ReservationOutcome.Refused]] (a missing `reason`
+    * degrades to a generic message, not a failure — a refuse must always parse). A body missing the `granted` flag, or
+    * granted-without-a-`reservationId`, is a contract violation surfaced as a `Left` the caller raises.
+    */
+  private[command] def parseReservation(body: ujson.Value): Either[Throwable, ReservationOutcome] =
+    body.objOpt.flatMap(_.get("granted")).flatMap(_.boolOpt) match
+      case Some(true) =>
+        body.objOpt.flatMap(_.get("reservationId")).flatMap(_.strOpt) match
+          case Some(id) => Right(ReservationOutcome.Granted(id))
+          case None => Left(new RuntimeException("reserve-budget: granted response missing 'reservationId'"))
+      case Some(false) =>
+        val reason =
+          body.objOpt.flatMap(_.get("reason")).flatMap(_.strOpt).getOrElse("budget reservation refused")
+        Right(ReservationOutcome.Refused(reason))
+      case None => Left(new RuntimeException("reserve-budget: response missing boolean 'granted'"))
 
   /** Raise on a JSON-RPC failure response so the caller's `handleErrorWith` reports it; a success is discarded. */
   private def expectOk(call: IO[JsonRpc.Response], method: String): IO[Unit] =

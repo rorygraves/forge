@@ -80,6 +80,11 @@ object WorkerLoop:
         .as(ExitCode(1))
 
   /** Build + run the orchestrator with the feed exporter tailing concurrently, then flush + report the terminal state.
+    *
+    * The worker injects a daemon-backed [[ReportingBudgetReserver]] (B2, Task 4.3.5) so each driver spawn is first
+    * authorized against the fleet budget over the control channel — a refuse makes the worker *hold* (never killed
+    * mid-turn). The coarse reservation estimate (O11) is the per-piece session cap (`config.maxPieceCostUsd`); the
+    * daemon corrects it to the real spend via the `cost.update` fan-in.
     */
   private def drive(
       paths: ForgePaths,
@@ -89,8 +94,9 @@ object WorkerLoop:
       mode: io.forge.core.Mode,
       credentialEnv: Map[String, String]
   ): IO[ExitCode] =
+    val reserver = new ReportingBudgetReserver(reporter, BigDecimal(config.maxPieceCostUsd))
     installAssets(paths) *>
-      OrchestratorBuilder.build(mode, paths, config, credentialEnv).flatMap { case (orch, _) =>
+      OrchestratorBuilder.build(mode, paths, config, credentialEnv, reserver).flatMap { case (orch, _) =>
         val logFile = paths.featureLog(feature)
         for
           watermark <- cats.effect.Ref.of[IO, Long](WorkerFeedExporter.InitialWatermark)

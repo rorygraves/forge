@@ -83,11 +83,50 @@ enum InstanceEvent:
   )
 
   /** A spawned worker process exited (`worker.exited`, §6.2/§6.4): its `exitCode`. Clears the worker's liveness so the
-    * supervisor's restart reconciliation (4.2.5) treats it as terminated rather than re-probing its pid.
+    * supervisor's restart reconciliation (4.2.5) treats it as terminated rather than re-probing its pid. Also clears
+    * any outstanding budget reservation the worker still held (a dead worker holds no budget — the §8
+    * reconciliation-lite).
     */
   case WorkerExited(workerId: String, exitCode: Int)
 
+  /** B2 budget reservation (§8, Task 4.3.5) — a worker requested authorization to spend up to `estimateUsd` before its
+    * next agent spawn (`budget.reserve`). An **audit breadcrumb**: the daemon emits it alongside the deciding
+    * [[BudgetGrant]]/[[BudgetRefuse]] so the log records the request as well as the outcome; it has no effect on the
+    * folded aggregates. `workstreamId` is the worker's owning workstream (resolved daemon-side from the worker record),
+    * `None` for a standalone-registered worker with no workstream.
+    */
+  case BudgetReserve(workerId: String, workstreamId: Option[WorkstreamId], estimateUsd: BigDecimal)
+
+  /** B2 — the daemon **granted** a reservation (`budget.grant`): `reservationId` is the opaque handle the matching
+    * [[BudgetFinalize]] clears it by. The fold records it as the worker's single outstanding reservation — a fresh
+    * grant for a worker **replaces** any prior one (the worker drives sequentially, so at most one session is in
+    * flight), so a missing finalize cannot leak outstanding headroom across sessions. Adds `estimateUsd` to the
+    * outstanding total the next authorization decision counts.
+    */
+  case BudgetGrant(workerId: String, workstreamId: Option[WorkstreamId], reservationId: String, estimateUsd: BigDecimal)
+
+  /** B2 — the daemon **refused** a reservation (`budget.refuse`): granting it would have oversubscribed the
+    * per-workstream or per-instance cap. An audit breadcrumb (no aggregate effect — nothing was reserved); the worker
+    * *holds* and surfaces a budget-hold rather than being killed (§8 — Slice-2.2's never-kill-mid-turn rule lifted to
+    * the aggregate). `reason` is the human-readable refusal carried back to the worker.
+    */
+  case BudgetRefuse(workerId: String, workstreamId: Option[WorkstreamId], estimateUsd: BigDecimal, reason: String)
+
+  /** B2 — a reservation **settled** (`budget.finalize`): the daemon emits it when the worker exports the `cost.update`
+    * for the granted session, clearing the worker's outstanding reservation. The real spend is folded into the
+    * committed totals by the `cost.update` fan-in itself (see [[RebuildInstanceState]]), so finalize carries
+    * `actualUsd` for audit/reconciliation only and does **not** itself move committed (no double count). A finalize
+    * whose `reservationId` no longer matches the worker's current reservation is a no-op (a late/duplicate settle).
+    */
+  case BudgetFinalize(workerId: String, reservationId: String, actualUsd: BigDecimal)
+
 object InstanceEvent:
+
+  /** The §19 per-feature `cost.update` action kind — the exported [[WorkerEvent]] the B3 committed-spend fan-in and the
+    * daemon's `budget.finalize` trigger key on. A wire literal (the per-feature log is `forge-core`'s; this module
+    * reads the exported tree generically), kept as a named constant so [[costUpdateUsd]] and a reader agree.
+    */
+  val CostUpdateKind: String = "cost.update"
 
   // --- well-known `kind` discriminators (the open string the on-disk record carries) ---
   val DaemonStartedKind: String = "daemon.started"
@@ -98,6 +137,10 @@ object InstanceEvent:
   val WorkstreamStatusKind: String = "workstream.status"
   val WorkerSpawnedKind: String = "worker.spawned"
   val WorkerExitedKind: String = "worker.exited"
+  val BudgetReserveKind: String = "budget.reserve"
+  val BudgetGrantKind: String = "budget.grant"
+  val BudgetRefuseKind: String = "budget.refuse"
+  val BudgetFinalizeKind: String = "budget.finalize"
 
   /** The on-disk `kind` for an event. */
   def kindOf(e: InstanceEvent): String = e match
@@ -109,6 +152,10 @@ object InstanceEvent:
     case _: WorkstreamStatusChanged => WorkstreamStatusKind
     case _: WorkerSpawned => WorkerSpawnedKind
     case _: WorkerExited => WorkerExitedKind
+    case _: BudgetReserve => BudgetReserveKind
+    case _: BudgetGrant => BudgetGrantKind
+    case _: BudgetRefuse => BudgetRefuseKind
+    case _: BudgetFinalize => BudgetFinalizeKind
 
   /** The event-specific payload (the `payload` field of [[InstanceLogRecord]]). Mirrors how `Action.payload` carries
     * per-`kind` data as a raw JSON tree rather than a closed schema.
@@ -141,6 +188,32 @@ object InstanceEvent:
       obj
     case WorkerExited(workerId, exitCode) =>
       ujson.Obj("workerId" -> ujson.Str(workerId), "exitCode" -> ujson.Num(exitCode.toDouble))
+    case BudgetReserve(workerId, workstreamId, estimateUsd) =>
+      val obj = ujson.Obj("workerId" -> ujson.Str(workerId), "estimateUsd" -> ujson.Num(estimateUsd.toDouble))
+      workstreamId.foreach(id => obj("workstreamId") = ujson.Str(id.value))
+      obj
+    case BudgetGrant(workerId, workstreamId, reservationId, estimateUsd) =>
+      val obj = ujson.Obj(
+        "workerId" -> ujson.Str(workerId),
+        "reservationId" -> ujson.Str(reservationId),
+        "estimateUsd" -> ujson.Num(estimateUsd.toDouble)
+      )
+      workstreamId.foreach(id => obj("workstreamId") = ujson.Str(id.value))
+      obj
+    case BudgetRefuse(workerId, workstreamId, estimateUsd, reason) =>
+      val obj = ujson.Obj(
+        "workerId" -> ujson.Str(workerId),
+        "estimateUsd" -> ujson.Num(estimateUsd.toDouble),
+        "reason" -> ujson.Str(reason)
+      )
+      workstreamId.foreach(id => obj("workstreamId") = ujson.Str(id.value))
+      obj
+    case BudgetFinalize(workerId, reservationId, actualUsd) =>
+      ujson.Obj(
+        "workerId" -> ujson.Str(workerId),
+        "reservationId" -> ujson.Str(reservationId),
+        "actualUsd" -> ujson.Num(actualUsd.toDouble)
+      )
 
   /** This event as an unstamped [[InstanceEventDraft]] — the daemon hands a draft to `FileInstanceLog.append`, which
     * stamps it with the next `seq` and a write-time `at` into a durable [[InstanceLogRecord]].
@@ -203,7 +276,41 @@ object InstanceEvent:
           workerId <- str("workerId")
           exitCode <- num("exitCode")
         yield WorkerExited(workerId, exitCode.toInt)
+      case BudgetReserveKind =>
+        for
+          workerId <- str("workerId")
+          estimateUsd <- num("estimateUsd")
+        yield BudgetReserve(workerId, workstreamId("workstreamId"), BigDecimal(estimateUsd))
+      case BudgetGrantKind =>
+        for
+          workerId <- str("workerId")
+          reservationId <- str("reservationId")
+          estimateUsd <- num("estimateUsd")
+        yield BudgetGrant(workerId, workstreamId("workstreamId"), reservationId, BigDecimal(estimateUsd))
+      case BudgetRefuseKind =>
+        for
+          workerId <- str("workerId")
+          estimateUsd <- num("estimateUsd")
+          reason <- str("reason")
+        yield BudgetRefuse(workerId, workstreamId("workstreamId"), BigDecimal(estimateUsd), reason)
+      case BudgetFinalizeKind =>
+        for
+          workerId <- str("workerId")
+          reservationId <- str("reservationId")
+          actualUsd <- num("actualUsd")
+        yield BudgetFinalize(workerId, reservationId, BigDecimal(actualUsd))
       case _ => None
+
+  /** The per-turn USD delta carried by an exported `cost.update` action (§19, [[CostUpdateKind]]), used by
+    * [[RebuildInstanceState]]'s B3 committed-spend fan-in and the daemon's `budget.finalize` trigger. `None` when
+    * `exported` is not a `cost.update` or lacks a numeric `payload.usd`.
+    */
+  def costUpdateUsd(exported: ujson.Value): Option[BigDecimal] =
+    exported.objOpt.flatMap { obj =>
+      val isCostUpdate = obj.get("kind").flatMap(_.strOpt).contains(CostUpdateKind)
+      if !isCostUpdate then None
+      else obj.get("payload").flatMap(_.objOpt).flatMap(_.get("usd")).flatMap(_.numOpt).map(BigDecimal(_))
+    }
 
 /** §6.4 — one entry in the durable instance log. The instance-scoped analogue of `io.forge.core.log.Action`: the same
   * `{seq, ts, kind, payload}` wire skeleton (no `feature`/`piece`/`actor`/`role` — those are per-feature concerns

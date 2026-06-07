@@ -44,6 +44,12 @@ object Daemon:
     *   - `broker-credentials` (`{workerId, repo}`) → drive the [[CredentialBroker]] seam (Task 4.3.3, O6): resolve the
     *     short-lived host-isolated credentials a containerised worker needs and answer `{env, missing}`. A broker
     *     refusal (no broker, or a required secret unconfigured) is an `InternalError` carrying the reason.
+    *   - `reserve-budget` (`{workerId, estimateUsd}`) → the B2 reservation handshake (Task 4.3.5): under the
+    *     single-writer gate, authorize `estimate` against the per-workstream / per-instance [[BudgetPolicy]] caps and
+    *     record a durable `budget.reserve` + `budget.grant`/`budget.refuse`, answering `{granted, reservationId?,
+    *     reason?}`. A *refuse* is a normal protocol outcome (`granted: false`), **not** a JSON-RPC error — the worker
+    *     holds on it rather than failing. Finalization is implicit: the worker's exported `cost.update` (a
+    *     `worker-event`) clears the reservation + fans its actual spend into the committed totals.
     *   - `subscribe` → the live aggregated per-worker feed ([[DaemonState.subscribe]]), one response line per event,
     *     seeded with the rebuilt exported-feed tail. Long-lived: the connection stays open until the client disconnects
     *     or the daemon shuts down.
@@ -54,7 +60,8 @@ object Daemon:
       state: DaemonState,
       shutdown: Deferred[IO, Unit],
       supervisor: Supervisor = Supervisor.noop,
-      broker: CredentialBroker = CredentialBroker.noop
+      broker: CredentialBroker = CredentialBroker.noop,
+      budget: BudgetPolicy = BudgetPolicy.unlimited
   ): DaemonSocketServer.Handler = {
     case req if req.method == "status" =>
       Stream.eval(state.snapshot.map(s => JsonRpc.Response.ok(req.id, s.toStatusJson)))
@@ -70,6 +77,8 @@ object Daemon:
       Stream.eval(spawnWorker(supervisor, req))
     case req if req.method == "broker-credentials" =>
       Stream.eval(brokerCredentials(broker, req))
+    case req if req.method == "reserve-budget" =>
+      Stream.eval(reserveBudget(state, budget, req))
     case req if req.method == "subscribe" =>
       state.subscribe().map(event => JsonRpc.Response.ok(req.id, eventWire(event)))
     case req if req.method == "shutdown" =>
@@ -138,14 +147,33 @@ object Daemon:
     WorkstreamId(s"ws-${(used.maxOption.getOrElse(0)) + 1}")
 
   /** `worker-event` (`{workerId, event}`) → a `worker.event` append carrying one exported per-feature event verbatim.
+    *
+    * When the exported event is a §19 `cost.update` and the worker holds an outstanding B2 reservation, the daemon also
+    * appends a `budget.finalize` in the **same** atomic write (under [[DaemonState.modify]]) — the implicit B2
+    * finalization (Task 4.3.5): the `cost.update` fan-in (in the fold) moves the actual spend into the committed
+    * totals, and the finalize releases the worker's outstanding reservation. Reading the pre-event snapshot's
+    * reservation under the gate is what makes the pair atomic with respect to a concurrent reserver.
     */
   private def workerEvent(state: DaemonState, req: JsonRpc.Request): IO[JsonRpc.Response] =
     val parsed =
       for
         workerId <- strField(req.params, "workerId")
         event <- field(req.params, "event")
-      yield InstanceEvent.WorkerEvent(workerId, event)
-    recordOrReject(state, req, parsed)(_ => ujson.Obj("accepted" -> ujson.Bool(true)))
+      yield (workerId, event)
+    parsed match
+      case Left(detail) => IO.pure(JsonRpc.Response.fail(req.id, JsonRpc.RpcError.invalidParams(detail)))
+      case Right((workerId, exported)) =>
+        state
+          .modify { snap =>
+            val workerEvent = InstanceEvent.WorkerEvent(workerId, exported)
+            val finalize =
+              for
+                usd <- InstanceEvent.costUpdateUsd(exported)
+                reservation <- snap.reservations.get(workerId)
+              yield InstanceEvent.BudgetFinalize(workerId, reservation.reservationId, usd)
+            IO.pure((workerEvent +: finalize.toVector, ()))
+          }
+          .as(JsonRpc.Response.ok(req.id, ujson.Obj("accepted" -> ujson.Bool(true))))
 
   /** `spawn-worker` (`{workstreamId, repo, feature}`) → drive the [[Supervisor]] seam (Task 4.2.5): provision an
     * isolated clone, launch the `forge worker` child, record `worker.spawned`, and activate the workstream. Answers
@@ -196,6 +224,57 @@ object Daemon:
           case Left(err) => JsonRpc.Response.fail(req.id, JsonRpc.RpcError.internal(err.message))
         }
 
+  /** `reserve-budget` (`{workerId, estimateUsd}`) → the B2 reservation handshake (Task 4.3.5). Resolves the worker's
+    * owning workstream from its record, then **under the single-writer gate** ([[DaemonState.modify]] — so two
+    * concurrent reservers cannot both win against the same headroom) authorizes `estimate` against the [[BudgetPolicy]]
+    * caps. On grant: append `budget.reserve` + `budget.grant` (a fresh `reservationId`) and answer `{granted: true,
+    * reservationId}`. On refuse: append `budget.reserve` + `budget.refuse` and answer `{granted: false, reason}`. A
+    * refuse is a normal protocol outcome (a JSON-RPC *success* with `granted: false`), not an error — the worker holds.
+    * A malformed param is `InvalidParams`. The `reservationId` is stamped into the durable `budget.grant`, so a replay
+    * rebuilds the same reservation table deterministically.
+    */
+  private def reserveBudget(state: DaemonState, budget: BudgetPolicy, req: JsonRpc.Request): IO[JsonRpc.Response] =
+    val parsed =
+      for
+        workerId <- strField(req.params, "workerId")
+        estimate <- numField(req.params, "estimateUsd")
+      yield (workerId, BigDecimal(estimate))
+    parsed match
+      case Left(detail) => IO.pure(JsonRpc.Response.fail(req.id, JsonRpc.RpcError.invalidParams(detail)))
+      case Right((workerId, estimate)) =>
+        state
+          .modify { snap =>
+            val workstreamId = snap.worker(workerId).flatMap(_.workstreamId)
+            if budget.authorize(snap, workerId, workstreamId, estimate) then
+              IO(java.util.UUID.randomUUID().toString).map { reservationId =>
+                val events = Vector(
+                  InstanceEvent.BudgetReserve(workerId, workstreamId, estimate),
+                  InstanceEvent.BudgetGrant(workerId, workstreamId, reservationId, estimate)
+                )
+                (events, grantWire(reservationId))
+              }
+            else
+              val reason =
+                s"budget cap reached: reserving $$$estimate would oversubscribe the configured per-workstream/" +
+                  "per-instance cap"
+              val events = Vector(
+                InstanceEvent.BudgetReserve(workerId, workstreamId, estimate),
+                InstanceEvent.BudgetRefuse(workerId, workstreamId, estimate, reason)
+              )
+              IO.pure((events, refuseWire(reason)))
+          }
+          .map(body => JsonRpc.Response.ok(req.id, body))
+
+  /** The on-the-wire JSON for a granted reservation: `{granted: true, reservationId}`. */
+  private def grantWire(reservationId: String): ujson.Value =
+    ujson.Obj("granted" -> ujson.Bool(true), "reservationId" -> ujson.Str(reservationId))
+
+  /** The on-the-wire JSON for a refused reservation: `{granted: false, reason}`. A normal protocol outcome the worker
+    * holds on — not a JSON-RPC error.
+    */
+  private def refuseWire(reason: String): ujson.Value =
+    ujson.Obj("granted" -> ujson.Bool(false), "reason" -> ujson.Str(reason))
+
   /** The on-the-wire JSON for brokered credentials: `{env: {<key>: <secret>}, missing: [<key>]}`. The `env` map carries
     * the secret values the worker injects into its environment; `missing` lists optional agent-auth keys the host had
     * not configured (non-secret, for the worker's diagnostics).
@@ -232,6 +311,11 @@ object Daemon:
   private def field(params: ujson.Value, name: String): Either[String, ujson.Value] =
     params.objOpt.flatMap(_.get(name)).toRight(s"missing '$name'")
 
+  /** Extract a required numeric field from a JSON-RPC `params` object, or a human reason for an `InvalidParams` error.
+    */
+  private def numField(params: ujson.Value, field: String): Either[String, Double] =
+    params.objOpt.flatMap(_.get(field)).flatMap(_.numOpt).toRight(s"missing or non-numeric '$field'")
+
   /** Serve the instance socket until `shutdown` completes, then release it. Completes normally on shutdown; cancelling
     * the surrounding fiber (e.g. SIGINT under `IOApp`) also tears the socket down via the server resource's finalizer.
     */
@@ -240,10 +324,11 @@ object Daemon:
       state: DaemonState,
       shutdown: Deferred[IO, Unit],
       supervisor: Supervisor = Supervisor.noop,
-      broker: CredentialBroker = CredentialBroker.noop
+      broker: CredentialBroker = CredentialBroker.noop,
+      budget: BudgetPolicy = BudgetPolicy.unlimited
   ): IO[Unit] =
     DaemonSocketServer
-      .serve(socketPath, handler(state, shutdown, supervisor, broker))
+      .serve(socketPath, handler(state, shutdown, supervisor, broker, budget))
       .interruptWhen(shutdown.get.attempt)
       .compile
       .drain

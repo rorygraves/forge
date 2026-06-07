@@ -20,13 +20,16 @@ object RebuildInstanceState:
     *
     * v2 (Task 4.2.4) — [[InstanceState]] gained `workstreams` and [[WorkerRecord]] gained
     * `workstreamId`/`checkoutRoot`/`pid`/`exitCode`. v3 (Task 4.3.4) — [[WorkerRecord]] gained `containerId` and `pid`
-    * became one of two optional liveness keys (a containerised worker carries `containerId`, not `pid`). A
-    * stale-version cache fails the version check in [[FileInstanceStateCache]] and is rebuilt from the
-    * (forward-compatible) log.
+    * became one of two optional liveness keys (a containerised worker carries `containerId`, not `pid`). v4 (Task
+    * 4.3.5, B2) — [[InstanceState]] gained the budget aggregates (`committedUsd` / `committedByWorkstream`) + the
+    * outstanding-reservation table (`reservations`). A stale-version cache fails the version check in
+    * [[FileInstanceStateCache]] and is rebuilt from the (forward-compatible) log.
     */
-  val CurrentSchemaVersion: Int = 3
+  val CurrentSchemaVersion: Int = 4
 
-  /** The empty state — no boots seen, no workers, no workstreams. The fold seed and the "fresh instance" value. */
+  /** The empty state — no boots seen, no workers, no workstreams, no spend. The fold seed and the "fresh instance"
+    * value.
+    */
   val empty: InstanceState =
     InstanceState(CurrentSchemaVersion, bootCount = 0, workers = Vector.empty, workstreams = Vector.empty)
 
@@ -64,7 +67,14 @@ object RebuildInstanceState:
         state.updateRegisteredWorker(workerId)(_.copy(status = status))
 
       case InstanceEvent.WorkerEvent(workerId, exported) =>
-        state.updateRegisteredWorker(workerId)(w => w.copy(events = w.events :+ exported))
+        // Append the exported event to the worker's feed tail, AND — when it is a `cost.update` (§19) — fan its per-turn
+        // USD delta into the committed-spend totals (the B2 fan-in backing both the authorization decision and the
+        // cockpit spend view). The fan-in is the sole writer of committed spend; `budget.finalize` only releases the
+        // outstanding reservation, so a turn's actual cost is never double-counted.
+        val appended = state.updateRegisteredWorker(workerId)(w => w.copy(events = w.events :+ exported))
+        InstanceEvent.costUpdateUsd(exported) match
+          case Some(usd) => appended.addCommitted(appended.worker(workerId).flatMap(_.workstreamId), usd)
+          case None => appended
 
       case InstanceEvent.WorkstreamCreated(workstreamId, goal) =>
         // Upsert: a fresh workstream seeds a Planning record; a duplicate create updates the goal but preserves the
@@ -116,7 +126,30 @@ object RebuildInstanceState:
           }
 
       case InstanceEvent.WorkerExited(workerId, exitCode) =>
-        state.updateRegisteredWorker(workerId)(_.copy(exitCode = Some(exitCode)))
+        // Record the exit AND release any reservation the worker still held — a dead worker holds no budget (the §8
+        // reconciliation-lite; the TTL/grant-reclaim hardening is 4.5).
+        val exited = state.updateRegisteredWorker(workerId)(_.copy(exitCode = Some(exitCode)))
+        exited.copy(reservations = exited.reservations - workerId)
+
+      case InstanceEvent.BudgetReserve(_, _, _) =>
+        state // audit breadcrumb — the deciding grant/refuse carries the aggregate effect
+
+      case InstanceEvent.BudgetGrant(workerId, workstreamId, reservationId, estimateUsd) =>
+        // A fresh grant REPLACES the worker's prior reservation (a worker drives sequentially ⇒ one session in flight),
+        // so a missing finalize cannot leak outstanding headroom across that worker's sessions.
+        state.copy(reservations =
+          state.reservations.updated(workerId, BudgetReservation(reservationId, workstreamId, estimateUsd))
+        )
+
+      case InstanceEvent.BudgetRefuse(_, _, _, _) =>
+        state // audit breadcrumb — nothing was reserved
+
+      case InstanceEvent.BudgetFinalize(workerId, reservationId, _) =>
+        // Clear the worker's reservation iff it is the one being finalized; a late/duplicate settle for an
+        // already-replaced reservation is a no-op. Committed spend is folded by the `cost.update` fan-in, not here.
+        state.reservations.get(workerId) match
+          case Some(r) if r.reservationId == reservationId => state.copy(reservations = state.reservations - workerId)
+          case _ => state
 
 /** A worker as the daemon sees it — a *record* plus its exported per-feature event feed. In Slice 4.1 a worker was only
   * a record + feed; Slice 4.2 (Task 4.2.4) adds the daemon-side **spawn** fields a supervised process carries.
@@ -163,19 +196,68 @@ object WorkerRecord:
   def registered(workerId: String, repo: String, feature: FeatureId): WorkerRecord =
     WorkerRecord(workerId, repo, feature, RegisteredStatus, Vector.empty)
 
-/** The rebuildable instance projection (§6.4): how many times the supervisor has booted plus the per-worker records and
-  * (Task 4.2.4) the per-workstream coordination objects. Persisted by [[FileInstanceStateCache]] and rebuilt by
-  * [[RebuildInstanceState.fold]]; the daemon serves its `status` snapshot from it.
+/** One outstanding (granted, not-yet-finalized) B2 budget reservation (§8, Task 4.3.5) — the headroom a worker holds
+  * for an in-flight agent session. Keyed in [[InstanceState.reservations]] by `workerId` (a worker drives sequentially
+  * ⇒ at most one outstanding at a time; a fresh grant replaces the prior). `estimateUsd` is the coarse per-session
+  * estimate (O11) the authorization decision counts; the real spend lands in the committed totals via the `cost.update`
+  * fan-in.
+  */
+final case class BudgetReservation(
+    reservationId: String,
+    workstreamId: Option[WorkstreamId],
+    estimateUsd: BigDecimal
+) derives ReadWriter
+
+/** The rebuildable instance projection (§6.4): how many times the supervisor has booted, the per-worker records, (Task
+  * 4.2.4) the per-workstream coordination objects, and (Task 4.3.5, B2) the budget aggregates — committed spend
+  * (per-instance + per-workstream, fanned in from each worker's exported `cost.update`) and the outstanding-reservation
+  * table. Persisted by [[FileInstanceStateCache]] and rebuilt by [[RebuildInstanceState.fold]]; the daemon serves its
+  * `status` snapshot — and its reservation authorization decision — from it.
   */
 final case class InstanceState(
     schemaVersion: Int,
     bootCount: Int,
     workers: Vector[WorkerRecord],
-    workstreams: Vector[Workstream] = Vector.empty
+    workstreams: Vector[Workstream] = Vector.empty,
+    // B2 (Task 4.3.5): committed (finalized) spend, fanned in from `cost.update`. `committedByWorkstream` is keyed by the
+    // workstream id's string value (a plain JSON object on the wire). `reservations` is the outstanding table, keyed by
+    // `workerId`.
+    committedUsd: BigDecimal = BigDecimal(0),
+    committedByWorkstream: Map[String, BigDecimal] = Map.empty,
+    reservations: Map[String, BudgetReservation] = Map.empty
 ) derives ReadWriter:
 
   /** The worker with `workerId`, if registered. */
   def worker(workerId: String): Option[WorkerRecord] = workers.find(_.workerId == workerId)
+
+  /** Total outstanding (granted, not-yet-finalized) reservation estimate across all workers, optionally excluding one
+    * worker's own current reservation (so a re-reserving worker is not counted against itself). Backs the per-instance
+    * authorization check.
+    */
+  def outstandingUsd(excludingWorker: Option[String] = None): BigDecimal =
+    reservations.iterator.collect { case (wid, r) if !excludingWorker.contains(wid) => r.estimateUsd }.sum
+
+  /** Outstanding reservation estimate for one workstream (same exclusion semantics as [[outstandingUsd]]). Backs the
+    * per-workstream authorization check.
+    */
+  def outstandingUsdForWorkstream(ws: WorkstreamId, excludingWorker: Option[String] = None): BigDecimal =
+    reservations.iterator.collect {
+      case (wid, r) if !excludingWorker.contains(wid) && r.workstreamId.contains(ws) => r.estimateUsd
+    }.sum
+
+  /** Committed (finalized) spend for one workstream. */
+  def committedUsdForWorkstream(ws: WorkstreamId): BigDecimal = committedByWorkstream.getOrElse(ws.value, BigDecimal(0))
+
+  /** Fan a per-turn `cost.update` USD delta into the committed totals (per-instance always; per-workstream when the
+    * worker has an owning workstream). The fold's sole writer of committed spend.
+    */
+  private[instance] def addCommitted(ws: Option[WorkstreamId], usd: BigDecimal): InstanceState =
+    copy(
+      committedUsd = committedUsd + usd,
+      committedByWorkstream = ws.fold(committedByWorkstream)(id =>
+        committedByWorkstream.updated(id.value, committedByWorkstream.getOrElse(id.value, BigDecimal(0)) + usd)
+      )
+    )
 
   /** The workstream with `id`, if created. */
   def workstream(id: WorkstreamId): Option[Workstream] = workstreams.find(_.id == id)
@@ -233,6 +315,8 @@ final case class InstanceState(
     ujson.Obj(
       "schemaVersion" -> ujson.Num(schemaVersion.toDouble),
       "bootCount" -> ujson.Num(bootCount.toDouble),
+      "committedUsd" -> ujson.Num(committedUsd.toDouble),
+      "outstandingUsd" -> ujson.Num(outstandingUsd().toDouble),
       "workers" -> ujson.Arr(workers.map(workerJson)*),
       "workstreams" -> ujson.Arr(workstreams.map(workstreamJson)*)
     )
@@ -258,6 +342,8 @@ final case class InstanceState(
       "workstreamId" -> ujson.Str(ws.id.value),
       "goal" -> ujson.Str(ws.goal),
       "status" -> ujson.Str(WorkstreamStatus.name(ws.status)),
+      "committedUsd" -> ujson.Num(committedUsdForWorkstream(ws.id).toDouble),
+      "outstandingUsd" -> ujson.Num(outstandingUsdForWorkstream(ws.id).toDouble),
       "workers" -> ujson.Arr(ws.workers.map(ujson.Str(_))*),
       "attention" -> ujson.Arr(
         attention(ws.id).map(a =>

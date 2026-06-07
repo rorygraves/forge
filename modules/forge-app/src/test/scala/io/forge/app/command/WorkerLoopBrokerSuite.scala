@@ -26,6 +26,8 @@ class WorkerLoopBrokerSuite extends CatsEffectSuite:
     def event(event: ujson.Value): IO[Unit] = calls.update(_ :+ "event")
     def brokerCredentials(repo: String): IO[Map[String, String]] =
       calls.update(_ :+ s"broker:$repo").as(Map("GH_TOKEN" -> "scoped"))
+    def reserveBudget(estimateUsd: BigDecimal): IO[io.forge.app.orchestrator.ReservationOutcome] =
+      calls.update(_ :+ s"reserve:$estimateUsd").as(io.forge.app.orchestrator.ReservationOutcome.Granted("res-1"))
 
   /** An empty clone dir (no manifest) the loop re-roots its paths onto, cleaned up after. */
   private val emptyClone: Resource[IO, ForgePaths] =

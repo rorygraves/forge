@@ -51,12 +51,17 @@ object OrchestratorBuilder:
     * containerised worker it carries the short-lived, host-isolated credentials brokered over the control channel (O6)
     * — a scoped `gh` token + any configured agent API keys — so a container with no host home mount still
     * authenticates.
+    *
+    * `reserver` is the B2 aggregate budget seam (Task 4.3.5). `BudgetReserver.noop` (the default) for a non-daemon
+    * `forge run` — no aggregate budget, the launch path is byte-identical to pre-4.3.5. A daemon-spawned worker passes
+    * a `ReportingBudgetReserver` so each driver spawn is authorized against the fleet cap (and holds on a refuse).
     */
   def build(
       mode: Mode,
       paths: ForgePaths,
       config: ForgeConfig,
-      credentialEnv: Map[String, String] = Map.empty
+      credentialEnv: Map[String, String] = Map.empty,
+      reserver: BudgetReserver = BudgetReserver.noop
   ): IO[(Orchestrator, ActionLog)] =
     val pairing = RolePairing.of(mode)
     for
@@ -89,7 +94,8 @@ object OrchestratorBuilder:
           docSync,
           paths,
           config,
-          commitIdentity
+          commitIdentity,
+          reserver
         )
       val orchestrator = new Orchestrator(
         sideEffects,

@@ -67,7 +67,8 @@ class RealSideEffectsSuite extends munit.FunSuite:
       connector: Connector = new FakeConnector,
       headBranch: BranchName = BranchName("forge/feat/p1"),
       commitIdentity: Option[CommitIdentity] = None,
-      worktreeClean: Boolean = true
+      worktreeClean: Boolean = true,
+      reserver: BudgetReserver = BudgetReserver.noop
   ): RealSideEffects =
     val paths = ForgePaths(repoRoot, repoRoot / "home")
     new RealSideEffects(
@@ -80,8 +81,13 @@ class RealSideEffectsSuite extends munit.FunSuite:
       docSync = new FakeDocSync,
       paths = paths,
       config = ForgeConfig.Default,
-      commitIdentity = commitIdentity
+      commitIdentity = commitIdentity,
+      reserver = reserver
     )
+
+  /** A [[BudgetReserver]] that records each pre-spawn reservation into `calls` (for asserting the §8 B2 wrap fires). */
+  private final class RecordingReserver(calls: ArrayBuffer[String]) extends BudgetReserver:
+    def reserveBeforeSpawn: IO[Unit] = IO(calls += "reserve").void
 
   private def feature(state: FsmState) =
     featureAt(featureId, oneePieceManifest, state)
@@ -215,6 +221,23 @@ class RealSideEffectsSuite extends munit.FunSuite:
     val failures = os.read(repo / ".forge" / "specs" / "feat" / "pieces" / "p1.failures.md")
     assert(failures.contains("backend") && failures.contains("PR #7"), failures)
     assert(failures.contains("formatter") || failures.contains("failing check"), failures)
+
+  // --- B2 reserve-before-spawn (§8, Task 4.3.5) -----------------------------
+
+  tempFixture.test("each driver launch reserves aggregate budget before spawning the session"): repo =>
+    val calls = ArrayBuffer.empty[String]
+    val se = sut(repo, reserver = new RecordingReserver(calls))
+    val m = mkManifest(featureId, Vector(piecePending(p1, 1).copy(prNumber = Some(PrNumber(7)))))
+    val feat = featureAt(featureId, m, FsmState.PieceFixingUp(p1, PrNumber(7), 1))
+    se.launchFixup(feat, p1, 1).unsafeRunSync()
+    se.launchBuildFixup(feat, p1, 1).unsafeRunSync()
+    // one reservation per driver spawn (the shared `reserving` wrap fires on each launch path)
+    assertEquals(calls.count(_ == "reserve"), 2)
+
+  tempFixture.test("the default (noop) reserver leaves the launch path unchanged"): repo =>
+    val se = sut(repo) // BudgetReserver.noop
+    // a launch succeeds with no reservation seam wired (the frozen `forge run` behaviour)
+    se.launchBuildFixup(feature(FsmState.PieceImplementing(p1)), p1, 1).unsafeRunSync()
 
   // --- requiredChecksOverlay (§8 overlay delegation) ------------------------
 
