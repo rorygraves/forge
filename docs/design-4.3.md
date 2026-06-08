@@ -29,7 +29,8 @@
 > (4.4) and the **aggregate-budget hardening / parallel edge cases** (4.5 —
 > reservation TTL/expiry, release-on-failed-spawn, oversubscription edges).
 >
-> **Status:** _open (2026-06-06)._ Task 4.3.1 (the OCI runtime seam spike) landing
+> **Status:** _✅ closed 2026-06-08 (docs-only close-out; live dogfood #8 deferred to
+> Slice 4.4's live exercise, ratified with the user)._ Task 4.3.1 (the OCI runtime seam spike) landing
 > first per CLAUDE.md "run code earlier": the riskiest *new* contract in 4.3 is the
 > **container runtime boundary** (O7) — an external OCI runtime the daemon shells
 > out to, whose process model (detached, daemon-owned, reattach-by-id), exit-code
@@ -38,8 +39,9 @@
 > all sit. The `Forgefile` (4.3.2), broker (4.3.3), and B2 protocol (4.3.5) are
 > comparatively mechanical (a parser, a control-channel handshake, more instance-log
 > events + a reservation table over the existing single-writer gate). So a runnable
-> `docker run`↔await-exit↔kill spike goes in front. **Tasks 4.3.1–4.3.5 landed;
-> Task 4.3.6 (proof + close-out) open.**
+> `docker run`↔await-exit↔kill spike goes in front. **All Tasks 4.3.1–4.3.6 ✅ landed;
+> slice closed 2026-06-08** (docs-only close-out — the whole-section review landed clean
+> with F1/F2/F3 fixed; the live dogfood #8 is deferred to Slice 4.4's live exercise).
 
 ---
 
@@ -190,7 +192,7 @@ container runtime also exposes), so the supervisor is unchanged in shape.
   granularity = the per-session cap (O11 coarse option; finalization corrects it);
   the TTL/expiry + release-on-failed-spawn edges are **4.5**.
 
-- [ ] **Task 4.3.6 — proof + close-out (exit criterion).** A test + a live `forge
+- [x] **Task 4.3.6 — proof + close-out (exit criterion).** A test + a live `forge
   daemon` exercise (dogfood #8) that spawns a worker **inside a container** on an
   isolated clone with isolated credentials, has it reach the daemon over the mounted
   socket and run the v1 loop, and completes a budget reservation cycle (reserve →
@@ -439,10 +441,44 @@ container runtime also exposes), so the supervisor is unchanged in shape.
   the user (2026-06-07: "defer dogfood; close on fixes+proofs"), the **live dogfood #8** (real `forge daemon --container`
   against a real repo, needs a scoped PAT + agent keys + real spend) and the **roadmap §5 sub-slice 4.3 flip** are the
   only remaining items.
+- **2026-06-08** — **Task 4.3.6 closed; Slice 4.3 closed (docs-only close-out, dogfood #8
+  deferred — ratified with the user).** Per the user (2026-06-07: "defer dogfood; close on
+  fixes+proofs", re-confirmed 2026-06-08), the slice closes on the landed code + proofs +
+  the clean whole-section review (F1/F2/F3 fixed) with the **live dogfood #8 deferred** rather
+  than gating the close. The exit criterion (§0) is met **in code + automated proof** — the
+  `OciRuntime`/`DockerRuntime` real-container lifecycle (opt-in `FORGE_IT_RUN_DOCKER`, proven
+  live against Docker 29.2.1 in 4.3.1/4.3.4), `WorkerDaemonHandshakeSuite` (the worker-side
+  register→broker→reserve→grant→finalize / refuse→hold tie-together over a served daemon), and
+  the budget/credential/TCP suites — but the **end-to-end `forge daemon --container` against a
+  real repo with real spend** is not yet run live; it is homed as Slice 4.4's live exercise (the
+  cockpit-TUI slice needs a live multi-worker run anyway; runbook
+  [`dogfood/4.3-container.md`](dogfood/4.3-container.md) is ready, needs a scoped PAT + agent
+  keys). **Carry-forward walk:** every §4 item confirmed durably homed — container transport→TCP
+  *landed in 4.3* (not deferred); Cockpit TUI→**4.4**; aggregate-budget hardening / O11 estimate
+  granularity / worker feed-resumption §6.4(d)→**4.5** + contract §11 / design-rationale; devcontainer
+  reuse, heavier credential sourcing (PAT minting / keychain-OAuth / `CredentialPolicy` persistence),
+  reviewer-spawn reservation, non-Docker OCI runtimes, O10 mirror cache→on-demand follow-ups (added
+  only if a dogfood needs them); no-host-home-mount→*wired in 4.3.4*, asserted in the always-on
+  `ContainerRuntimeSuite`. **§23 spec deltas already folded** during 4.3.6 prep + the TCP entry
+  (`forge-design-2.0.md` §6.1/§6.3/§6.4/§7/§8, O2/O9/O11, the `worker.spawned` pid→`containerId`
+  generalisation, the `--container`/`--socket`/`--worker-root` worker contract, the four `budget.*`
+  events + `InstanceState` v4, the `reserve-budget` RPC, the `worker-event` at-least-once dedup
+  / cache schema v5, the container-mode `git` credential overlay). `sbt compile` green. Roadmap §5
+  sub-slice 4.3 bullet flipped → **✅ closed 2026-06-08**.
 
 ---
 
 ## 4. Carry-forward / deferred
+
+- **Live dogfood #8 (end-to-end containerised run) → Slice 4.4 live exercise.** The slice
+  closed on landed code + automated proofs + a clean whole-section review; the live
+  `forge daemon --container` against a real repo (real container worker reaching the daemon
+  over TCP, a real reserve→grant→finalize budget cycle, a real PR push under the scoped
+  `gh` token, real spend) was **not** run live — deferred per the user ("defer dogfood; close
+  on fixes+proofs"). It is homed as part of **Slice 4.4**'s live cockpit exercise (which needs
+  a live multi-worker run regardless), needs a scoped PAT + agent API keys + a built
+  `forge-worker:latest` image, and the runbook [`dogfood/4.3-container.md`](dogfood/4.3-container.md)
+  is ready to drive it.
 
 - **Container control-channel transport → TCP (landed in 4.3, not deferred).** Found
   in the 4.3.6 dogfood prep: a container **cannot** connect to a *host-created* Unix
