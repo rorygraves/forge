@@ -60,6 +60,14 @@ enum CommandClass:
     */
   case Workstream
 
+  /** `cockpit` — Phase-4 §6.3 the operator **cockpit** TUI (Slice 4.4, Task 4.4.1). Instance-scoped like [[Daemon]] (no
+    * [[io.forge.app.config.ForgeConfig]], no connector, no per-checkout lock); it attaches to a running daemon as a
+    * read client (a `status` JSON-RPC round-trip seeds it, then a per-tick re-fetch), renders the whole fleet
+    * (workstreams → workers + attention + spend), and detaches cleanly on quit — the daemon is the sole writer
+    * (§6.3.1), so the cockpit never mutates state. Parsed via [[CliParser.parseCockpit]] into a [[CockpitCommand]].
+    */
+  case Cockpit
+
 /** Phase-1 parse result: enough to route resource setup, with per-command args deferred to [[CliParser.phase2]]. */
 final case class Invocation(
     repoRoot: Option[String],
@@ -106,6 +114,12 @@ object DaemonCommand:
 
   /** `forge daemon status` — render a running daemon's status snapshot (a `status` JSON-RPC call). */
   final case class Status(instance: Option[InstanceName]) extends DaemonCommand
+
+/** Parsed Phase-4 cockpit command ([[CommandClass.Cockpit]], Slice 4.4 Task 4.4.1) — `forge cockpit [--instance
+  * <name>]`. Carries an **optional** target instance (`Some` from `--instance <name>`, else the sole-instance fallback
+  * resolved by the handler), exactly like [[DaemonCommand]]. A read-only client of a running daemon.
+  */
+final case class CockpitCommand(instance: Option[InstanceName])
 
 /** Parsed Phase-4 hidden worker command (Task 4.2.1 / 4.3.4) — the [[CommandClass.Worker]] payload. The target
   * `instance`, the `workerId` it was assigned, the `repo` it drives, and the `feature` are **required** (the daemon
@@ -258,6 +272,7 @@ object CliParser:
       case "unlock" => Right((CommandClass.UnlockForce, false))
       case "init-instance" | "add-repo" | "list-repos" => Right((CommandClass.Instance, false))
       case "daemon" => Right((CommandClass.Daemon, false))
+      case "cockpit" => Right((CommandClass.Cockpit, false))
       case "workstream" => Right((CommandClass.Workstream, false))
       // `worker list` is the operator client read (Task 4.2.4); the bare/flag form is the hidden daemon-spawned process
       // (Task 4.2.1). needsConnector is false for both — the real loop builds its own connector under the worker's
@@ -399,6 +414,14 @@ object CliParser:
         case Some("status") => Right(DaemonCommand.Status(instance))
         case Some(other) => Left(CliError.UnknownDaemonSubcommand(other))
     }
+
+  /** Parse a [[CommandClass.Cockpit]] invocation (`cockpit [--instance <name>]`) into a [[CockpitCommand]] (Slice 4.4
+    * Task 4.4.1). No subcommand — the cockpit takes only the optional `--instance` (pulled out wherever it appears);
+    * any remaining tokens are ignored (future flags slot in here). Like the daemon client commands it is CLI-layer-only
+    * and instance-scoped.
+    */
+  def parseCockpit(rest: Vector[String]): Either[CliError, CockpitCommand] =
+    extractInstance(rest).map((instance, _) => CockpitCommand(instance))
 
   /** Parse a [[CommandClass.Worker]] invocation (`worker --instance <name> --worker-id <id> --repo <path> --feature
     * <id>`) into a [[WorkerCommand]] (Task 4.2.1). The fifth parse entry point — every field is a **required** flag

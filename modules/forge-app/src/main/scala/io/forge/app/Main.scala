@@ -6,6 +6,7 @@ import io.forge.app.bootstrap.AssetInstaller
 import io.forge.app.cli.{CliError, CliParser, CommandClass, Invocation}
 import io.forge.app.command.{
   unlock,
+  CockpitCommands,
   CommandRouter,
   DaemonCommands,
   InstanceCommands,
@@ -71,6 +72,7 @@ object Main extends IOApp:
       case CommandClass.Daemon => runDaemon(invocation, paths)
       case CommandClass.Worker => runWorker(invocation, paths)
       case CommandClass.Workstream => runWorkstream(invocation, paths)
+      case CommandClass.Cockpit => runCockpit(invocation, paths)
 
   // --- step 2: repo-root ----------------------------------------------------
 
@@ -140,6 +142,17 @@ object Main extends IOApp:
     CliParser.parseWorkstream(invocation.name, invocation.rest) match
       case Left(err) => usageError(err)
       case Right(command) => WorkstreamCommands.run(paths.home, command)
+
+  // --- cockpit: operator TUI client (Task 4.4.1) ----------------------------
+
+  /** Phase-4 cockpit TUI (`forge cockpit [--instance <name>]`). Instance-scoped like the daemon/workstream commands —
+    * no config / assets / per-checkout lock; only `paths.home` matters. Attaches to a running daemon as a read client
+    * ([[CockpitCommands]]).
+    */
+  private def runCockpit(invocation: Invocation, paths: ForgePaths): IO[ExitCode] =
+    CliParser.parseCockpit(invocation.rest) match
+      case Left(err) => usageError(err)
+      case Right(command) => CockpitCommands.run(paths.home, command)
 
   // --- read-only: config, no lock -------------------------------------------
 
