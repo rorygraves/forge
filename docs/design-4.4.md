@@ -149,13 +149,20 @@ the read path (Tasks 4.4.1–4.4.3); only the *control* path adds RPCs.
     registered workers (host-process or stub — the live *container* fleet is 4.4.6),
     rendering the fleet + detaching cleanly.
 
-- [ ] **Task 4.4.2 — live feed via `subscribe` + clean attach/detach.** Drive cockpit
-  updates off the B3 `DaemonClient.subscribe` stream (fold each pushed `InstanceEvent`
-  into the model) rather than only re-polling `status`; prove attach → observe live
-  events → detach (q / Ctrl-C) leaves the daemon + every worker running (the
-  exit-criterion attach/detach bar) + a reconnect-on-drop policy. Resolve the
-  termflow-`Future` vs fs2-`Stream` bridge (a background fiber feeding a queue the
-  reload drains, or a `Sub` over the stream).
+- [x] **Task 4.4.2 — live feed via `subscribe` + clean attach/detach.** Drive cockpit
+  updates off the B3 `DaemonClient.subscribe` stream rather than only re-polling
+  `status`; prove attach → observe live events → detach (q / Ctrl-C) leaves the daemon
+  + every worker running (the exit-criterion attach/detach bar) + a reconnect-on-drop
+  policy. Resolve the termflow-`Future` vs fs2-`Stream` bridge (a background fiber
+  feeding the queue the reload drains). **Ratified bridge: subscribe-triggered status
+  refresh** — each pushed event is a *change signal* that triggers a debounced `status`
+  re-fetch into a shared `Ref` the render tick reads, rather than a client-side event
+  fold. The cockpit's §5 `attention` projection + §8 spend totals are derived
+  canonically in `forge-instance` (which `forge-tui` can't see) and the daemon's
+  subscribe *seed* is per-worker only (no pre-attach workstreams/budget), so a literal
+  client-side fold would duplicate load-bearing projection logic and lose pre-attach
+  state; re-fetching `status` keeps the projection canonical + lossless while staying
+  event-driven.
 
 - [ ] **Task 4.4.3 — worker drill-down + per-worker "needs a human" flagging (G5).**
   Keyboard navigation (select a workstream / worker); a selected-worker **detail pane**
@@ -237,6 +244,34 @@ the read path (Tasks 4.4.1–4.4.3); only the *control* path adds RPCs.
   with the interactive live render deferred to the Task 4.4.6 dogfood (it needs a real terminal
   + a live fleet). forge-tui 38→53, forge-app 561→566; full `sbt test` green across all modules,
   `scalafmtCheckAll` clean, ForgePaths smell sweep passes. Tasks 4.4.2–4.4.6 open.
+- **2026-06-08** — **Task 4.4.2 (live feed via `subscribe` + clean attach/detach) landed.**
+  The cockpit's data source flips from per-tick `status` polling to the B3 `subscribe`
+  stream, via the ratified **subscribe-triggered status refresh** bridge. (1) New
+  **`CockpitLiveFeed` (forge-app)** — `follow(instance, latest, settle, reconnectDelay)`
+  holds a persistent `DaemonClient.subscribe` connection; each pushed event is a *change
+  signal* that, after a `settle` debounce coalescing bursts, re-fetches `status` into a
+  shared `Ref[Option[CockpitSnapshot]]`; an RPC-error/transport-failure `fetch` leaves the
+  ref untouched (keep the last good frame); stream completion/error waits `reconnectDelay`
+  and re-subscribes (reconnect-on-drop), with an immediate `fetch` catch-up per (re)connect
+  so an empty fleet (no seed events) and a post-reconnect gap both refresh. *Why a re-fetch
+  and not a client-side event fold:* the §5 `attention` projection + §8 spend are derived
+  canonically in `forge-instance` (`AttentionReason.forStatus`, the reservation table) which
+  `forge-tui` can't see, and the daemon's subscribe *seed* replays per-worker events only (no
+  pre-attach workstreams/budget) — folding client-side would duplicate load-bearing logic +
+  lose pre-attach state. (2) **`CockpitCommands.launch` rewired** — seeds the `Ref` from one
+  `status` round-trip, hands `ForgeCockpit` a ref-reading reload thunk (`() =>
+  latest.get.unsafeToFuture()`, no per-tick network I/O), and runs
+  `CockpitLiveFeed.follow(...).background` around the blocking `ForgeCockpit.run`; quitting
+  closes the background scope → cancels the fiber → releases the subscribe socket (clean
+  detach, daemon untouched). **`ForgeCockpit` (forge-tui) is unchanged** — its `reload`
+  contract is reused verbatim; only the data behind it changed. (3) **Tests:** new real-daemon
+  **`CockpitLiveFeedSuite` (forge-app, 3)** mirroring `DaemonWorkerSubscribeSuite`'s
+  `instance`/`served` harness (a real `DaemonState` + `Daemon.serveUntilShutdown` over a real
+  socket): a recorded fleet mutation refreshes the shared snapshot off the feed; detaching
+  (cancelling) leaves the daemon answering `status`; the feed reconnects after a daemon
+  restart and surfaces a worker registered against the second daemon. forge-app 566→569; full
+  `sbt test` green across all modules, `scalafmtCheckAll` clean. Live interactive render still
+  rides the Task 4.4.6 dogfood (needs a real terminal + live fleet). Tasks 4.4.3–4.4.6 open.
 
 ---
 
