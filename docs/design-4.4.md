@@ -39,6 +39,11 @@
 > critical behaviour. The control API (Task 4.4.4) and container inspection (4.4.5)
 > are comparatively mechanical *given* a proven render path. So a runnable
 > `forge cockpit` that attaches to a real daemon and renders its fleet goes in front.
+>
+> **Quality gate update (2026-06-13).** A whole-project review found that root
+> `sbt test` can fail in aggregate even when the implicated suites pass in isolation
+> (currently a supervisor/background-lifecycle cleanup race). Fixing aggregate test
+> reliability is a priority before expanding the cockpit/control surface further.
 
 ---
 
@@ -165,6 +170,10 @@ the read path (Tasks 4.4.1–4.4.3); only the *control* path adds RPCs.
   event-driven.
 
 - [ ] **Task 4.4.3 — worker drill-down + per-worker "needs a human" flagging (G5).**
+  **Quality precondition:** restore stable aggregate `sbt test` first. The current
+  failure mode points at background supervisor/watch fibers racing temp-dir cleanup;
+  the fix should leave the root unit suite green under normal aggregate execution,
+  not only under targeted `testOnly` reruns.
   Keyboard navigation (select a workstream / worker); a selected-worker **detail pane**
   (exported event tail, FSM status, spend, liveness/container id, attention reason); the
   `attention` projection rendered as prominent badges (NHI / driver-question /
@@ -272,6 +281,13 @@ the read path (Tasks 4.4.1–4.4.3); only the *control* path adds RPCs.
   restart and surfaces a worker registered against the second daemon. forge-app 566→569; full
   `sbt test` green across all modules, `scalafmtCheckAll` clean. Live interactive render still
   rides the Task 4.4.6 dogfood (needs a real terminal + live fleet). Tasks 4.4.3–4.4.6 open.
+- **2026-06-13 — whole-project review follow-up.** The planning docs now treat root
+  `sbt test` reliability as a first-class quality gate for the active slice. Observed
+  state: `sbt scalafmtCheckAll` passes; targeted reruns of the initially implicated
+  suites pass; aggregate `sbt test` can still fail in `SupervisorSuite` with a
+  `DirectoryNotEmptyException` during temp-dir cleanup, consistent with a background
+  supervisor/watch lifecycle race. Task 4.4.3 carries the precondition to fix this
+  before adding more cockpit/control surface.
 
 ---
 

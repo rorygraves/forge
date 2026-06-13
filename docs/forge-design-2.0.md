@@ -1,6 +1,6 @@
 # Forge — design doc v2.0
 
-> A Scala meta-orchestrator that sits above Claude Code and Codex CLI, breaking features into reviewable pieces and shepherding each through design → implement → PR → merge with cross-model review and human-in-the-loop.
+> A Scala meta-orchestrator that sits above Claude Code and Codex CLI, breaking features into reviewable pieces and shepherding each through design → implement → PR → merge with configurable validation — including true cross-model review — and human-in-the-loop.
 
 **Author:** Rory  •  **Status:** v2.0 (2026-06-05) — Phase 4 (Workspace & Workstream platform): instance scope + workstreams + workers + daemon + containerised execution + parallel runs  •  **Target:** personal tool, OSS later
 
@@ -26,6 +26,7 @@ v1 is a laptop tool whose lifetime is one TUI session driving **one feature in o
 - **G3 — Daemon.** A long-running supervisor owning the instance lock, the worker fleet, spend authorization, and event aggregation; TUI and CLI are clients over a local socket.
 - **G4 — Worker isolation.** Each worker runs in its own container — an isolated full-clone checkout, pinned tool versions, host-isolated permissions — so broad-permission agent runs can't cross-contaminate and parallel work can't collide.
 - **G5 — Cockpit observability.** A multi-workstream/worker TUI that flags and accepts human input at the right stage of *each* worker (NHI, driver question, merge gate, profile/convention-PR approval), plus per-container log/process/port inspection via the daemon status API.
+- **G6 — Validation pairings stay explicit.** A worker run must be able to use same-CLI validation for cost/locality and true cross-model validation for independent review. `RolePairing` remains the seam; Phase 4/5 work must not bake in the current same-CLI resolver as a product limit.
 
 **Re-decided v1 non-goals (v1.6 §1 / §22 reject these *for v1*; v2.0 revisits them deliberately).**
 | v1 stance | v2.0 decision |
@@ -181,6 +182,7 @@ Consumed as a library, unchanged except for the four B1–B4 seams:
 - The action-log **format**, `foldEvents`, replay, `RebuildState`, restart recovery (determinism). *Location* re-roots (B1); format and semantics do not.
 - Branch/PR/CI/merge gates; `BranchManager`, `PRWatcher`, `CiReadiness`, `ChangeCollector`; the **FSM-driving poll loop** (stays in the worker, B4).
 - Connectors (Claude/Codex), the reviewer path + `Reviewed[A]` cost-fold (Slice 2.2), the Phase-3 senses.
+- Role pairing remains a configuration seam: same-CLI validation is allowed, but true cross-model validation must be supported as a configured pairing.
 - Per-session budget enforcement (§12). The aggregate authorization (B2) wraps it; it does not change.
 
 ---
@@ -233,3 +235,4 @@ v1.6 §22 is correct *for v1*; v2.0 reverses four for the new constraint set and
 **Status log.**
 - **v2.0 (2026-06-05)** — ratified. Synthesises roadmap §5 into the Phase-4 architecture contract; settled over three review rounds. Load-bearing decisions: the **worker** unit + cardinality (workstream 1—N worker 1—1 feature 1—1 checkout 1—1 container); the core bet as a **worker boundary** (B1 path · B2 budget-auth · B3 event-export · B4 process) around a frozen v1 FSM; committed `.forge/specs/` written in the **worker clone** and merged via PR (the registered repo is registry/input); the action log as **local canonical runtime** (not committed); the **FSM-driving poll stays in the worker** (daemon supervises, doesn't relocate it); **B2 reservation protocol** (reserve/grant/finalize, concurrency-safe) for aggregate caps; **§6.3.1** worker-as-sole-writer control serialization; **§6.4** daemon durability/recovery incl. the B2/O6 dependency; workstream "needs a human" as an aggregate **`attention` projection**; credential isolation a **4.3 blocker**. Rulings O1–O10 in §10; one open: O11 (reservation estimate granularity). Deferred: 4.6 cross-repo workstreams.
 - **Slice 4.3 reconciliation (2026-06-07)** — the implemented O1/O6/O7 + B2 deltas folded back into the design text (the "Implemented (4.3)" annotations in §6.4 / §7 / §8 and the O11 resolution in §10), at the Slice-4.3 close-out per CLAUDE.md "deviation is a flag, reconcile at close". Concrete contract pins now realized: the `worker.spawned` pid-xor-`containerId` topology key + cache schema v3 (§6.4); the `forge worker … --worker-root/--socket/--container` in-container contract, the two-mount no-home-no-secret-env spec, and the `forge-worker:latest` fallback image (§7); the four `budget.*` events + `InstanceState` v4 aggregates/reservation table, the `reserve-budget` `{workerId, estimateUsd}`→`{granted, reservationId?, reason?}` RPC with **refuse-is-a-success**, the implicit `cost.update`-drives-`finalize` fan-in, and the `committedUsd`/`outstandingUsd` status fields (§8); O11 resolved to the coarse per-piece estimate. Plan + audit trail: [`design-4.3.md`](design-4.3.md). No section renumbering (annotations only); the still-open hardening (TTL/expiry, release-on-failed-spawn, reviewer pre-reservation, non-root UID mapping, `InstanceConfig` cap persistence) is 4.5.
+- **Validation-mode reconciliation (2026-06-13)** — the product requirement is explicit: support true cross-model validation as well as same-CLI validation. This is not a v2 worker-boundary change; it is a role-pairing/configuration follow-up on the existing `RolePairing` seam.

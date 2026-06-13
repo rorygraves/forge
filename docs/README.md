@@ -1,76 +1,57 @@
 # Forge docs — index
 
-Start here. This index sorts the `docs/` tree into **live / forward-looking**,
-**reference**, and **closed / historical** so the active design surface is easy
-to find. (The per-slice audit trails are kept in-tree for history rather than
-deleted; git holds the full lineage either way.)
+Start here. The live design surface is intentionally small; older slice
+plans and spec revisions stay in-tree as audit trails, but the project
+does not try to maintain a full narrative history in this index.
 
-> **Direction (2026-06-02):** the roadmap is re-centered on **repo adaptation** —
-> a deterministic spine + agentic *senses* (RepoProfiler, FailureClassifier,
-> ConventionLearner) so Forge stops running blind on a repo. See
-> [`roadmap.md`](roadmap.md) §4 (Phase 3) and [`design-rationale.md`](design-rationale.md) **A5**.
-
-## Live / forward-looking — read these
+## Live / forward-looking
 
 | Doc | What it is |
 |---|---|
-| [`roadmap.md`](roadmap.md) | Multi-horizon product plan. Phase 3 = Repo Adaptation (the current pivot); Phase 4 = workspace/workstream platform; Phase 5 = cockpit. |
-| [`forge-design-2.0.md`](forge-design-2.0.md) | **Phase-4 architecture contract** (ratified 2026-06-05). The v2.0 workspace/workstream/**worker**/daemon/container design — a *worker boundary* (path · budget-auth · event-export · process) around the frozen v1 feature loop. Design only; implementation not started (sub-slices 4.0–4.6). The live *implementation* contract is still 1.16. |
-| [`forge-design-1.16.md`](forge-design-1.16.md) | **Live implementation contract** (the spec) — latest revision. Standalone-by-freeze over 1.15: restates §7.1/§12/§18 for **Phase-2 §3.5 tuning** — reviewer/sensor methods return `Reviewed[A]` (verdict + `Option[Cost]`) so reviewer spend joins `Feature.cost` (S4-3), and the per-turn cost cap becomes a non-killing post-hoc advisory (`maxTurnCostUsd` 2 → 15). 1.14 (§18 `reviewer` block) / 1.15 (Phase-3 P0/P1/P2 fixes) sit between; §-numbers preserved, so a "v1.2 §N" reference resolves to the same §N. |
-| [`forge-design-1.13.md`](forge-design-1.13.md) | Phase-3 revision. Standalone-by-freeze over 1.12: restates §7.11/§11.7/§19 for **reviewer-comment mining** — a new `review.request_changes` audit kind records reviewer `RequestChanges` blockers, the `ConventionLearner` cost lever widens to failures-OR-comments, and its input gains a `reviewerComments` channel (decision **D8**), freezing the rest at 1.12. 1.14→1.16 freeze its unchanged sections; read together. |
-| [`forge-design-1.12.md`](forge-design-1.12.md) | Phase-3 revision. Standalone-by-freeze over 1.11: restates only §19 to enumerate the `profile.conventions_learned` audit kind (a pure spec-text reconciliation — decision **D7**, no code change). 1.13 freezes its unchanged sections; read together. |
-| [`forge-design-1.11.md`](forge-design-1.11.md) | Phase-3 revision. Standalone-by-freeze over 1.10: restates only §6/§8.3/§11.4/§11.5/§19 for the `WorkflowProfile.branchModel` **trunk-commit (no-PR) lifecycle** — a `TrunkBased` piece commits straight to mainline and refines with no PR tail (design-3.3-trunk / W3), freezing the rest at 1.10. 1.12 freezes its unchanged sections; read together. |
-| [`forge-design-1.10.md`](forge-design-1.10.md) | Phase-3 revision: `Mode` becomes a *configuration* of `Driver`/`Reviewer`/`Sensor` roles resolved once via `RolePairing.of` (cross-model review reconciled to same-CLI — §7, design-3.5). 1.11→1.12 freeze its unchanged sections; read together. |
-| [`forge-design-1.9.md`](forge-design-1.9.md) | Phase-3 revision: the `WorkflowProfile` begins parameterizing the §11 FSM — review-required (§6/§11.5/§18, design-3.3). 1.10→1.12 freeze its unchanged sections; read together. |
-| [`forge-design-1.8.md`](forge-design-1.8.md) | Phase-3 revision: the pre-PR Build gate (§6/§8.3/§11.4/§11.5/§19, design-3.0 D2). 1.9→1.12 freeze its unchanged sections; read together. |
-| [`forge-design-1.7.md`](forge-design-1.7.md) | Phase-3 architectural revision (Repo Adaptation): `RepoProfile` / `WorkflowProfile`, sensor surface (§3/§6/§7/§8/§11/§18/§19). 1.8→1.12 freeze its unchanged sections. |
-| [`forge-design-1.6.md`](forge-design-1.6.md) | The pre-Phase-3 base (Phases 1–2). 1.7→1.12 freeze its unchanged sections. |
-| [`design-rationale.md`](design-rationale.md) | Why the spec looks the way it does. Decision/rejected/where-to-read per item. **A5** is the Phase-3 architecture direction. |
+| [`roadmap.md`](roadmap.md) | Current product plan, phase status, and priority queue. |
+| [`forge-design-1.16.md`](forge-design-1.16.md) | Live v1 implementation contract: the single-feature lifecycle, command set, connectors, reviewer/sensor cost accounting, FSM, action log, and repo-adaptation behaviour. |
+| [`forge-design-2.0.md`](forge-design-2.0.md) | Phase-4 architecture contract: workspace/instance scope, workstreams, workers, daemon, container isolation, aggregate budget authorization, and cockpit observability. |
+| [`design-4.4.md`](design-4.4.md) | Active Slice 4.4 implementation plan: daemon-backed cockpit TUI, control actions, inspection, live multi-workstream container proof, and current quality gates. |
+| [`design-rationale.md`](design-rationale.md) | Durable explanations for non-obvious tradeoffs and reconciliations. |
 
-**All Phase-3 implementation plans are now closed** (Slices 3.0–3.5) — see the
-historical table below. The Phase-3 *phase-level* exit criterion (a live run on a
-new, unseen, non-Scala repo) is still open; it is tracked in [`roadmap.md`](roadmap.md) §4
-and planned in [`design-phase3-exit.md`](design-phase3-exit.md) (🟡 open — design +
-pre-flight runbook; target = a fork of `taverns-red/toast-stats`, Node·TS + prettier).
+## Current direction
+
+- **Validation mode:** Forge must support true cross-model validation
+  (one CLI drives, another independently reviews). Same-CLI validation
+  remains a supported pairing for local/cost-sensitive runs, but not the
+  product ceiling.
+- **Quality gate:** root `sbt test` must be aggregate-green and stable;
+  `sbt scalafmtCheckAll` remains required.
+- **Active phase:** Phase 4 is in progress. Slices 4.0–4.3 have landed
+  the instance/daemon/worker/container/budget engine. Slice 4.4 is the
+  cockpit and live fleet proof.
 
 ## Reference / support
 
 | Doc | What it is |
 |---|---|
-| [`agent-best-practices.md`](agent-best-practices.md) | Working discipline for human + agent contributors (mirrored by the CLAUDE.md "Testing & review discipline" list). |
-| [`slice-0/slice-0-report.md`](slice-0/slice-0-report.md) | CLI-capability validation (pinned flags, transcripts). |
-| [`slice-1/slice-1-findings.md`](slice-1/slice-1-findings.md) | Connector runtime findings. |
-| [`slice-4/mvp-friction.md`](slice-4/mvp-friction.md) | Dogfood run #1 (`image-creds-dedup`, MVP gate). |
-| [`dogfood/extract-media-network-config.md`](dogfood/extract-media-network-config.md) | Dogfood run #2 — the run that motivated the adaptation pivot (the $0.73-vs-$1.78 formatter waste). |
+| [`agent-best-practices.md`](agent-best-practices.md) | Working discipline for human + agent contributors. |
+| [`slice-0/slice-0-report.md`](slice-0/slice-0-report.md) | Captured CLI capability validation. |
+| [`slice-1/slice-1-findings.md`](slice-1/slice-1-findings.md) | Connector-runtime findings from early implementation. |
+| [`slice-4/mvp-friction.md`](slice-4/mvp-friction.md) | Dogfood run #1, the MVP gate friction log. |
+| [`dogfood/`](dogfood/) | Live-run notes and Phase-4 proof runbooks. |
 
-## Closed / historical — per-slice audit trails (reference only)
+## Historical audit trails
 
-These are **closed**; they record *how* a slice was built (Task breakdowns, status
-logs, review rounds, carry-forwards). They are not the live contract — that is
-`forge-design-1.13.md`. Kept for history.
+Closed `design-*.md` files record how a slice landed: task breakdowns,
+status logs, review rounds, and carry-forwards. Treat them as evidence,
+not as the live contract. The live contracts are the roadmap plus
+`forge-design-1.16.md` and `forge-design-2.0.md`.
 
-| Doc | Slice | Closed |
-|---|---|---|
-| [`design-2.1.md`](design-2.1.md) | Slice 1.1 — agent connectors | 2026-05-26 |
-| [`design-2.2.md`](design-2.2.md) | Slice 1.2 — FSM / core / action log | 2026-05-26 |
-| [`design-2.3.md`](design-2.3.md) | Slice 1.3 — forge-git / forge-app | 2026-05-27 |
-| [`design-1.4.md`](design-1.4.md) | Slice 1.4 — reviewer assets + orchestrator + MVP gate (Phase 1 close) | 2026-05-31 |
-| [`design-2.0.md`](design-2.0.md) | Slice 2.0 — run observability | 2026-05-31 |
-| [`design-3.5.md`](design-3.5.md) | D3 — driver-respawn-avoidance on resume | 2026-06-01 |
-| [`design-2.1-tui.md`](design-2.1-tui.md) | Slice 2.1 — read-only TUI | 2026-06-01 |
-| [`design-3.3.md`](design-3.3.md) | Slice 3.3 — `WorkflowProfile` FSM parameterization (review-required + CI required-check sensing) | 2026-06-04 |
-| [`design-3.3-trunk.md`](design-3.3-trunk.md) | Slice 3.3-W3 — `branchModel` trunk-commit (no-PR) lifecycle path (contract: `forge-design-1.11.md`) | 2026-06-04 |
-| [`design-2.2-tuning.md`](design-2.2-tuning.md) | Slice 2.2 — Phase-2 §3.5 driver/reviewer tuning + S4-3 reviewer-cost widening (contract: `forge-design-1.16.md`). **Implementation landed, pending whole-section review.** Not the Slice 1.2 [`design-2.2.md`](design-2.2.md). | 2026-06-05 |
-| [`design-3.5-role-trait.md`](design-3.5-role-trait.md) | Slice 3.5 — role-trait refactor: `Mode` → `Agent`/`Driver`/`Reviewer`/`Sensor` via `RolePairing.of` (contract: `forge-design-1.10.md` §7). Not the Phase-2 [`design-3.5.md`](design-3.5.md). | 2026-06-04 |
-| [`design-3.1-build-gate.md`](design-3.1-build-gate.md) | Slice 3.1-D2 — pre-PR local **Build** gate: `PieceBuildFailed`/`PieceBuildFixingUp` FSM path (contract: `forge-design-1.8.md`) | 2026-06-03 |
-| [`design-3.0.md`](design-3.0.md) | Slice 3.0/3.1 — `RepoProfile` + senses: model/store/hash, `FailureClassifier` + §8.2 deterministic-fix routing (live §8.2 collapse, dogfood #4), `RepoProfiler` + `ConventionLearner` | 2026-06-05 |
+Closed plan families:
 
-> Naming note: the `design-N.md` numbers are *slice* ids and do **not** track the
-> `forge-design-1.N.md` spec revisions — e.g. `design-2.1.md` is Slice 1.1, while
-> `design-2.1-tui.md` is the Phase-2 TUI slice (renamed to dodge the collision).
+- `design-1.4.md`, `design-2.0.md`, `design-2.1*.md`,
+  `design-2.2*.md`, `design-2.3.md` — Phase 1/2 implementation trails.
+- `design-3*.md`, `design-phase3-exit.md` — Phase 3 repo-adaptation
+  trails.
+- `design-4.0.md`, `design-4.1.md`, `design-4.2.md`,
+  `design-4.3.md` — closed Phase-4 engine slices.
 
-## Superseded spec revisions (redirect stubs)
-
-`forge-design-1.1.md` … `forge-design-1.5.md` are one-line stubs pointing at the
-live `forge-design-1.6.md`; full prior text is in git history. They exist only so
-old "v1.x" links still resolve.
+Superseded `forge-design-1.N.md` revisions remain to preserve old links
+and section references. Only `forge-design-1.16.md` is the current v1
+implementation contract.

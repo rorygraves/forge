@@ -1,35 +1,35 @@
 # Forge — product roadmap
 
-> Companion to [`forge-design-1.4.md`](forge-design-1.4.md). The design doc is
-> the implementation contract for v1; this document is the multi-horizon plan
-> the design lives inside. Early phases are concrete (and trace directly into
-> §17 of the design); later phases capture direction and have not yet been
-> turned into specs.
+> This is the phase plan. The live contracts are
+> [`forge-design-1.16.md`](forge-design-1.16.md) for the v1 feature
+> engine and [`forge-design-2.0.md`](forge-design-2.0.md) for the
+> Phase-4 workspace/workstream/worker architecture. Closed slice plans
+> remain in-tree as audit trails, but this file should describe the
+> current state and the next decisions, not retell every historical
+> implementation round.
 >
-> **Status:** draft v0.13 — 2026-06-02. **DIRECTION CHANGE (2026-06-02):** the roadmap is re-centered on _repo adaptation_ — Forge grows agentic *senses* on its deterministic spine so it stops running blind on a repo (RepoProfiler, FailureClassifier, ConventionLearner; see §4 Phase 3 and design-rationale **A5**). The compact picture is in "## Status at a glance" below; this paragraph keeps the detailed history. **Phase 1 (MVP) ✅ COMPLETE — Slices 1.1, 1.2, 1.3, and 1.4 all closed.** Phase 2 (MLP) is open; **Slice 2.0 (run observability, §3.1) ✅ closed 2026-05-31** — all three tiers landed (`cost.update` + `session.complete` writers, `forge stats`, work-vs-wait markers, driver raw-dump, clean resume-from-NHI); the final implement-turn `forge stats` capture against real CLI output is a watch item (the writers + fold are unit-tested). **§3.5 driver-respawn-avoidance (the D3 large half) ✅ closed 2026-06-01** — a restart from a mid-exploration implement/fix-up crash now resumes the existing driver session instead of re-paying the full exploration (gap #10), gated by a worktree-safety classifier; `forge stats` folds the resumed turn as a measured saving. The live contract is now **[`forge-design-1.6.md`](forge-design-1.6.md)** (1.4 and 1.5 → redirect stubs), which reconciles the Slice-2.0 §19 additions, the §3.5 D3 deltas, and (new in 1.6) the §3.3 termflow `0.4.0` dependency + §3.3.1 Scala-3.7.1 floor against what Slice 2.1 shipped; §3.5's second bullet (§18 reviewer/driver tuning, S4-3/S4-5) stays open. Audit trails: [`design-2.0.md`](design-2.0.md), [`design-3.5.md`](design-3.5.md), [`design-2.1-tui.md`](design-2.1-tui.md). **Slice 2.1 (TUI, §3.2) ✅ closed 2026-06-01** — plan in [`design-2.1-tui.md`](design-2.1-tui.md); Tasks 2.1.1→2.1.4 plus 2.1.6→2.1.8 landed (read-only `forge tui <feature>`, polling snapshot builder, scrollable log pane, Q&A display, resize-aware themed view, key-help overlay, and the Task 2.1.8 close-out → v1.6). Task 2.1.5 live `AgentEvent` tap is carried forward unless real use needs token-level liveness; the termflow-`0.4.0`-to-Central watch item (rolled to §3.4) has since ✅ resolved upstream — `0.4.0` is on Maven Central as of 2026-04-30, so fresh clones resolve the build (the spec §3.3 note corrects in the next 1.7 revision).
-> Slice 1.1 (Task 1.1.1 → Task 1.1.5 in [`design-2.1.md`](design-2.1.md)) ships
-> both connectors against the v1.2 §7.1 streaming-spec trait with
-> real-CLI integration tests in `forge-it`. Slice 1.2 (Task 1.2.1 → Task 1.2.7 in
-> [`design-2.2.md`](design-2.2.md)) ships `forge-core` — `ForgePaths`
-> + relocated manifest types, `FsmState`/`FsmEvent`/`Feature`,
-> `Fsm.transition` per §11, `FileActionLog` + `Feature.foldEvents`,
-> `FileStateCache` + `RebuildState.run`, and a property-test suite
-> covering the §17 slice-2 invariants. Slice 1.3 (Task 1.3.1 → Task 1.3.8 in
-> [`design-2.3.md`](design-2.3.md)) ships `forge-git` (`GhClient` /
-> `GitClient` one-shot CLI seams, `PrSnapshotDecoder` + `PollBaseline`
-> with `BaselineCursor(at, seenIds)`, `BranchManager` +
-> `BranchProtectionCache`, `PRWatcher`) and `forge-app` (`ProcessLock`,
-> `SessionMonitor`) — every component the Slice 1.4 orchestrator needs
-> to produce `FsmEvent`s from the outside world. Carry-forwards to
-> v1.3 / Slice 1.4: **C14**, **C15**, **S2-1** through **S2-10**, and
-> **S3-1** through **S3-8** (each with a durable home in
-> [`design-rationale.md`](design-rationale.md) or §7.2 below — §7.2
-> is grouped by what closing each item requires). Next active slice:
-> 4, split dependency-shaped per v0.7 into **Slice 1.4a** (reviewer assets,
-> `forge-specs` repopulation, Task 1.4.7 regression gate) → **Slice 1.4b**
-> (orchestrator loop, CLI, self-hosting gate). MVP-gate recommendation
-> stays as v0.7: pick a contained, low-variance first feature, not
-> "Forge builds its own Slice 2.1 (TUI)".
+> **Status:** draft v0.14 — 2026-06-13. Phase 1 is complete, Phase 2 is
+> mostly complete, Phase 3 is complete, and Phase 4 is active. Slices
+> 4.0–4.3 have landed the instance/daemon/worker/container/budget engine.
+> Slice 4.4 is open for the cockpit TUI, control/inspection APIs, and the
+> live multi-workstream container proof.
+
+## Immediate priorities
+
+1. **Restore aggregate test reliability.** Root `sbt test` is currently
+   not an acceptable gate: aggregate runs can fail in supervisor/cockpit
+   adjacent suites even when targeted reruns pass. Fix the lifecycle /
+   cleanup race before widening Phase-4 surface area.
+2. **Make validation pairing explicit and configurable.** Forge must
+   support true cross-model validation (one CLI drives, another reviews)
+   and same-CLI validation (one CLI drives + reviews on a cheaper/local
+   model). The role-trait seam exists; the next plan needs to turn it
+   into a persisted/configured pairing rather than a hard-coded
+   same-CLI resolver.
+3. **Keep code quality boring.** Every slice closes with aggregate
+   `sbt test`, `sbt scalafmtCheckAll`, and a coherence sweep over docs,
+   tests, and public comments. Historical docs can stay historical; live
+   docs must stay concise and current.
 
 ## Status at a glance
 
@@ -39,10 +39,13 @@
 | 1 — MVP | Single-repo self-host end-to-end | ✅ closed |
 | 2 — MLP | Pleasant single-repo daily-driver | open — Slice 2.0 (observability) ✅, Slice 2.1 (TUI) ✅, §3.4 OSS-readiness ✅ (config example + README + standalone `forge` launcher; published-binary polish still open); **§3.5 tuning + S4-3 reviewer-cost widening ✅ (Slice 2.2, contract 1.16 — whole-section review landed clean 2026-06-05)**; a small dogfood-#2 resilience pass still open |
 | 3 — v1.0: **Repo Adaptation** ⭐ | Deterministic spine + agentic senses; works on any repo via its CLAUDE.md + a derived, hashed `RepoProfile` | ✅ **closed 2026-06-05** (contract `forge-design-1.15.md`) — **all six sub-slices 3.0–3.5 ✅ closed**; **exit criterion MET live** (`queryclient-config` on the Node/TS fork `rorygraves/toast-stats` → `FeatureDone`, §8.2 prettier-collapse; [`design-phase3-exit.md`](design-phase3-exit.md) closed); **whole-section review landed** — all findings fixed (F3 CiReadiness late-check, S4-5 reviewer config, D4 commit identity, P0 `pr_based`/schema-2 trunk-push safety, P1 §8.2 autofix staging, P2 profiler reads README) |
-| 4 — v2.0 | Workspace (multi-repo) + workstreams + daemon + multi-workstream cockpit TUI | **design ratified 2026-06-05** ([`forge-design-2.0.md`](forge-design-2.0.md)); **Slice 4.0 (instance scope + B1 path re-root) ✅ closed 2026-06-05** ([`design-4.0.md`](design-4.0.md)) — B1 committed-vs-local split **proven live** on `llm4s/szork` under the `llm4s` instance ([`dogfood/4.0-reroot.md`](dogfood/4.0-reroot.md)), whole-section review clean; **Slice 4.1 (daemon skeleton + JSON-RPC socket + durability core) ✅ closed 2026-06-06** ([`design-4.1.md`](design-4.1.md)) — `forge daemon start/stop/status` over a Unix-socket JSON-RPC 2.0 transport, an append-only instance log + rebuildable state cache (O8 / §6.4), B3 worker register/event-export/subscribe; **crash-recovery exit criterion proven live** (a `kill -9`'d daemon rebuilt its worker view from the instance log alone, [`dogfood/4.1-daemon.md`](dogfood/4.1-daemon.md)); **Slice 4.2 (real worker process + isolated clones + multiplexed supervision) ✅ closed 2026-06-06** ([`design-4.2.md`](design-4.2.md)) — `forge daemon` spawns a real `forge worker` OS process on its own isolated clone (O10), runs the frozen v1 loop + exports its feed (B3), under the workstream model (§5) + supervisor cadence/reconcile (§6.2/§6.4); **exit criterion proven live** (a `kill -9`'d daemon reconciled + reattached to the surviving worker process from the instance log alone, [`dogfood/4.2-supervisor.md`](dogfood/4.2-supervisor.md)), whole-section review clean (`WorkerLauncher` relative-classpath fix; worker feed-*resumption* §6.4(d) deferred to 4.3 — 4.2 delivers liveness reattach); **Slice 4.3 (containerised execution O1/O6/O7 + B2 budget) ✅ closed 2026-06-08** ([`design-4.3.md`](design-4.3.md)) — the daemon spawns a worker **inside an isolated OCI container** behind the abstract `OciRuntime` seam (Docker-first `DockerRuntime`, proven live against real Docker 29.2.1), on its own isolated clone, with its image pinned from a committed `Forgefile` (O1) and its credentials isolated from the host (O6 — no host home mount, a scoped `gh` token + a host-side broker vending short-lived `claude`/`codex` auth over the **TCP** control channel, re-architected from Unix sockets within this slice so the container topology works on macOS); a worker obtains a fleet-wide **budget reservation** before each agent spawn (B2: `reserve → grant/refuse → finalize-on-`cost.update``, durable in the instance log, the daemon refusing an oversubscribing spawn + holding-not-killing on a refuse) with the `cost.update` fan-in driving live workstream + instance spend totals; **whole-section review landed clean** (F1 container-`git`-push credential overlay, F2 atomic single exit-record, F3 `cost.update` at-least-once dedup / cache schema v5 — all fixed); the **live dogfood #8** (end-to-end `forge daemon --container` against a real repo with real spend) is **deferred to Slice 4.4's live exercise** (ratified with the user; runbook [`dogfood/4.3-container.md`](dogfood/4.3-container.md) ready), the exit criterion met in code + automated proof (`WorkerDaemonHandshakeSuite` + the opt-in real-container lifecycle suites); sub-slices 4.4–4.6 (cockpit, hardening, cross-repo) not started (§5/§11) |
+| 4 — v2.0 | Workspace (multi-repo) + workstreams + daemon + multi-workstream cockpit TUI | **active**. Contract ratified in [`forge-design-2.0.md`](forge-design-2.0.md). Slices 4.0–4.3 are closed: instance scope + B1 path re-root, daemon durability + TCP JSON-RPC, worker processes on isolated clones, containerised execution, credential broker, and B2 aggregate budget reservation/fan-in. **Slice 4.4 is open** in [`design-4.4.md`](design-4.4.md): cockpit TUI, worker drill-down, control actions, container inspection, and the deferred live multi-workstream container proof. Slice 4.5 remains budget hardening / parallel edge cases; 4.6 cross-repo coordinated workstreams stays deferred until lived experience justifies it. |
 | 5 — v3.0+ | Agentic-dev cockpit (knowledge base, reactive review, custom triggers) | concept |
 
-**Live docs:** this roadmap · spec [`forge-design-1.16.md`](forge-design-1.16.md) · [`design-rationale.md`](design-rationale.md) · index [`README.md`](README.md). The per-slice `design-*.md` files (`design-1.4.md` … `design-3.5.md`) are *closed* audit trails kept for historical reference; [`design-2.2-tuning.md`](design-2.2-tuning.md) (Slice 2.2 — §3.5 driver/reviewer tuning + S4-3) is the most recent, **✅ closed 2026-06-05 (whole-section review landed clean)**. The index sorts live-vs-historical.
+**Live docs:** this roadmap · [`forge-design-1.16.md`](forge-design-1.16.md) ·
+[`forge-design-2.0.md`](forge-design-2.0.md) · [`design-4.4.md`](design-4.4.md) ·
+[`design-rationale.md`](design-rationale.md) · docs index [`README.md`](README.md).
+Closed per-slice `design-*.md` files are audit trails.
 
 ---
 
@@ -53,7 +56,7 @@
 | 0 — Slice 0 | CLI capabilities validated | [`slice-0/slice-0-report.md`](slice-0/slice-0-report.md) |
 | 1 — Testability MVP | Forge ships its own next slice | `forge-design-1.4.md` §17 slices 1–4 |
 | 2 — MLP | Pleasant single-repo daily-driver | §17 slice 5 + polish |
-| 3 — v1.0: Repo Adaptation | Works on a stranger's repo / any stack via its CLAUDE.md + derived profile; deterministic spine + agentic senses | §4 + `forge-design-1.7.md` (to open) + role-trait refactor |
+| 3 — v1.0: Repo Adaptation | Works on a stranger's repo / any stack via its CLAUDE.md + derived profile; deterministic spine + agentic senses | §4 + `forge-design-1.7.md` through `forge-design-1.16.md` + role-trait refactor |
 | 4 — v2.0 | Forge-instance pivot (multi-repo, daemon, parallel, containerised) | [`forge-design-2.0.md`](forge-design-2.0.md) (design ratified 2026-06-05; implementation sub-slices 4.0–4.6) |
 | 5 — v3.0+ | Agentic-dev cockpit (knowledge base, reactive review, triggers) | Concept notes only |
 
@@ -879,13 +882,16 @@ honest hard edge").
   concrete third+ roles, so the refactor lands *inside* the phase that needs it.
   ✅ **closed 2026-06-04** — a base `Agent` trait + `Driver` / `Reviewer` /
   `Sensor` roles replace `Mode`-dispatch; `Mode` resolves **once** to a
-  `RolePairing` configuration (`RolePairing.of`), and cross-model review is
-  reconciled to **same-CLI** (D1 — one CLI drives + reviews on a cheaper model,
-  as C15 validated). The §6.1 replay invariant held throughout
+  `RolePairing` configuration (`RolePairing.of`). The shipped resolver currently
+  maps both built-in modes to **same-CLI validation** (one CLI drives + reviews on
+  a cheaper/local model, as C15 validated), but the product requirement is now
+  explicit: **cross-model validation must also be supported** as a configured
+  pairing. The §6.1 replay invariant held throughout
   (`ProfileReplayInvarianceSuite` R1/R2; the `fsm` package names no role type,
   the wire form is byte-identical). Contract:
   [`forge-design-1.10.md`](forge-design-1.10.md) §7; plan + carry-forward (C1 —
-  Connector-trait split → Phase 4/5): [`design-3.5-role-trait.md`](design-3.5-role-trait.md).
+  Connector-trait split + persisted role pairings → Phase 4/5):
+  [`design-3.5-role-trait.md`](design-3.5-role-trait.md).
 
 **Exit criterion:** Forge drives a feature end-to-end on a **new, unseen repo
 with a different stack** (e.g. a Node or Python repo), having auto-profiled it,
@@ -975,17 +981,18 @@ to `Role`, not `Mode`.
 - **✅ Landed as sub-slice 3.5 (closed 2026-06-04).** The `Agent` base
   trait + `Driver` / `Reviewer` / `Sensor` roles shipped; `Mode` is now a
   wire token resolved **once** to a `RolePairing` configuration
-  (`RolePairing.of`), with cross-model review reconciled to **same-CLI**
-  (decision D1 — the same CLI drives and reviews on a cheaper model, as
-  C15 validated). Contract: [`forge-design-1.10.md`](forge-design-1.10.md)
-  §7; audit trail [`design-3.5-role-trait.md`](design-3.5-role-trait.md).
+  (`RolePairing.of`). The current built-in resolver is same-CLI; the next
+  role-pairing task must make pairings persisted/configurable so both
+  same-CLI and true cross-model validation are supported without caller
+  rewrites. Contract: [`forge-design-1.10.md`](forge-design-1.10.md) §7;
+  audit trail [`design-3.5-role-trait.md`](design-3.5-role-trait.md).
 - **Carry-forward to Phase 4/5 (C1):** splitting the `Connector` god-trait
   into per-role capability traits (`DriverConnector` / `ReviewerConnector`
   / `SensorConnector`) was deliberately *excluded* from sub-slice 3.5 (it
   sweeps every caller, which this refactor scoped out). It becomes
-  worthwhile when the daemon (Phase 4) / reactive review (Phase 5) add the
-  4th/5th concrete role and a per-role capability surface stops being
-  speculative — pick it up there. See design-3.5-role-trait §5 C1.
+  worthwhile when configurable role pairings, the daemon (Phase 4), or
+  reactive review (Phase 5) make per-role capability surfaces concrete.
+  See design-3.5-role-trait §5 C1.
 
 ### 4.3 Hardening
 
@@ -1061,8 +1068,8 @@ next feature(s), and (Phase 5) a backing issue.
 ### 5.3 Daemon mode
 
 - Long-running supervisor; TUI is one client. CLI commands remain the
-  primary scripting interface; both talk to the same daemon via Unix
-  socket.
+  primary scripting interface; both talk to the same daemon over the
+  loopback TCP JSON-RPC transport introduced in Phase 4.
 - Polling cadence per-feature (the existing 30s rule) becomes
   per-workstream; the daemon can multiplex.
 - Daemon owns the instance lock; per-workstream locks live below it.

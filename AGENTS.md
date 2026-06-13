@@ -8,16 +8,35 @@ and others). Read it before writing code.
 
 Forge is a Scala 3 meta-orchestrator that drives the Claude Code and
 Codex CLIs to take a feature from intent → design → piece-by-piece
-implementation → PR → merge. Cross-model review; human-in-the-loop;
-incremental merge.
+implementation → PR → merge. Configurable validation; human-in-the-loop;
+incremental merge. The product requirement is to support true cross-model
+validation, while same-CLI validation remains a valid cost/locality mode.
 
-The implementation contract is [`docs/forge-design-1.6.md`](docs/forge-design-1.6.md).
-The 1.1 → 1.4 revisions are kept in-tree only as superseded stubs that point
-here (their full text is in git history); §-numbers are preserved, so a "v1.4 §N"
-reference resolves to the same §N in 1.5. If the spec and this file disagree, the
-spec wins — and please open a PR to fix this file.
+The live contracts are [`docs/forge-design-1.16.md`](docs/forge-design-1.16.md)
+for the v1 feature engine and [`docs/forge-design-2.0.md`](docs/forge-design-2.0.md)
+for the Phase-4 workspace/workstream/worker architecture. If a contract and
+this file disagree, the contract wins — and please fix this file in the same
+change.
 
 ## Current state
+
+- **Active phase — Phase 4 / Slice 4.4.** Slices 4.0–4.3 have landed the
+  instance model, daemon, worker process model, isolated clones, container
+  runtime seam, credential broker, and aggregate budget reservation/fan-in.
+  [`docs/design-4.4.md`](docs/design-4.4.md) is open for the daemon-backed
+  cockpit TUI, worker drill-down, control actions, container inspection, and
+  live multi-workstream container proof.
+- **Immediate quality priority.** Root `sbt test` must be restored to stable
+  aggregate-green before widening the active cockpit/control surface. A
+  whole-project review found an aggregate-only supervisor cleanup race; targeted
+  reruns can pass, which is not sufficient for the project gate.
+- **Validation-mode priority.** `RolePairing` currently ships same-CLI
+  pairings. That is allowed, but the plan now requires persisted/configurable
+  pairings so Forge can also run true cross-model validation.
+
+The detailed closed-slice bullets below are retained as audit history. For live
+state, read [`docs/roadmap.md`](docs/roadmap.md), the contracts above, and the
+active `docs/design-<slice-id>.md`.
 
 - **Slice 0 (CLI validation) — complete.** Findings folded into design
   v1.1 and carried forward into v1.2.
@@ -194,15 +213,16 @@ spec wins — and please open a PR to fix this file.
   forge-app 329 (1234 unit tests). Reviewer cost/tuning + the CLI e2e
   smoke roll forward to Phase 2 as S4-3 / S4-5 / S4-6.
 - Slices 1.4b and 2.1 (TUI) scoped in design §17.
-- Phase 4 (Forge-instance pivot: multi-repo, daemon, parallel,
-  containerised) is post-v1 and needs its own design doc before any
-  code lands. See [`docs/roadmap.md`](docs/roadmap.md).
+- Phase 4 (workspace/workstream/worker pivot: multi-repo, daemon,
+  parallel, containerised) is active. Its architecture contract is
+  [`docs/forge-design-2.0.md`](docs/forge-design-2.0.md); active
+  implementation work lives in `docs/design-4.x.md`.
 
 Where to look first when starting a task:
 
 | Question | File |
 |---|---|
-| What's the v1 contract? | `docs/forge-design-1.6.md` |
+| What's the v1 contract? | `docs/forge-design-1.16.md` |
 | What's actively being worked on right now? | `docs/design-<slice-id>.md` for the open Slice (see "Per-section implementation plans" below) |
 | Why was X decided that way? | `docs/design-rationale.md` |
 | What's the phase plan beyond v1? | `docs/roadmap.md` |
@@ -310,7 +330,7 @@ task:
 
 | Layer | File | Purpose | Lifecycle |
 |---|---|---|---|
-| Contract | `docs/forge-design-1.6.md` | What the system is *for*; signatures and invariants. | Standalone revisions (`forge-design-1.x.md`) when corrections land. |
+| Contract | `docs/forge-design-1.16.md` + `docs/forge-design-2.0.md` | What the system is *for*; signatures and invariants. | Focused spec revisions or `design-4.x.md` plans when corrections land. |
 | Phase plan | `docs/roadmap.md` | Direction, exit criteria, gates between phases. | Stays terse; ticks bullets `[~]` → `[x]` only after a section's code review passes. |
 | Implementation plan | `docs/design-<slice-id>.md` | Per-Task checklist for one Slice, broken into numbered Tasks. | Created when work on the Slice starts; lives until the Slice closes; ticks granular checkboxes as items land. |
 
@@ -411,16 +431,15 @@ implications of round 1's signature change; `design-1.4.md`
 
 ### Active design-`<slice-id>`.md files
 
-*(none currently open — Phase 1 is complete; Phase 2 opens its own
-`design-<slice-id>.md` when work starts.)*
+[`docs/design-4.4.md`](docs/design-4.4.md) is currently open. It owns the
+cockpit TUI, worker drill-down, control actions, container inspection, and live
+multi-workstream container proof. It also carries the current quality
+precondition to make aggregate `sbt test` stable.
 
-Recently-closed audit trails: [`docs/design-1.4.md`](docs/design-1.4.md)
-(Slice 1.4 — Phase-1 MVP gate, closed 2026-05-31),
-[`docs/design-2.3.md`](docs/design-2.3.md) (Slice 1.3, closed 2026-05-27),
-[`docs/design-2.2.md`](docs/design-2.2.md) (Slice 1.2, closed 2026-05-26),
-[`docs/design-2.1.md`](docs/design-2.1.md) (Slice 1.1, closed 2026-05-26).
-Historical files retain their `design-2.N.md` filenames; they are sealed
-audit trails.
+Recently-closed Phase-4 audit trails: [`docs/design-4.0.md`](docs/design-4.0.md),
+[`docs/design-4.1.md`](docs/design-4.1.md), [`docs/design-4.2.md`](docs/design-4.2.md),
+and [`docs/design-4.3.md`](docs/design-4.3.md). Older `design-*.md` files are
+historical audit trails, not the live contract.
 
 Don't pre-write design-`<slice-id>`.md files for Slices that aren't
 being actively worked. They drift; the roadmap is enough until the
@@ -428,7 +447,7 @@ Slice opens.
 
 ## Code conventions
 
-- **Scala 3.5.x**, sbt build (`build.sbt` at root, module sub-projects
+- **Scala 3.7.1**, sbt build (`build.sbt` at root, module sub-projects
   under `modules/`).
 - **`-Xfatal-warnings` is on.** Treat warnings as errors. `-Wunused:imports`
   and `-Wvalue-discard` are also on — discarded non-Unit values must be
@@ -453,6 +472,8 @@ Reference file for the style we're aiming at:
 | Module | Owns | Lands in |
 |---|---|---|
 | `forge-core` | FSM, `Feature`, `ActionLog`, `StateCache`, `RebuildState`, `Manifest` / `ManifestPatch` / `Piece` / `PieceStatus`, `PrSnapshot` ADT, `ForgePaths`, domain model, `Mode`, `Ids`, `Question`, `FeatureIdSlugger`, `Cost` / `CostTotals` | Slice 1.2 (manifest types relocated here per **S2-1**; `PrSnapshot` here per §3.2, correcting an earlier `AGENTS.md` row that placed it under `forge-git` — **S2-4**) |
+| `forge-instance` | Instance/workstream/worker model, registries, instance state fold/cache, re-rooted worker paths, aggregate spend/reservation projections | Phase 4 |
+| `forge-daemon` | Daemon state, TCP JSON-RPC client/server, worker event aggregation, budget authority, worker control/broker APIs | Phase 4 |
 | `forge-agents` | `Connector`, `AgentSession`, `StreamingSession`, Claude/Codex adapters, `Reviews`, `Prompts` | Slice 1.1 |
 | `forge-specs` | `SpecStore`, `DocSync`, `ChangeCollector` | Slice 1.4 |
 | `forge-git` | `BranchManager`, `PRWatcher` | Slice 1.3 |
@@ -490,14 +511,14 @@ Test fixtures (`src/test/`) are exempt by design.
 
 ### 2. Role-trait stub (design §17 Slice 1)
 
-Connectors and orchestrator callers route through a thin `Role`
-indirection (`Role.Driver`, `Role.Reviewer`) instead of pattern-matching
-on `Mode`. The two-case `Mode` ADT and its `fromString` config wiring
-stay unchanged for v1; the seam is purely about call-site discipline.
+Connectors and orchestrator callers route through the role-pairing seam instead
+of pattern-matching on `Mode`. `Mode` remains the persisted wire token, but
+behaviour is selected by resolving it once to a `RolePairing`.
 
 ```scala
 // good
-role.connector.runStreamingSpec(...)
+val pairing = RolePairing.of(mode)
+ConnectorFactory.build(pairing.driver, paths, config)
 
 // bad — match on Mode outside Mode itself
 mode match
@@ -505,8 +526,10 @@ mode match
   case Mode.CodexDriver  => codexConnector.run(...)
 ```
 
-Smell test: `match m: Mode` (or its destructuring equivalent) outside
-`Mode` itself and connector construction.
+Smell test: `match m: Mode` (or its destructuring equivalent) appears only in
+`Mode` itself and `RolePairing.of`. Same-CLI validation is allowed, but do not
+encode it as a global assumption; cross-model validation must be expressible as
+a configured pairing.
 
 ## Building and testing
 
@@ -534,9 +557,10 @@ design.
 
 ## Documentation discipline
 
-- **Spec changes** → next `forge-design-1.x.md` (standalone, per §23).
-  The live spec is `forge-design-1.6.md`; don't edit it in place — open
-  `forge-design-1.7.md`.
+- **Spec changes** → update the relevant live contract deliberately:
+  `forge-design-1.16.md` for the v1 engine or `forge-design-2.0.md` for the
+  Phase-4 worker/daemon layer. If the change is a focused spec revision, create
+  the next `forge-design-1.x.md` rather than silently changing frozen history.
 - **Non-obvious tradeoff worth preserving** → `docs/design-rationale.md`
   with a cross-reference into the current spec.
 - **Phase-level direction** → `docs/roadmap.md`.
@@ -550,8 +574,9 @@ design.
 These are deliberately rejected in v1 (see design §22 and §1
 non-goals). Pull requests that introduce them will be rejected:
 
-- **Parallel features.** Concurrency unit in v1 is one feature on one
-  laptop. Phase 4 changes this; not before.
+- **Parallel features inside the v1 repo checkout.** Phase 4 supports
+  concurrency through isolated workers/clones/containers, not by sharing
+  one mutable checkout.
 - **Worktrees.** Devcontainer-incompatible per prior experience. Use a
   full clone if a second checkout is needed.
 - **Real-time webhooks.** Polling `gh` every 30s is the model.
@@ -563,8 +588,8 @@ non-goals). Pull requests that introduce them will be rejected:
   capabilities only.
 - **Mid-feature mode switching.** The configured `Mode` is locked at
   feature creation.
-- **Same CLI in both driver and reviewer roles.** Cross-model review
-  is a core property.
+- **Assuming one validation pairing globally.** Same-CLI and cross-model
+  validation must both be supportable through role-pairing configuration.
 - **`.get` on a required session id.** Use `requireSessionId`.
 - **Committing `.forge/log/` or `.forge/state/`.** Both are in
   `.gitignore` for a reason — local canonical runtime artefacts only.

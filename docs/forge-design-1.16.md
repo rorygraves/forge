@@ -1,10 +1,12 @@
 # Forge — design doc v1.16
 
-> A Scala meta-orchestrator that sits above Claude Code and Codex CLI, breaking features into reviewable pieces and shepherding each through design → implement → PR → merge with cross-model review and human-in-the-loop.
+> A Scala meta-orchestrator that sits above Claude Code and Codex CLI, breaking features into reviewable pieces and shepherding each through design → implement → PR → merge with configurable validation — including true cross-model review — and human-in-the-loop.
 
 **Author:** Rory  •  **Status:** v1.16 — Phase-2 §3.5 (driver/reviewer tuning): reviewer-cost widening (S4-3) + the per-turn cost cap as a post-hoc advisory  •  **Target:** personal tool, OSS later
 
 **This is the implementation contract.** Earlier versions (0.1 → … → 1.14 → 1.15) and their commentaries remain in the workspace as a record of how the design evolved. Implementers read only this document together with the unchanged sections it freezes from 1.15.
+
+**Validation-mode reconciliation (2026-06-13).** Forge's product requirement is to support **both** same-CLI validation and true **cross-model validation**. The current shipped resolver from 1.10 maps each built-in `Mode` to a same-CLI driver/reviewer pair; that is a valid mode for cost/locality, not the long-term limit. The roadmap carries the follow-up to make role pairings persisted/configurable so one CLI can drive while another independently reviews.
 
 **Standalone-by-freeze (this revision only, continuing the 1.7→1.15 exception).** 1.16 is a *focused* revision landing the open tail of roadmap §3.5 (carry-forwards **S4-3** / **S4-5**):
 

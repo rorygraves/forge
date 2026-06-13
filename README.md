@@ -2,8 +2,8 @@
 
 Forge is a Scala meta-orchestrator that sits above the Claude Code and
 Codex CLIs. You bring a feature request; Forge shepherds it through
-design → piece-by-piece implementation → PR → merge, with cross-model
-review and a human in the loop.
+design → piece-by-piece implementation → PR → merge, with independent
+validation and a human in the loop.
 
 Forge is not itself an LLM. It drives the coding-agent CLIs you already
 use, coordinating them with a finite-state machine and Git so one person
@@ -17,8 +17,12 @@ Forge is in active development.
   feature from intake to a merged pull request against a real
   repository, and has done so end to end on a live repo. The CLI
   (`forge run` / `forge spec` / `forge status`, plus the rest of the
-  §15 command set), the headless orchestrator loop, cross-model review,
+  §15 command set), the headless orchestrator loop, reviewer validation,
   and crash/restart durability are all implemented and tested.
+- **Phase 2 (MLP) — mostly complete.** Run observability, the
+  single-feature read-only TUI, the standalone `forge` launcher, and
+  reviewer-cost accounting have landed. Remaining work is polish and
+  resilience, not a change to the v1 lifecycle.
 - **Phase 3 (Repo Adaptation) — complete.** Forge auto-profiles an
   unfamiliar repository — its build tool, format/lint/build/test
   commands, commit identity, and workflow shape — into a committed,
@@ -26,11 +30,16 @@ Forge is in active development.
   end to end on a previously unseen Node/TypeScript repo with **zero
   hardcoded-config edits**, handling a formatting failure as a free
   local step (`prettier`) rather than a paid agent fix-up round.
-- **Phase 2 (MLP) — in progress.** This is the work that turns the
-  working engine into something a developer other than the author can
-  comfortably pick up: run observability and a read-only TUI (both
-  landed), packaging of a standalone `forge` launcher (landed), and
-  onboarding polish.
+- **Phase 4 (Workspace & Workstream platform) — in progress.** The
+  instance model, daemon, worker process model, isolated clones,
+  container runtime seam, credential broker, and aggregate budget
+  reservation protocol have landed. The active slice is the daemon-backed
+  cockpit TUI and live multi-workstream container proof.
+
+Immediate quality priorities are tracked in the roadmap: restore a
+stable aggregate `sbt test`, keep `scalafmtCheckAll` clean, and make the
+role-pairing story configurable so Forge can run either same-CLI
+validation or true cross-model validation.
 
 > **Trying it today:** install the standalone launcher with
 > `scripts/install-forge.sh` and run `forge <command>` from inside any
@@ -39,8 +48,9 @@ Forge is in active development.
 > Forge itself.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the phase plan and
-[`docs/forge-design-1.15.md`](docs/forge-design-1.15.md) for the
-authoritative implementation contract.
+[`docs/forge-design-1.16.md`](docs/forge-design-1.16.md) plus
+[`docs/forge-design-2.0.md`](docs/forge-design-2.0.md) for the current
+implementation and Phase-4 architecture contracts.
 
 ## What it does
 
@@ -49,8 +59,10 @@ Concretely, in v1:
 - One feature at a time, with a fresh agent context per piece.
 - An interactive **spec phase** with the configured *driver* (Claude or
   Codex), then headless implementation, piece by piece.
-- **Cross-model review:** the *other* CLI reviews every design and every
-  PR.
+- **Configurable validation:** Forge must support true cross-model
+  validation, where one CLI drives and the other independently reviews.
+  Same-CLI validation remains a valid pairing for local/cost-sensitive
+  runs, but it is a mode, not the product limit.
 - One branch per piece off `main`, one PR, one CI run, human-merged.
 - A per-feature action log, so any run is resumable after a failure or
   restart.
@@ -134,7 +146,7 @@ through sbt instead of installing the launcher — `sbt "forge-app/run
 The full command set (`new`, `spec`, `run`, `resume`, `reconcile`,
 `refresh-cache`, `abandon`, `profile`, `status`, `tail`, `tui`,
 `rebuild-state`, `stats`, `unlock --force`) is specified in
-`docs/forge-design-1.15.md` §15. `forge profile` writes the repo's
+`docs/forge-design-1.16.md` §15. `forge profile` writes the repo's
 auto-derived `.forge/profile.json` (Phase 3 adaptation); `forge tui`
 opens a read-only terminal view of a feature's progress.
 
@@ -145,8 +157,9 @@ opens a read-only terminal view of a feature's progress.
 
 ### Configuration & where Forge keeps things
 
-Per-project state lives under a `.forge/` directory **inside the target
-repository** (everything is routed through the `ForgePaths` helper):
+For v1 single-repo runs, per-project state lives under a `.forge/`
+directory **inside the target repository** (everything is routed through
+the `ForgePaths` helper):
 
 - `.forge/config.json` — your configuration (optional; sensible
   defaults apply if absent). A fully-populated, copy-able template
@@ -162,6 +175,11 @@ repository** (everything is routed through the `ForgePaths` helper):
 - `.forge/state/`, `.forge/log/` — rebuilt state cache and the canonical
   per-feature action log (gitignored).
 
+For Phase-4 daemon/worker runs, committed `.forge/specs/`, config, and
+profile files stay in the worker clone and flow back through Git, while
+local runtime state/log/locks are re-rooted under the instance/worker
+directory. That split is the `ForgePaths` seam.
+
 Reviewer assets (schemas, prompts, templates) are installed once per
 user under `~/.forge/{schemas,prompts,templates}/` on first use.
 
@@ -170,7 +188,7 @@ reference is in the example file and the design doc):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `mode` | `"claude-driver"` | Which CLI drives implementation (the other one reviews); the other valid value is `"codex-driver"`. |
+| `mode` | `"claude-driver"` | Which CLI drives implementation. Current shipped pairings use the same CLI for reviewer calls; the roadmap makes cross-model pairings a first-class configuration target. The other valid value is `"codex-driver"`. |
 | `baseBranch` | `"main"` | Branch features are cut from and merged into. |
 | `branchPrefix` | `"forge"` | Prefix for the branches Forge creates. |
 | `maxPieceCostUsd` | `8.00` | Spend cap per piece. |
@@ -178,7 +196,7 @@ reference is in the example file and the design doc):
 
 The reviewer models in v1 default to the built-in **Claude `haiku`** /
 **Codex `gpt-5.3-codex`** pair with a per-review wall-clock cap, tunable
-via the `reviewer` block. See `docs/forge-design-1.15.md` §18 for the
+via the `reviewer` block. See `docs/forge-design-1.16.md` §18 for the
 complete config reference.
 
 > **Heads-up for external users:** install the launcher
@@ -209,6 +227,8 @@ FORGE_IT_RUN_REGRESSION_SMOKE=1 \
 ```
 modules/
   forge-core/    ← FSM, Feature, ActionLog, StateCache, domain model
+  forge-instance/← instance/workstream/worker model, registries, re-rooted paths
+  forge-daemon/  ← daemon state, JSON-RPC/TCP client/server, worker event aggregation
   forge-agents/  ← Connector, AgentSession, Claude/Codex adapters
   forge-git/     ← BranchManager, PRWatcher (gh CLI)
   forge-specs/   ← SpecStore, DocSync, manifest, ChangeCollector
@@ -223,11 +243,10 @@ modules/
   here if you want to work *on* Forge).
 - [`docs/roadmap.md`](docs/roadmap.md) — phased delivery plan and
   current status.
-- [`docs/forge-design-1.15.md`](docs/forge-design-1.15.md) — the design
-  and implementation contract, including the full §15 command set. This
-  is the authoritative description of how Forge behaves (earlier
-  revisions are superseded stubs that point at the live one;
-  [`docs/README.md`](docs/README.md) indexes the whole `docs/` tree).
+- [`docs/forge-design-1.16.md`](docs/forge-design-1.16.md) — the v1
+  implementation contract, including the full §15 command set.
+- [`docs/forge-design-2.0.md`](docs/forge-design-2.0.md) — the Phase-4
+  workspace/workstream/worker architecture contract.
 - [`docs/design-rationale.md`](docs/design-rationale.md) — non-obvious
   tradeoffs preserved through the design's evolution.
 - [`docs/slice-0/`](docs/slice-0/) — the captured CLI flag/transcript

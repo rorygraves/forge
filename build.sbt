@@ -1,5 +1,5 @@
-// Forge — Scala meta-orchestrator (see docs/forge-design-1.2.md).
-// Module layout per §3.2; build order per §17.
+// Forge — Scala meta-orchestrator (see docs/forge-design-1.16.md and docs/forge-design-2.0.md).
+// Module layout follows the current module map in AGENTS.md; build order follows module dependencies.
 
 // Bumped 3.5.2 → 3.7.1 for Slice 2.1 (TUI): termflow is published only for Scala 3.7.x (TASTy 28.7),
 // which a 3.5.2 compiler (TASTy ≤ 28.5) cannot read. See docs/design-2.1-tui.md Task 1.
@@ -26,9 +26,7 @@ val V = new {
   val munit = "1.0.4"
   val munitCatsEffect = "2.0.0"
   // Slice 2.1 (TUI): termflow Elm-architecture framework. 0.4.0 is the API the forge-tui app is
-  // written against (grounded against its published sources). Maven Central currently carries 0.3.0;
-  // 0.4.0 resolves from the local ivy repo (`publishLocal`, on sbt's default resolver chain) until it
-  // ships to Central. Tracked as a Slice 2.1 Task-1 watch item — see docs/design-2.1-tui.md.
+  // written against and is now resolved from the normal resolver chain.
   val termflow = "0.4.0"
 }
 
@@ -75,11 +73,11 @@ lazy val `forge-instance` = (project in file("modules/forge-instance"))
 
 // Phase-4 Slice 4.1: the long-running **daemon** mechanics. Owns the durable instance state store (append-only instance
 // action log + rebuildable cache — contract §6.4 / O8) via forge-instance, plus the daemon's runtime snapshot
-// (`DaemonState`, Task 4.1.3) and the JSON-RPC-2.0-over-Unix-socket status/control API (O2) the CLI/TUI clients speak.
+// (`DaemonState`, Task 4.1.3) and the JSON-RPC-2.0-over-TCP status/control API (O2) the CLI/TUI clients speak.
 // The supervisor *lifecycle* (instance-lock acquisition + the `forge daemon` CLI) composes in forge-app, where the §13
-// `FileProcessLock` lives. Depends on forge-instance (Instance model + socket path + durability core) and transitively
-// forge-core. fs2-io supplies the `JdkUnixSockets` transport (JDK-21 native). No worker process / container yet — see
-// docs/design-4.1.md.
+// `FileProcessLock` lives. Depends on forge-instance (Instance model + discovery path + durability core) and
+// transitively forge-core. fs2-io supplies the TCP transport. Worker process and container support landed in
+// later Phase-4 slices.
 lazy val `forge-daemon` = (project in file("modules/forge-daemon"))
   .dependsOn(`forge-instance`)
   .settings(commonSettings)
