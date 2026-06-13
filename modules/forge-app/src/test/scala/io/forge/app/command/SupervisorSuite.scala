@@ -1,6 +1,7 @@
 package io.forge.app.command
 
 import cats.effect.{IO, Resource}
+import cats.effect.std.Supervisor as FiberSupervisor
 import cats.syntax.all.*
 import io.forge.core.paths.ForgePaths
 import io.forge.core.{FeatureId, InstanceName, WorkstreamId}
@@ -23,14 +24,21 @@ import scala.concurrent.duration.*
   */
 class SupervisorSuite extends CatsEffectSuite:
 
-  private val instance: Resource[IO, Instance] =
-    Resource.make {
-      val home = os.Path("/tmp") / s"fd-${UUID.randomUUID().toString.take(8)}"
-      new FileInstanceStore(home).create(InstanceName("demo")).flatMap {
-        case Right(inst) => IO.pure(inst)
-        case Left(err) => IO.raiseError(new IllegalStateException(s"could not create test instance: $err"))
-      }
-    }(inst => IO.blocking(os.remove.all(inst.dir / os.up / os.up / os.up)).void)
+  // Yields the instance plus a fiber Supervisor the test's `supervisor(...)` runs its exit-watcher fibers under.
+  // Resource release is LIFO: `fibers` closes first — cancelling + awaiting any in-flight `worker.exited` writer — and
+  // only then does `os.remove.all` run, so a detached watcher can no longer race the directory deletion (the lifecycle
+  // race that made aggregate `sbt test` flaky).
+  private val instance: Resource[IO, (Instance, FiberSupervisor[IO])] =
+    for
+      inst <- Resource.make {
+        val home = os.Path("/tmp") / s"fd-${UUID.randomUUID().toString.take(8)}"
+        new FileInstanceStore(home).create(InstanceName("demo")).flatMap {
+          case Right(inst) => IO.pure(inst)
+          case Left(err) => IO.raiseError(new IllegalStateException(s"could not create test instance: $err"))
+        }
+      }(inst => IO.blocking(os.remove.all(inst.dir / os.up / os.up / os.up)).void)
+      fibers <- FiberSupervisor[IO]
+    yield (inst, fibers)
 
   /** A launcher that ignores the worker identity and always yields `cmd` (a real `sh` child). */
   private def launcherOf(cmd: List[String]): WorkerLauncher =
@@ -62,17 +70,18 @@ class SupervisorSuite extends CatsEffectSuite:
       inst: Instance,
       state: DaemonState,
       launcher: WorkerLauncher,
+      fibers: FiberSupervisor[IO],
       provision: (String, os.Path) => IO[Either[String, ForgePaths]] = provisionOk,
       spawner: WorkerSpawner = RealWorkerSpawner
   ): IO[RealSupervisor] =
-    RealSupervisor.build(inst, state, spawner, launcher, provision)
+    RealSupervisor.build(inst, state, spawner, launcher, provision, fibers)
 
   test("spawnWorker provisions, launches a real child, records worker.spawned, and activates the workstream") {
-    instance.use { inst =>
+    instance.use { case (inst, fibers) =>
       for
         state <- DaemonState.boot(inst, pid = 1L)
         _ <- state.record(InstanceEvent.WorkstreamCreated(WorkstreamId("ws-1"), "add auth"))
-        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")))
+        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")), fibers)
         res <- sup.spawnWorker(WorkstreamId("ws-1"), "/repo", FeatureId("feat"))
         snap <- state.snapshot
       yield
@@ -90,11 +99,11 @@ class SupervisorSuite extends CatsEffectSuite:
   }
 
   test("the exit-watcher records worker.exited with the real exit code when the child terminates") {
-    instance.use { inst =>
+    instance.use { case (inst, fibers) =>
       for
         state <- DaemonState.boot(inst, pid = 1L)
         _ <- state.record(InstanceEvent.WorkstreamCreated(WorkstreamId("ws-1"), "g"))
-        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "exit 9")))
+        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "exit 9")), fibers)
         _ <- sup.spawnWorker(WorkstreamId("ws-1"), "/repo", FeatureId("feat"))
         _ <- eventually(state.snapshot.map(_.worker("w-1").exists(_.exitCode.isDefined)))
         snap <- state.snapshot
@@ -106,11 +115,11 @@ class SupervisorSuite extends CatsEffectSuite:
   }
 
   test("spawnWorker is idempotent: a second request for the same workstream+feature does not double-spawn") {
-    instance.use { inst =>
+    instance.use { case (inst, fibers) =>
       for
         state <- DaemonState.boot(inst, pid = 1L)
         _ <- state.record(InstanceEvent.WorkstreamCreated(WorkstreamId("ws-1"), "g"))
-        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")))
+        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")), fibers)
         first <- sup.spawnWorker(WorkstreamId("ws-1"), "/repo", FeatureId("feat"))
         second <- sup.spawnWorker(WorkstreamId("ws-1"), "/repo", FeatureId("feat"))
         snap <- state.snapshot
@@ -122,11 +131,11 @@ class SupervisorSuite extends CatsEffectSuite:
   }
 
   test("concurrent spawns for distinct features allocate distinct ids (no allocate-the-same-id race)") {
-    instance.use { inst =>
+    instance.use { case (inst, fibers) =>
       for
         state <- DaemonState.boot(inst, pid = 1L)
         _ <- state.record(InstanceEvent.WorkstreamCreated(WorkstreamId("ws-1"), "g"))
-        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")), provision = provisionSlow)
+        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")), fibers, provision = provisionSlow)
         // Fire five spawns at once, each a distinct feature so the idempotency guard doesn't collapse them. With a
         // non-atomic allocation they would read the same snapshot and several would pick w-1; atomic allocation gives
         // five distinct ids.
@@ -144,11 +153,11 @@ class SupervisorSuite extends CatsEffectSuite:
   }
 
   test("concurrent identical spawns collapse to a single worker (in-flight idempotency)") {
-    instance.use { inst =>
+    instance.use { case (inst, fibers) =>
       for
         state <- DaemonState.boot(inst, pid = 1L)
         _ <- state.record(InstanceEvent.WorkstreamCreated(WorkstreamId("ws-1"), "g"))
-        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")), provision = provisionSlow)
+        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")), fibers, provision = provisionSlow)
         // Same workstream + same feature, fired concurrently: the in-flight reservation must dedup them to one worker.
         results <- (1 to 5).toList.parTraverse(_ => sup.spawnWorker(WorkstreamId("ws-1"), "/repo", FeatureId("feat")))
         snap <- state.snapshot
@@ -160,14 +169,14 @@ class SupervisorSuite extends CatsEffectSuite:
   }
 
   test("concurrent identical spawns all observe the SAME launch failure (no false success for the duplicate)") {
-    instance.use { inst =>
+    instance.use { case (inst, fibers) =>
       for
         state <- DaemonState.boot(inst, pid = 1L)
         _ <- state.record(InstanceEvent.WorkstreamCreated(WorkstreamId("ws-1"), "g"))
         // The winning spawn's launch fails (provision returns Left after a delay). The duplicates must wait on that
         // launch and see the same failure — not a Right(workerId) for a worker that was never recorded.
         failSlow = (_: String, _: os.Path) => IO.sleep(40.millis).as(Left("boom"))
-        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")), provision = failSlow)
+        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")), fibers, provision = failSlow)
         results <- (1 to 5).toList.parTraverse(_ => sup.spawnWorker(WorkstreamId("ws-1"), "/repo", FeatureId("feat")))
         snap <- state.snapshot
       yield
@@ -179,16 +188,17 @@ class SupervisorSuite extends CatsEffectSuite:
   }
 
   test("spawnWorker refuses an unknown workstream and a provisioning failure, recording nothing") {
-    instance.use { inst =>
+    instance.use { case (inst, fibers) =>
       for
         state <- DaemonState.boot(inst, pid = 1L)
-        unknownSup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")))
+        unknownSup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")), fibers)
         unknown <- unknownSup.spawnWorker(WorkstreamId("ws-404"), "/repo", FeatureId("feat"))
         _ <- state.record(InstanceEvent.WorkstreamCreated(WorkstreamId("ws-1"), "g"))
         failSup <- supervisor(
           inst,
           state,
           launcherOf(List("sh", "-c", "sleep 2")),
+          fibers,
           provision = (_, _) => IO.pure(Left("boom"))
         )
         failed <- failSup.spawnWorker(WorkstreamId("ws-1"), "/repo", FeatureId("feat"))
@@ -201,7 +211,7 @@ class SupervisorSuite extends CatsEffectSuite:
   }
 
   test("reconcile surfaces a worker whose pid has died (§6.4)") {
-    instance.use { inst =>
+    instance.use { case (inst, fibers) =>
       for
         dead <- childHandle(List("sh", "-c", "exit 0"))
         _ <- dead.awaitExit // ensure the pid is gone before reconcile probes it
@@ -209,7 +219,7 @@ class SupervisorSuite extends CatsEffectSuite:
         _ <- state.record(
           InstanceEvent.WorkerSpawned("w-1", WorkstreamId("ws-1"), "/repo", FeatureId("feat"), "/clone", Some(dead.pid))
         )
-        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")))
+        sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")), fibers)
         _ <- sup.reconcile
         snap <- state.snapshot
       yield
@@ -220,7 +230,7 @@ class SupervisorSuite extends CatsEffectSuite:
   }
 
   test("reconcile leaves a live worker running and watches it; killing it later records the exit") {
-    instance.use { inst =>
+    instance.use { case (inst, fibers) =>
       childHandle(List("sh", "-c", "sleep 30")).flatMap { alive =>
         for
           state <- DaemonState.boot(inst, pid = 1L)
@@ -234,7 +244,7 @@ class SupervisorSuite extends CatsEffectSuite:
               Some(alive.pid)
             )
           )
-          sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")))
+          sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")), fibers)
           _ <- sup.reconcile
           afterReconcile <- state.snapshot
           _ = assert(afterReconcile.worker("w-1").exists(_.live), "a still-alive worker stays live after reconcile")
@@ -247,7 +257,7 @@ class SupervisorSuite extends CatsEffectSuite:
   }
 
   test("the cadence sweep records worker.exited for a live worker whose pid dies (§6.2)") {
-    instance.use { inst =>
+    instance.use { case (inst, fibers) =>
       childHandle(List("sh", "-c", "sleep 30")).flatMap { alive =>
         for
           state <- DaemonState.boot(inst, pid = 1L)
@@ -261,7 +271,7 @@ class SupervisorSuite extends CatsEffectSuite:
               Some(alive.pid)
             )
           )
-          sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")))
+          sup <- supervisor(inst, state, launcherOf(List("sh", "-c", "sleep 2")), fibers)
           // Run only the cadence loop (no reconcile ⇒ no ProcessHandle watcher), so the exit is detected by the sweep.
           result <- sup
             .superviseLoop(40.millis)

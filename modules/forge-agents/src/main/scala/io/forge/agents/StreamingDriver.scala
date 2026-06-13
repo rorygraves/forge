@@ -108,13 +108,17 @@ object StreamingDriver:
       eventChan <- Channel.unbounded[IO, AgentEvent]
       stderrBuf <- IO.ref(Vector.empty[String])
       stderrSink = (line: String) => stderrBuf.update(_ :+ line)
-      parsePipeline = parseStreamPipeline(sp, parseLine, initDef, eventChan, stderrSink, stderrBuf, rawLineSink)
+      parsePipeline =
+        parseStreamPipeline(sp, parseLine, initDef, eventChan, stderrSink, stderrBuf, rawLineSink, initialUserInput)
       stderrPipeline = sp.stderr.evalMap(stderrSink).compile.drain
       parseFiber <- parsePipeline.compile.drain.start
       stderrFiber <- stderrPipeline.start
       // Write the initial user input (if any) BEFORE blocking on Init: both pinned streaming-spec CLIs need a user
-      // message before they'll emit it. The mirror UserMessage event is pushed *after* Init arrives so the events
-      // stream's first element stays Init (channel-order contract).
+      // message before they'll emit it. The mirror UserMessage event is pushed by the parse fiber *immediately after*
+      // it forwards Init, so the events stream's first element stays Init (channel-order contract) and the mirror can't
+      // race the channel close: a fast-exiting subprocess used to let the main fiber's mirror-send lose to the parse
+      // fiber's onFinalize `eventChan.close`, silently dropping the UserMessage (Channel.send on a closed channel is a
+      // no-op Left). Emitting it inside the parse fiber keeps it ahead of that close.
       _ <- initialUserInput.traverse_(input => sp.sendLine(encodeUserInput(input)))
       initResult <-
         initDef.get.timeoutTo(
@@ -129,8 +133,6 @@ object StreamingDriver:
             stderrFiber.cancel.attempt.void *>
             release.attempt.void *>
             IO.raiseError(RuntimeException(err.message))
-      // Mirror the initial input as a UserMessage so the action log captures it ordering-wise after Init.
-      _ <- initialUserInput.traverse_(input => eventChan.send(AgentEvent.UserMessage(summary = input.take(200))).void)
     yield new StreamingSessionWithDiagnostics:
       val sessionId: String = sid
       def events: Stream[IO, AgentEvent] = eventChan.stream
@@ -184,7 +186,8 @@ object StreamingDriver:
       eventChan: Channel[IO, AgentEvent],
       stderrSink: String => IO[Unit],
       stderrBuf: cats.effect.kernel.Ref[IO, Vector[String]],
-      rawLineSink: Option[String => IO[Unit]]
+      rawLineSink: Option[String => IO[Unit]],
+      initialUserInput: Option[String]
   ): Stream[IO, Unit] =
     sp.stdout
       .evalMap: line =>
@@ -192,7 +195,17 @@ object StreamingDriver:
           case Right(events) =>
             events.traverse_ {
               case e @ AgentEvent.Init(id) =>
-                initDef.complete(Right(id)).attempt.void *> eventChan.send(e).void
+                // Forward Init, then — only on the *first* Init (complete returns true) — mirror the initial user
+                // input as a UserMessage. Doing this here (rather than from the main fiber) keeps the mirror ahead of
+                // the onFinalize `eventChan.close` even when the subprocess exits immediately, and guarantees the
+                // Init → UserMessage order in the events stream.
+                initDef.complete(Right(id)).flatMap { firstInit =>
+                  eventChan.send(e).void *>
+                    IO.whenA(firstInit)(
+                      initialUserInput
+                        .traverse_(in => eventChan.send(AgentEvent.UserMessage(summary = in.take(200))).void)
+                    )
+                }
               case other => eventChan.send(other).void
             }
           case Left(err) =>

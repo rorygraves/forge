@@ -2,7 +2,7 @@ package io.forge.app.command
 
 import cats.effect.{ExitCode, IO}
 import cats.effect.kernel.Deferred
-import cats.effect.std.Console
+import cats.effect.std.{Console, Supervisor as FiberSupervisor}
 import io.forge.app.cli.DaemonCommand
 import io.forge.app.lock.{FileProcessLock, LockAcquireResult, LockMetadata}
 import io.forge.core.InstanceName
@@ -80,38 +80,46 @@ object DaemonCommands:
       )
       shutdown <- Deferred[IO, Unit]
       state <- DaemonState.boot(instance, ProcessHandle.current().pid())
-      supervisor <-
-        if container then RealSupervisor.buildContainer(instance, state) else RealSupervisor.build(instance, state)
-      boots <- state.snapshot.map(_.bootCount)
-      live <- state.snapshot.map(_.workers.count(_.live))
-      _ <-
-        if live > 0 then Console[IO].println(s"forge daemon: reconciling $live worker(s) from the instance log…")
-        else IO.unit
-      _ <- supervisor.reconcile
-      // A containerised daemon binds all interfaces so a worker can reach it over `host.docker.internal`; a host-only
-      // daemon binds loopback. The ephemeral port is logged once it binds (see `onBound`).
-      bindHost = if container then DaemonSocketServer.AllInterfaces else DaemonSocketServer.Loopback
-      _ <- supervisor
-        .superviseLoop(RealSupervisor.DefaultCadence)
-        .background
-        .use(_ =>
-          Daemon.serveUntilShutdown(
-            instance.portFile,
-            state,
-            shutdown,
-            supervisor,
-            RealCredentialBroker.default,
-            BudgetPolicy.default,
-            bindHost = bindHost,
-            onBound = port =>
-              val where =
-                if container then s"0.0.0.0:$port (workers reach it at ${DaemonAddress.DockerHost}:$port)"
-                else s"${DaemonAddress.Loopback}:$port"
-              Console[IO].println(s"forge daemon: listening on $where (boot #$boots).")
-          )
-        )
-      _ <- Console[IO].println("forge daemon: stopped.")
-    yield ExitCode.Success
+      // The supervisor's exit-watcher fibers run under `fibers`; closing this scope on stop cancels + awaits them, so no
+      // watcher is mid-`worker.exited` write when the daemon unwinds (a surviving worker is re-watched on the next boot's
+      // reconcile). Workers themselves are intentionally *not* killed — they outlive the daemon (§6.4).
+      exit <- FiberSupervisor[IO].use { fibers =>
+        for
+          supervisor <-
+            if container then RealSupervisor.buildContainer(instance, state, fibers)
+            else RealSupervisor.build(instance, state, fibers)
+          boots <- state.snapshot.map(_.bootCount)
+          live <- state.snapshot.map(_.workers.count(_.live))
+          _ <-
+            if live > 0 then Console[IO].println(s"forge daemon: reconciling $live worker(s) from the instance log…")
+            else IO.unit
+          _ <- supervisor.reconcile
+          // A containerised daemon binds all interfaces so a worker can reach it over `host.docker.internal`; a
+          // host-only daemon binds loopback. The ephemeral port is logged once it binds (see `onBound`).
+          bindHost = if container then DaemonSocketServer.AllInterfaces else DaemonSocketServer.Loopback
+          _ <- supervisor
+            .superviseLoop(RealSupervisor.DefaultCadence)
+            .background
+            .use(_ =>
+              Daemon.serveUntilShutdown(
+                instance.portFile,
+                state,
+                shutdown,
+                supervisor,
+                RealCredentialBroker.default,
+                BudgetPolicy.default,
+                bindHost = bindHost,
+                onBound = port =>
+                  val where =
+                    if container then s"0.0.0.0:$port (workers reach it at ${DaemonAddress.DockerHost}:$port)"
+                    else s"${DaemonAddress.Loopback}:$port"
+                  Console[IO].println(s"forge daemon: listening on $where (boot #$boots).")
+              )
+            )
+          _ <- Console[IO].println("forge daemon: stopped.")
+        yield ExitCode.Success
+      }
+    yield exit
 
   // --- stop ------------------------------------------------------------------
 

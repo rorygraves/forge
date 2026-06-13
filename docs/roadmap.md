@@ -16,10 +16,18 @@
 
 ## Immediate priorities
 
-1. **Restore aggregate test reliability.** Root `sbt test` is currently
-   not an acceptable gate: aggregate runs can fail in supervisor/cockpit
-   adjacent suites even when targeted reruns pass. Fix the lifecycle /
-   cleanup race before widening Phase-4 surface area.
+1. **Restore aggregate test reliability.** ✅ done 2026-06-13. Root `sbt
+   test` is green across 25 consecutive aggregate runs. Two lifecycle
+   races were fixed: (a) `StreamingDriver` dropped the `initialUserInput`
+   mirror `UserMessage` when a fast-exiting subprocess closed the events
+   channel before the main fiber emitted it — the mirror now lands inside
+   the parse fiber right after `Init`, ahead of the channel close; (b) the
+   supervisor's exit-watcher fibers were detached `start` fibers that
+   could race a test's `os.remove.all` while still writing
+   `worker.exited` — they now run under a caller-owned
+   `cats.effect.std.Supervisor` (threaded into `RealSupervisor.build`),
+   whose close cancels + awaits them as a barrier (daemon stop on the prod
+   side, fixture teardown on the test side).
 2. **Make validation pairing explicit and configurable.** Forge must
    support true cross-model validation (one CLI drives, another reviews)
    and same-CLI validation (one CLI drives + reviews on a cheaper/local

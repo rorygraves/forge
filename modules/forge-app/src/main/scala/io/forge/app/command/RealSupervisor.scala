@@ -1,6 +1,7 @@
 package io.forge.app.command
 
 import cats.effect.{Deferred, IO, Outcome, Ref}
+import cats.effect.std.Supervisor as FiberSupervisor
 import cats.syntax.all.*
 import io.forge.core.paths.ForgePaths
 import io.forge.core.{FeatureId, WorkstreamId}
@@ -24,6 +25,15 @@ import scala.concurrent.duration.*
   * (a host child's stdio captured to a per-worker file; a container owned by the OCI daemon), so they keep running
   * cleanly after the daemon dies.
   *
+  * The **exit-watcher fibers** it forks ([[watchLaunched]] / [[watchProcessHandle]] / [[watchContainer]]) are a
+  * different matter from the workers themselves: they are bookkeeping the daemon owns, so they run under a
+  * `cats.effect.std.Supervisor` (the caller-owned [[fibers]] scope passed to [[RealSupervisor.build]]). Closing that
+  * scope (the daemon's `Supervisor` resource on stop, or a test fixture's on teardown) **cancels and awaits** them — a
+  * barrier that guarantees no watcher is still writing to the instance log/cache when the scope unwinds (a worker that
+  * outlives the daemon is re-watched by the next boot's [[reconcile]]). Without it the watchers were detached `start`
+  * fibers that could race a stopping daemon or a test deleting the instance directory underneath an in-flight
+  * `worker.exited` write.
+  *
   * Two recovery paths re-establish supervision after a daemon restart, neither of which has a [[LaunchedWorker]] for
   * the pre-restart worker. Both **dispatch on the recorded liveness key** (a host pid via [[ProcessHandle]], a
   * container id via the injected [[OciRuntime]]), so a daemon restarted in *either* spawn mode reconciles *both*
@@ -44,7 +54,8 @@ final class RealSupervisor private (
     oci: OciRuntime,
     provision: (String, os.Path) => IO[Either[String, ForgePaths]],
     liveHandles: Ref[IO, Map[String, LaunchedWorker]],
-    reserved: Ref[IO, Map[String, RealSupervisor.Reservation]]
+    reserved: Ref[IO, Map[String, RealSupervisor.Reservation]],
+    fibers: FiberSupervisor[IO]
 ) extends Supervisor:
 
   import RealSupervisor.{nextWorkerId, Allocation, ExternallyObservedExit, Reservation}
@@ -139,7 +150,7 @@ final class RealSupervisor private (
             _ <- state.record(
               InstanceEvent.WorkerSpawned(workerId, workstreamId, repo, feature, checkout.toString, pid, containerId)
             )
-            _ <- watchLaunched(workerId, launched).start
+            _ <- fibers.supervise(watchLaunched(workerId, launched))
           yield Right(workerId)
         }
     }
@@ -180,12 +191,12 @@ final class RealSupervisor private (
     livenessKeyOf(w) match
       case Some(LivenessKey.HostPid(pid)) =>
         IO.blocking(ProcessHandle.of(pid).filter(_.isAlive)).flatMap {
-          case p if p.isPresent => watchProcessHandle(w.workerId, p.get).start.void
+          case p if p.isPresent => fibers.supervise(watchProcessHandle(w.workerId, p.get)).void
           case _ => surfaceExit(w.workerId, ExternallyObservedExit)
         }
       case Some(LivenessKey.ContainerId(id)) =>
         oci.running(id).flatMap {
-          case true => watchContainer(w.workerId, id).start.void
+          case true => fibers.supervise(watchContainer(w.workerId, id)).void
           case false => surfaceExit(w.workerId, ExternallyObservedExit)
         }
       case None => IO.unit
@@ -302,25 +313,27 @@ object RealSupervisor:
     * pre-existing **container** workers a prior `--container` daemon life left behind (§6.4 — reconcile dispatches on
     * each record's key, not the daemon's spawn mode).
     */
-  def build(instance: Instance, state: DaemonState): IO[RealSupervisor] =
+  def build(instance: Instance, state: DaemonState, fibers: FiberSupervisor[IO]): IO[RealSupervisor] =
     build(
       instance,
       state,
       HostProcessRuntime(RealWorkerSpawner, WorkerLauncher.Real),
       DockerRuntime,
-      realProvision(instance)
+      realProvision(instance),
+      fibers
     )
 
   /** The **containerised** supervisor (Slice 4.3, `forge daemon start --container`): runs `forge worker` inside an
     * isolated OCI container via [[DockerRuntime]] ([[ContainerRuntime]]), the same real clone provisioning + reconcile.
     */
-  def buildContainer(instance: Instance, state: DaemonState): IO[RealSupervisor] =
+  def buildContainer(instance: Instance, state: DaemonState, fibers: FiberSupervisor[IO]): IO[RealSupervisor] =
     build(
       instance,
       state,
       new ContainerRuntime(DockerRuntime, ContainerRuntime.DefaultImage),
       DockerRuntime,
-      realProvision(instance)
+      realProvision(instance),
+      fibers
     )
 
   /** Injectable host-pair build for tests (stub spawner / launcher / provisioner) — preserves the 4.2 test surface;
@@ -332,9 +345,10 @@ object RealSupervisor:
       state: DaemonState,
       spawner: WorkerSpawner,
       launcher: WorkerLauncher,
-      provision: (String, os.Path) => IO[Either[String, ForgePaths]]
+      provision: (String, os.Path) => IO[Either[String, ForgePaths]],
+      fibers: FiberSupervisor[IO]
   ): IO[RealSupervisor] =
-    build(instance, state, HostProcessRuntime(spawner, launcher), DockerRuntime, provision)
+    build(instance, state, HostProcessRuntime(spawner, launcher), DockerRuntime, provision, fibers)
 
   /** Core injectable build over a [[WorkerRuntime]] (spawn mechanism) + an [[OciRuntime]] (container reconcile/probe).
     * The 4.3.4 reconcile-dispatch test injects a stub `OciRuntime`; the runtime is `HostProcessRuntime` or
@@ -345,12 +359,13 @@ object RealSupervisor:
       state: DaemonState,
       runtime: WorkerRuntime,
       oci: OciRuntime,
-      provision: (String, os.Path) => IO[Either[String, ForgePaths]]
+      provision: (String, os.Path) => IO[Either[String, ForgePaths]],
+      fibers: FiberSupervisor[IO]
   ): IO[RealSupervisor] =
     for
       liveHandles <- Ref.of[IO, Map[String, LaunchedWorker]](Map.empty)
       reserved <- Ref.of[IO, Map[String, Reservation]](Map.empty)
-    yield new RealSupervisor(instance, state, runtime, oci, provision, liveHandles, reserved)
+    yield new RealSupervisor(instance, state, runtime, oci, provision, liveHandles, reserved, fibers)
 
   /** The real [[WorkerProvisioner]]-backed clone provisioner for `instance` (shared by both runtimes — even a container
     * worker's clone is provisioned host-side, then bind-mounted in).

@@ -1,6 +1,7 @@
 package io.forge.app.command
 
 import cats.effect.{IO, Resource}
+import cats.effect.std.Supervisor as FiberSupervisor
 import io.forge.core.paths.ForgePaths
 import io.forge.core.{FeatureId, InstanceName, WorkstreamId}
 import io.forge.daemon.{DaemonState, RealWorkerSpawner, WorkerSpawner, WorkerSpec}
@@ -31,15 +32,22 @@ import scala.concurrent.duration.*
   */
 class SupervisorReconcileSuite extends CatsEffectSuite:
 
-  /** A short `/tmp`-rooted instance (macOS caps `sun_path` at 104 bytes), created on disk and cleaned up after. */
-  private val instance: Resource[IO, Instance] =
-    Resource.make {
-      val home = os.Path("/tmp") / s"fd-${UUID.randomUUID().toString.take(8)}"
-      new FileInstanceStore(home).create(InstanceName("demo")).flatMap {
-        case Right(inst) => IO.pure(inst)
-        case Left(err) => IO.raiseError(new IllegalStateException(s"could not create test instance: $err"))
-      }
-    }(inst => IO.blocking(os.remove.all(inst.dir / os.up / os.up / os.up)).void)
+  /** A short `/tmp`-rooted instance (macOS caps `sun_path` at 104 bytes), created on disk and cleaned up after. Paired
+    * with a fiber Supervisor the test's `supervisor(...)` runs its exit-watchers under: LIFO release closes `fibers`
+    * (cancelling + awaiting any in-flight `worker.exited` writer) before `os.remove.all`, so no watcher races the
+    * delete.
+    */
+  private val instance: Resource[IO, (Instance, FiberSupervisor[IO])] =
+    for
+      inst <- Resource.make {
+        val home = os.Path("/tmp") / s"fd-${UUID.randomUUID().toString.take(8)}"
+        new FileInstanceStore(home).create(InstanceName("demo")).flatMap {
+          case Right(inst) => IO.pure(inst)
+          case Left(err) => IO.raiseError(new IllegalStateException(s"could not create test instance: $err"))
+        }
+      }(inst => IO.blocking(os.remove.all(inst.dir / os.up / os.up / os.up)).void)
+      fibers <- FiberSupervisor[IO]
+    yield (inst, fibers)
 
   /** A launcher that ignores the worker identity and always yields `cmd` (a real `sh` child standing in for the real
     * `forge worker` JVM — the JVM launch is exercised live in dogfood #7).
@@ -55,9 +63,10 @@ class SupervisorReconcileSuite extends CatsEffectSuite:
       inst: Instance,
       state: DaemonState,
       cmd: List[String],
+      fibers: FiberSupervisor[IO],
       spawner: WorkerSpawner = RealWorkerSpawner
   ): IO[RealSupervisor] =
-    RealSupervisor.build(inst, state, spawner, launcherOf(cmd), provisionOk)
+    RealSupervisor.build(inst, state, spawner, launcherOf(cmd), provisionOk, fibers)
 
   private def pidAlive(pid: Long): IO[Boolean] =
     IO.blocking(ProcessHandle.of(pid).map(_.isAlive).orElse(false))
@@ -71,12 +80,12 @@ class SupervisorReconcileSuite extends CatsEffectSuite:
     }
 
   test("a spawned worker process survives the daemon crash and reconcile reattaches to the same live pid (§6.4)") {
-    instance.use { inst =>
+    instance.use { case (inst, fibers) =>
       for
         // --- First daemon life: spawn a real long-lived worker, then abandon the daemon mid-flight. ---
         state1 <- DaemonState.boot(inst, pid = 1L)
         _ <- state1.record(InstanceEvent.WorkstreamCreated(WorkstreamId("ws-1"), "add auth"))
-        sup1 <- supervisor(inst, state1, List("sh", "-c", "sleep 30"))
+        sup1 <- supervisor(inst, state1, List("sh", "-c", "sleep 30"), fibers)
         spawned <- sup1.spawnWorker(WorkstreamId("ws-1"), "/repo", FeatureId("feat"))
         _ = assertEquals(spawned, Right("w-1"))
         snap1 <- state1.snapshot
@@ -100,7 +109,7 @@ class SupervisorReconcileSuite extends CatsEffectSuite:
         _ = assert(wRebuilt.live, "the survivor must rebuild as live (no worker.exited in the log)")
         _ = assertEquals(wRebuilt.workstreamId, Some(WorkstreamId("ws-1")))
 
-        sup2 <- supervisor(inst, state2, List("sh", "-c", "sleep 30"))
+        sup2 <- supervisor(inst, state2, List("sh", "-c", "sleep 30"), fibers)
         _ <- sup2.reconcile
         // Reconcile probed the recorded pid, found it alive, and left it running (no re-spawn, no spurious exit).
         afterReconcile <- state2.snapshot

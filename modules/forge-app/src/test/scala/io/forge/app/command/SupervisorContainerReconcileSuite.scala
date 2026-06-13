@@ -1,6 +1,7 @@
 package io.forge.app.command
 
 import cats.effect.{IO, Resource}
+import cats.effect.std.Supervisor as FiberSupervisor
 import io.forge.core.paths.ForgePaths
 import io.forge.core.{FeatureId, InstanceName, WorkstreamId}
 import io.forge.daemon.{ContainerHandle, ContainerSpec, DaemonState, DockerRuntime, OciRuntime}
@@ -26,14 +27,20 @@ class SupervisorContainerReconcileSuite extends CatsEffectSuite:
 
   private val dockerEnabled: Boolean = sys.env.get("FORGE_IT_RUN_DOCKER").contains("1")
 
-  private val instance: Resource[IO, Instance] =
-    Resource.make {
-      val home = os.Path("/tmp") / s"fd-${UUID.randomUUID().toString.take(8)}"
-      new FileInstanceStore(home).create(InstanceName("demo")).flatMap {
-        case Right(inst) => IO.pure(inst)
-        case Left(err) => IO.raiseError(new IllegalStateException(s"could not create test instance: $err"))
-      }
-    }(inst => IO.blocking(os.remove.all(inst.dir / os.up / os.up / os.up)).void)
+  // Paired with a fiber Supervisor the test's `RealSupervisor.build(...)` runs its exit-watchers under: LIFO release
+  // closes `fibers` (cancelling + awaiting any in-flight `worker.exited` writer) before `os.remove.all`, so no detached
+  // watcher races the directory deletion.
+  private val instance: Resource[IO, (Instance, FiberSupervisor[IO])] =
+    for
+      inst <- Resource.make {
+        val home = os.Path("/tmp") / s"fd-${UUID.randomUUID().toString.take(8)}"
+        new FileInstanceStore(home).create(InstanceName("demo")).flatMap {
+          case Right(inst) => IO.pure(inst)
+          case Left(err) => IO.raiseError(new IllegalStateException(s"could not create test instance: $err"))
+        }
+      }(inst => IO.blocking(os.remove.all(inst.dir / os.up / os.up / os.up)).void)
+      fibers <- FiberSupervisor[IO]
+    yield (inst, fibers)
 
   /** A provisioner that succeeds without cloning (the clone path is proven in WorkerProvisionerSuite). */
   private val provisionOk: (String, os.Path) => IO[Either[String, ForgePaths]] =
@@ -75,11 +82,11 @@ class SupervisorContainerReconcileSuite extends CatsEffectSuite:
   // --- always-on: reconcile dispatches on the container id key ---
 
   test("reconcile reattaches a still-running containerised worker by id (the record carries containerId, not pid)") {
-    instance.use { inst =>
+    instance.use { case (inst, fibers) =>
       for
         state <- DaemonState.boot(inst, pid = 1L)
         _ <- containerWorker(state)
-        sup <- RealSupervisor.build(inst, state, unusedRuntime, stubOci(isRunning = true), provisionOk)
+        sup <- RealSupervisor.build(inst, state, unusedRuntime, stubOci(isRunning = true), provisionOk, fibers)
         _ <- sup.reconcile
         snap <- state.snapshot
       yield
@@ -91,11 +98,11 @@ class SupervisorContainerReconcileSuite extends CatsEffectSuite:
   }
 
   test("reconcile surfaces a containerised worker whose container is gone (running=false → exit recorded)") {
-    instance.use { inst =>
+    instance.use { case (inst, fibers) =>
       for
         state <- DaemonState.boot(inst, pid = 1L)
         _ <- containerWorker(state)
-        sup <- RealSupervisor.build(inst, state, unusedRuntime, stubOci(isRunning = false), provisionOk)
+        sup <- RealSupervisor.build(inst, state, unusedRuntime, stubOci(isRunning = false), provisionOk, fibers)
         _ <- sup.reconcile
         snap <- state.snapshot
       yield
@@ -121,12 +128,12 @@ class SupervisorContainerReconcileSuite extends CatsEffectSuite:
 
   test("a containerised worker survives the daemon crash and reconcile reattaches by container id (§6.4)") {
     assume(dockerEnabled, "set FORGE_IT_RUN_DOCKER=1 (and have a running Docker daemon) to run the live container test")
-    instance.use { inst =>
+    instance.use { case (inst, fibers) =>
       for
         // --- First daemon life: spawn a real container, then abandon the daemon. ---
         state1 <- DaemonState.boot(inst, pid = 1L)
         _ <- state1.record(InstanceEvent.WorkstreamCreated(WorkstreamId("ws-1"), "g"))
-        sup1 <- RealSupervisor.build(inst, state1, sleeperRuntime, DockerRuntime, provisionOk)
+        sup1 <- RealSupervisor.build(inst, state1, sleeperRuntime, DockerRuntime, provisionOk, fibers)
         spawned <- sup1.spawnWorker(WorkstreamId("ws-1"), "/repo", FeatureId("feat"))
         _ = assertEquals(spawned, Right("w-1"))
         snap1 <- state1.snapshot
@@ -142,7 +149,7 @@ class SupervisorContainerReconcileSuite extends CatsEffectSuite:
         rebuilt <- state2.snapshot
         _ = assertEquals(rebuilt.worker("w-1").flatMap(_.containerId), Some(cid))
         _ = assert(rebuilt.worker("w-1").exists(_.live), "the survivor rebuilds as live from the log")
-        sup2 <- RealSupervisor.build(inst, state2, sleeperRuntime, DockerRuntime, provisionOk)
+        sup2 <- RealSupervisor.build(inst, state2, sleeperRuntime, DockerRuntime, provisionOk, fibers)
         _ <- sup2.reconcile
         afterReconcile <- state2.snapshot
         _ = assert(afterReconcile.worker("w-1").exists(_.live), "reconcile leaves the live container running")
